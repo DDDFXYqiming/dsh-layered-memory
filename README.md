@@ -1,4 +1,4 @@
-# dsh-memory
+# dsh-layered-memory
 
 **DeepSeek Harness（DSH）跨会话长期记忆插件** —— 命名空间隔离 + L1 索引注入（存在性编码）+ L2 环境事实 + L3 任务经验 + 自动蒸馏候选 + 溯源/归档/回滚 + 自动维护 + 渐进式工具暴露。
 
@@ -43,8 +43,8 @@
 ## 安装
 
 ```powershell
-# 从 GitHub 安装（推荐，自带 cordis.patch.yml，贡献 id: dsh-memory）
-dsh plugin --profile web add github:DDDFXYqiming/dsh-memory
+# 从 GitHub 安装（推荐，自带 cordis.patch.yml，贡献 id: dsh-layered-memory）
+dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
 
 # 本地开发时也可直接使用仓库目录
 dsh plugin --profile web add <本目录>
@@ -54,7 +54,7 @@ dsh plugin --profile web add <本目录>
 
 ```yaml
 # profile cordis.patch.yml —— 裸条目覆盖 bundle 行（勿重复 insert！）
-- id: dsh-memory
+- id: dsh-layered-memory
   config:
     memoryDir: ''              # 默认 <home>/.dsh/memory
     maxIndexLines: 30

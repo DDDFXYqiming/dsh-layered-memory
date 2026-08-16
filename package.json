@@ -1,5 +1,5 @@
 {
-  "name": "dsh-memory",
+  "name": "dsh-layered-memory",
   "version": "0.4.0",
   "description": "DSH 跨会话长期记忆：命名空间隔离 + L1 索引注入（存在性编码）+ 行动验证写入 + 自动蒸馏候选 + 溯源/归档/回滚 + 自动维护（去重/压缩/统计/合并候选）。",
   "type": "module",
@@ -41,7 +41,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/DDDFXYqiming/dsh-memory.git"
+    "url": "git+https://github.com/DDDFXYqiming/dsh-layered-memory.git"
   },
   "engines": {
     "node": ">=22.19"

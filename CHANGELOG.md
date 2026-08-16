@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `dsh-memory` are documented here.
+All notable changes to `dsh-layered-memory` are documented here.
 
 ## [0.4.0] - 2026-08-16
 

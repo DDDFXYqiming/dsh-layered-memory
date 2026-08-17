@@ -37,6 +37,19 @@ description: 跨会话长期记忆：读写经验 SOP 与环境事实；管理 p
 - 也可配置 `maintainEveryTurns` 自动触发
 - `memory_stats` 查看统计
 
+## 命名空间约定（本地定制）
+
+- **通用记忆** = `default` 命名空间（共享记忆库根目录），两个项目一起维护：
+  - 读/写通用记忆时，工具参数显式传 `namespace: "default"`。
+  - 例如 `memory_write` / `memory_read` / `memory_list` 都支持 `namespace` 参数。
+- **项目记忆** = 不传 `namespace` 时自动按当前项目区分：
+  - DSH 项目 → `deepseek-harness`
+  - 股票项目 → `stock`
+- 当前项目内默认读写项目记忆；只有明确要共享/通用内容时才写 `default`。
+- 每轮注入的记忆索引会同时显示 `[通用记忆]` 和 `[项目记忆 <当前项目>]` 两部分：
+  - 看到“通用记忆”里的关键词时，读写请显式传 `namespace: "default"`；
+  - 看到“项目记忆”里的关键词时，直接按当前项目读写即可。
+
 ## 存储布局
 
 ```

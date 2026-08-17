@@ -3,8 +3,8 @@
 需要细节时用 memory_read / memory_list 取 L2/L3；新增经验用 memory_write（须带证据）
 任务完成且【行动验证成功】时主动 memory_write 沉淀（无需等用户提醒；无验证信息则不写）
 <!-- AUTO-BEGIN -->
-[L2] （facts.md 的条目将在此列出）
-[L3] （sops/ 的文件将在此列出）
+[L2] （facts.md 的每个条目单独列出）
+[L3] （sops/ 的每个文件单独列出）
 <!-- AUTO-END -->
 [RULES]
 （红线规则：不提醒就会犯的错。词级维护，禁 overwrite）

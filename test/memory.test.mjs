@@ -1,5 +1,5 @@
 import { test, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply } from "../lib/index.js";
@@ -8,7 +8,7 @@ let memDir;
 let disposer;
 let tools;
 
-function setup() {
+function setup({ maxIndexLines = 30 } = {}) {
 	memDir = mkdtempSync(join(tmpdir(), "dsh-memory-test-"));
 	const registered = [];
 	const ctx = {
@@ -32,7 +32,7 @@ function setup() {
 		progressive: false,
 		autoNamespace: false,
 		defaultNamespace: "test",
-		maxIndexLines: 30,
+		maxIndexLines,
 	});
 	tools = registered;
 }
@@ -118,4 +118,104 @@ test("memory_maintain dedupes identical SOP files", async () => {
 	const report = await tool("memory_maintain").execute({ namespace: "test" });
 	expect(report.report.dedupe.removed.length).toBeGreaterThanOrEqual(1);
 	expect(existsSync(join(memDir, "test", "archive"))).toBe(true);
+});
+
+test("memory_maintain keeps a complete fitting index and normalizes blank padding", async () => {
+	for (let i = 1; i <= 3; i++) {
+		await tool("memory_write").execute({
+			topic: `fact-${i}`,
+			entry_type: "fact",
+			content: `fact ${i}`,
+			evidence: "unit test",
+			namespace: "test",
+		});
+		await tool("memory_write").execute({
+			topic: `sop-${i}`,
+			entry_type: "sop",
+			content: `sop ${i}`,
+			evidence: "unit test",
+			namespace: "test",
+		});
+	}
+	const indexPath = join(memDir, "test", "index.txt");
+	const padded = readFileSync(indexPath, "utf8").replace("<!-- AUTO-END -->", "<!-- AUTO-END -->\n\n\n\n");
+	writeFileSync(indexPath, padded, "utf8");
+
+	const report = await tool("memory_maintain").execute({ namespace: "test" });
+	const index = readFileSync(indexPath, "utf8");
+	expect(report.report.compress.compressed).toBe(false);
+	expect(report.report.compress.facts_kept).toBe(3);
+	expect(report.report.compress.sops_kept).toBe(3);
+	expect(index).toContain("[L2] fact-1");
+	expect(index).toContain("[L2] fact-3");
+	expect(index).toContain("[L3] sops/sop-1.md");
+	expect(index).toContain("[L3] sops/sop-3.md");
+	expect(index).not.toMatch(/\n{3,}/);
+
+	// A full index rebuild followed by maintenance must remain a no-op while it fits.
+	await tool("memory_index").execute({ namespace: "test" });
+	const second = await tool("memory_maintain").execute({ namespace: "test" });
+	expect(second.report.compress.facts_kept).toBe(3);
+	expect(second.report.compress.sops_kept).toBe(3);
+});
+
+test("memory_maintain compresses oversized indexes without hiding either layer", async () => {
+	// Recreate the fixture with a deliberately tiny line budget.
+	if (typeof disposer === "function") disposer();
+	if (memDir) rmSync(memDir, { recursive: true, force: true });
+	setup({ maxIndexLines: 8 });
+
+	for (let i = 1; i <= 4; i++) {
+		await tool("memory_write").execute({
+			topic: `fact-${i}`,
+			entry_type: "fact",
+			content: `fact ${i}`,
+			evidence: "unit test",
+			namespace: "test",
+		});
+		await tool("memory_write").execute({
+			topic: `sop-${i}`,
+			entry_type: "sop",
+			content: `sop ${i}`,
+			evidence: "unit test",
+			namespace: "test",
+		});
+	}
+
+	const report = await tool("memory_maintain").execute({ namespace: "test" });
+	const index = readFileSync(join(memDir, "test", "index.txt"), "utf8");
+	expect(report.report.compress.compressed).toBe(true);
+	expect(report.report.compress.facts_kept).toBeGreaterThanOrEqual(1);
+	expect(report.report.compress.sops_kept).toBeGreaterThanOrEqual(1);
+	expect(index).toContain("[L2]");
+	expect(index).toContain("[L3]");
+	expect(index).toContain("调用 memory_list 查看");
+
+	// Compression only affects the L1 pointers; hidden entries remain readable/listable.
+	const hiddenFact = await tool("memory_read").execute({ name: "fact-4", namespace: "test" });
+	expect(hiddenFact.not_found).not.toBe(true);
+	expect(hiddenFact.content).toContain("fact 4");
+	const listed = await tool("memory_list").execute({ namespace: "test" });
+	expect(listed.facts).toHaveLength(4);
+	expect(listed.sops).toHaveLength(4);
+});
+
+test("memory_maintain preserves the only non-empty layer at an impossible budget", async () => {
+	if (typeof disposer === "function") disposer();
+	if (memDir) rmSync(memDir, { recursive: true, force: true });
+	setup({ maxIndexLines: 1 });
+	await tool("memory_write").execute({
+		topic: "only-fact",
+		entry_type: "fact",
+		content: "single layer",
+		evidence: "unit test",
+		namespace: "test",
+	});
+
+	const report = await tool("memory_maintain").execute({ namespace: "test" });
+	const index = readFileSync(join(memDir, "test", "index.txt"), "utf8");
+	expect(report.report.compress.facts_kept).toBe(1);
+	expect(report.report.compress.sops_kept).toBe(0);
+	expect(index).toContain("[L2] only-fact");
+	expect(index).toContain("[L3] （空）");
 });

@@ -34,7 +34,7 @@
 | 冲突/过期 | `memory_update`(supersede) / `memory_archive` / `memory_rollback`，旧版本保留在 `.history/` / `archive/` |
 | 命名空间 | `<memoryDir>/<namespace>/...`，`default` 兼容旧根目录；默认取 workspace/git 分支 |
 | 自动维护 | `maintainEveryTurns`（默认 20）触发去重/压缩/统计/合并候选 |
-| L1 索引 | `index.txt`（≤30 行，`<!-- AUTO -->` 自动段 + `[RULES]` 手动段） |
+| L1 索引 | `index.txt`（≤30 个逻辑行；每条 L2/L3 指针单独一行；`<!-- AUTO -->` 自动段 + `[RULES]` 手动段） |
 | L2 事实库 | `facts.md`（`## SECTION` upsert） |
 | L3 经验库 | `sops/*.md`（slug 文件名） |
 | 热度统计 | `file_access_stats.json`（轻量） + `memory_stats.json`（聚合统计） |
@@ -64,6 +64,8 @@ dsh plugin --profile web add <本目录>
     autoPending: true          # turn/end 自动生成 pending 候选
     maintainEveryTurns: 20     # 每 N 轮自动维护
 ```
+
+`memory_maintain` 只有在完整 L1 索引超过 `maxIndexLines` 时才会按访问热度裁剪；未进入 L1 的记忆不会被删除，并会保留“还有 N 条，请调用 `memory_list` 查看”的提示。维护过程会清理自动段周围的多余空行。
 
 ## 存储布局
 

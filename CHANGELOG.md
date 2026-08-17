@@ -2,6 +2,13 @@
 
 All notable changes to `dsh-layered-memory` are documented here.
 
+## [Unreleased]
+
+### Fixed
+- 修复 `memory_maintain` 因尾部空行、错误行数预算而过度裁剪 L1 索引的问题。
+- L1 指针改为逐条逻辑行；索引未超限时完整保留，超限时两层至少各保留一个指针并显示隐藏数量。
+- 增加 `memory_maintain` 的完整索引、空行、超限裁剪和底层记忆可读性回归测试。
+
 ## [0.4.0] - 2026-08-16
 
 ### Added

@@ -52,6 +52,11 @@ afterEach(() => {
 	if (memDir) rmSync(memDir, { recursive: true, force: true });
 });
 
+test("apply initializes only the selected namespace", () => {
+	expect(existsSync(join(memDir, "facts.md"))).toBe(false);
+	expect(existsSync(join(memDir, "test", "facts.md"))).toBe(true);
+});
+
 test("memory_write creates a fact and memory_read returns it", async () => {
 	const w = await tool("memory_write").execute({
 		topic: "test-fact",
@@ -61,7 +66,7 @@ test("memory_write creates a fact and memory_read returns it", async () => {
 		namespace: "test",
 	});
 	expect(w.action).toBe("created");
-	expect(existsSync(join(memDir, "facts.md"))).toBe(true);
+	expect(existsSync(join(memDir, "test", "facts.md"))).toBe(true);
 
 	const r = await tool("memory_read").execute({
 		name: "test-fact",

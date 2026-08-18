@@ -41,17 +41,16 @@ description: 跨会话长期记忆：读写经验 SOP 与环境事实；管理 p
 
 ```
 <home>/.dsh/memory/
-├── memory_management_sop.md   L0 元规则（怎么管记忆）
-├── index.txt                  L1 索引（≤30 行：L2/L3 存在性列表 + RULES）
-├── facts.md                   L2 环境事实（## SECTION）
-├── sops/*.md                  L3 任务经验
-├── pending/*.md               自动蒸馏候选区
-├── archive/                   归档/历史保留
-├── .history/                  supersede/rollback 历史快照
-├── memory-meta.json           溯源/审计元数据
-├── memory_stats.json          聚合统计
-├── maintenance-report.json   最近一次维护报告
-└── file_access_stats.json     读取热度统计
+├── <namespace>/                非 default 命名空间（当前 profile 通常显式配置）
+│   ├── memory_management_sop.md   L0 元规则
+│   ├── index.txt                  L1 索引
+│   ├── facts.md                   L2 环境事实
+│   ├── sops/*.md                  L3 任务经验
+│   ├── pending/ / archive/ / .history/
+│   ├── memory-meta.json / memory_stats.json
+│   ├── maintenance-report.json
+│   └── file_access_stats.json
+└── （namespace=default 时兼容旧根目录布局）
 ```
 
 ## 工具

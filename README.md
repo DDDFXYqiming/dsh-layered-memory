@@ -71,17 +71,18 @@ dsh plugin --profile web add <本目录>
 
 ```
 <home>/.dsh/memory/
-├── memory_management_sop.md   L0 元规则
-├── index.txt                  L1 索引（≤30 行）
-├── facts.md                   L2 环境事实
-├── sops/*.md                  L3 任务经验
-├── pending/*.md               自动蒸馏候选区
-├── archive/                   归档/历史保留
-├── .history/                  supersede/rollback 历史快照
-├── memory-meta.json           溯源/审计元数据
-├── memory_stats.json          聚合统计
-├── maintenance-report.json    最近一次维护报告
-└── file_access_stats.json     读取热度
+├── <namespace>/                非 default 命名空间（推荐显式配置）
+│   ├── memory_management_sop.md
+│   ├── index.txt
+│   ├── facts.md
+│   ├── sops/*.md
+│   ├── pending/*.md
+│   ├── archive/ / .history/
+│   ├── memory-meta.json
+│   ├── memory_stats.json
+│   ├── maintenance-report.json
+│   └── file_access_stats.json
+└── （namespace=default 时，以上内容兼容地放在此根目录）
 ```
 
 ## 核心公理

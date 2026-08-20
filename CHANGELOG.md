@@ -9,6 +9,7 @@ All notable changes to `dsh-layered-memory` are documented here.
 - **非 SOP 文件混入 L3 修复**：`sopNames()` 过滤保留名（README/LICENSE/index，大小写不敏感），安装/文档文件不再计入 L3 统计、索引与合并候选。
 - 补齐 `memory-meta.json` 的 `createdAt`：首建记录、更新保留原创建时间（此前仅写 `updatedAt`，recency 无据可查）。
 - 新增回归测试：README/LICENSE 过滤、recency 保护（陈旧条目被裁时新鲜条目保留）。
+- 文档：README/SKILL 补充 recency 保护、写入即热、保留名过滤说明。
 
 ### Fixed
 - 修复 `memory_maintain` 因尾部空行、错误行数预算而过度裁剪 L1 索引的问题。

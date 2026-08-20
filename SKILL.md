@@ -36,6 +36,7 @@ description: 跨会话长期记忆：读写经验 SOP 与环境事实；管理 p
 - 可手动运行 `memory_maintain`：去重、压缩 L1 索引、统计、合并候选
 - 也可配置 `maintainEveryTurns` 自动触发
 - `memory_stats` 查看统计
+- 压缩保护：新写入 7 天内的条目有 recency 加分，不会被压缩裁出 L1；`sops/` 保留名（README/LICENSE/index）不计入条目
 
 ## 存储布局
 

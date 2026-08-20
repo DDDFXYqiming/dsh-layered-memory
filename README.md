@@ -33,11 +33,11 @@
 | 溯源/审计 | `memory-meta.json` 记录 `sourceSession` / `sourceSeqs` / `createdAt` / `updatedAt` / `evidence` |
 | 冲突/过期 | `memory_update`(supersede) / `memory_archive` / `memory_rollback`，旧版本保留在 `.history/` / `archive/` |
 | 命名空间 | `<memoryDir>/<namespace>/...`，`default` 兼容旧根目录；默认取 workspace/git 分支 |
-| 自动维护 | `maintainEveryTurns`（默认 20）触发去重/压缩/统计/合并候选 |
+| 自动维护 | `maintainEveryTurns`（默认 20）触发去重/压缩/统计/合并候选；压缩按访问热度排序并给 7 天内新条目 recency 加分 |
 | L1 索引 | `index.txt`（≤30 个逻辑行；每条 L2/L3 指针单独一行；`<!-- AUTO -->` 自动段 + `[RULES]` 手动段） |
 | L2 事实库 | `facts.md`（`## SECTION` upsert） |
-| L3 经验库 | `sops/*.md`（slug 文件名） |
-| 热度统计 | `file_access_stats.json`（轻量） + `memory_stats.json`（聚合统计） |
+| L3 经验库 | `sops/*.md`（slug 文件名；保留名 README/LICENSE/index 不计入条目） |
+| 热度统计 | `file_access_stats.json`（`memory_read` 每次 bump；`memory_write` 写入即热 +1）+ `memory_stats.json`（聚合统计） |
 | L0 元规则 | `memory_management_sop.md`（行动验证/禁易变/最小指针/不删改） |
 
 ## 安装
@@ -65,7 +65,7 @@ dsh plugin --profile web add <本目录>
     maintainEveryTurns: 20     # 每 N 轮自动维护
 ```
 
-`memory_maintain` 只有在完整 L1 索引超过 `maxIndexLines` 时才会按访问热度裁剪；未进入 L1 的记忆不会被删除，并会保留“还有 N 条，请调用 `memory_list` 查看”的提示。维护过程会清理自动段周围的多余空行。
+`memory_maintain` 只有在完整 L1 索引超过 `maxIndexLines` 时才会裁剪：按访问热度排序，**7 天内创建且无访问热度的新条目获得 recency 加分**（配合 `memory_write` 的写入即热，新记忆不会被压缩立刻挤出 L1）；未进入 L1 的记忆不会被删除，并会保留“还有 N 条，请调用 `memory_list` 查看”的提示。维护过程会清理自动段周围的多余空行。
 
 ## 存储布局
 
@@ -100,6 +100,8 @@ pnpm build        # node --check lib/index.js
 pnpm test         # vitest
 pnpm test:smoke   # dsh --profile headless --dump-config
 ```
+
+> 注意：单元测试会 import `@deepseek-ai/dsh-tools` / `@deepseek-ai/schemastery`（DSH 内置包，非公开 npm）。本机如有已安装的 DSH 环境（如 `~/.dsh/profiles/<profile>/node_modules`），可将 `node_modules/@deepseek-ai` 等以 junction/链接方式指过去（`auto-install-peers=false` 已写入 `.npmrc` 防止 pnpm 尝试解析私有 peer 而失败）。
 
 ## 相关
 

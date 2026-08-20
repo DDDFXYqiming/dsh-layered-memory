@@ -224,3 +224,58 @@ test("memory_maintain preserves the only non-empty layer at an impossible budget
 	expect(index).toContain("[L2] only-fact");
 	expect(index).toContain("[L3] （空）");
 });
+
+test("sopNames excludes reserved non-SOP files (README/LICENSE) from L3", async () => {
+	const fs = await import("node:fs");
+	const sopsDir = join(memDir, "test", "sops");
+	fs.mkdirSync(sopsDir, { recursive: true });
+	fs.writeFileSync(join(sopsDir, "README.md"), "# plugin readme copy\n", "utf8");
+	fs.writeFileSync(join(sopsDir, "LICENSE.md"), "MIT\n", "utf8");
+	await tool("memory_write").execute({
+		topic: "real-sop",
+		entry_type: "sop",
+		content: "真实经验",
+		evidence: "unit test",
+		namespace: "test",
+	});
+
+	const report = await tool("memory_maintain").execute({ namespace: "test" });
+	const index = readFileSync(join(memDir, "test", "index.txt"), "utf8");
+	expect(report.report.compress.total_sops).toBe(1);
+	expect(report.report.compress.sops_kept).toBe(1);
+	expect(index).toContain("real-sop");
+	expect(index).not.toContain("README");
+	expect(index).not.toContain("LICENSE");
+});
+
+test("compress keeps freshly created entries via recency bonus when unaccessed", async () => {
+	if (typeof disposer === "function") disposer();
+	if (memDir) rmSync(memDir, { recursive: true, force: true });
+	setup({ maxIndexLines: 1 });
+
+	const fs = await import("node:fs");
+	const sopsDir = join(memDir, "test", "sops");
+	fs.mkdirSync(sopsDir, { recursive: true });
+	// 无访问热度、createdAt 陈旧（30 天前）与新鲜（now）各一条：recency 应保新鲜条目
+	fs.writeFileSync(join(sopsDir, "old-a.md"), "# old-a\n\nstale\n", "utf8");
+	fs.writeFileSync(join(sopsDir, "new-a.md"), "# new-a\n\nfresh\n", "utf8");
+	const oldTs = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+	const nowTs = new Date().toISOString();
+	fs.writeFileSync(
+		join(memDir, "test", "memory-meta.json"),
+		JSON.stringify({
+			facts: {},
+			sops: {
+				"old-a": { createdAt: oldTs, updatedAt: oldTs },
+				"new-a": { createdAt: nowTs, updatedAt: nowTs },
+			},
+		}, null, 2),
+		"utf8"
+	);
+
+	const report = await tool("memory_maintain").execute({ namespace: "test" });
+	const index = readFileSync(join(memDir, "test", "index.txt"), "utf8");
+	expect(report.report.compress.sops_kept).toBe(1);
+	expect(index).toContain("new-a");
+	expect(index).not.toContain("old-a");
+});

@@ -5,6 +5,12 @@ All notable changes to `dsh-layered-memory` are documented here.
 ## [Unreleased]
 
 ### Fixed
+- **新条目"写完即隐身"修复**：`memory_write` 写入后立即 bump 热度；`memory_maintain` 压缩排序加入 recency 保护（7 天内创建、无访问热度的条目获得加分），新写入的 fact/sop 不再被压缩立刻裁出 L1。
+- **非 SOP 文件混入 L3 修复**：`sopNames()` 过滤保留名（README/LICENSE/index，大小写不敏感），安装/文档文件不再计入 L3 统计、索引与合并候选。
+- 补齐 `memory-meta.json` 的 `createdAt`：首建记录、更新保留原创建时间（此前仅写 `updatedAt`，recency 无据可查）。
+- 新增回归测试：README/LICENSE 过滤、recency 保护（陈旧条目被裁时新鲜条目保留）。
+
+### Fixed
 - 修复 `memory_maintain` 因尾部空行、错误行数预算而过度裁剪 L1 索引的问题。
 - L1 指针改为逐条逻辑行；索引未超限时完整保留，超限时两层至少各保留一个指针并显示隐藏数量。
 - 增加 `memory_maintain` 的完整索引、空行、超限裁剪和底层记忆可读性回归测试。

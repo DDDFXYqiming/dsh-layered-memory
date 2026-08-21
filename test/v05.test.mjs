@@ -195,6 +195,13 @@ test("memory_write auto-compresses oversized index without manual maintain", asy
 			// 最后一次写入应已自动压缩（或索引本就未超限），且不再出现未压缩的 over_limit
 			expect(w.index.compressed || !w.index.over_limit).toBe(true);
 		}
+		// 回归：output.schema 声明 additionalProperties:false，execute 返回的
+		// index 键必须全部在 schema 中声明，否则宿主校验会拒绝整个工具结果
+		// （v0.5.1 前压缩路径塞入 facts_hidden/sops_hidden 触发过该 bug）。
+		const declared = Object.keys(tool("memory_write").output.schema.properties.index.properties);
+		for (const key of Object.keys(w.index)) {
+			expect(declared).toContain(key);
+		}
 	}
 	const index = readFileSync(join(memDir, "test", "index.txt"), "utf8");
 	const lineCount = index.replace(/\n+$/, "").split("\n").length;

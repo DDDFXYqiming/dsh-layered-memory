@@ -2,6 +2,11 @@
 
 All notable changes to `dsh-layered-memory` are documented here.
 
+## [Unreleased]
+
+### Fixed
+- **`memory_write` 压缩路径输出校验崩溃**：L1 索引超限触发"写入即压缩"时，返回值携带 `index.facts_hidden` / `index.sops_hidden`，但 output schema 声明了 `additionalProperties: false` 且未声明这两个字段，宿主校验直接拒绝整个工具结果（表现为持续内部错误）。已在 schema 中补声明两个计数字段，render 同步展示隐藏数量；新增回归测试断言 execute 返回的 index 键全部被 schema 覆盖。
+
 ## [0.5.0] - 2026-08-21
 
 ### Added

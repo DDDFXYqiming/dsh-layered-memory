@@ -278,14 +278,16 @@ export function buildTools(ctx, cfg) {
 							index_lines: { type: "integer" },
 							max_index_lines: { type: "integer" },
 							over_limit: { type: "boolean" },
-							compressed: { type: "boolean" }
+							compressed: { type: "boolean" },
+							facts_hidden: { type: "integer" },
+							sops_hidden: { type: "integer" }
 						}
 					}
 				}
 			},
 			render: (_args, value) => [{
 				type: "text",
-				text: `✅ 已${value.action === "created" ? "新建" : "更新"}记忆「${value.topic}」（${value.entry_type === "fact" ? "L2 事实" : "L3 SOP"}）→ ${value.path} [${value.namespace}]${value.index?.compressed ? "\n📦 L1 超限已自动按热度压缩" : ""}${value.index?.over_limit ? "\n⚠️ L1 索引压缩后仍超过限制（多为 RULES 手动段过长），建议手动精简 [RULES]" : ""}`
+				text: `✅ 已${value.action === "created" ? "新建" : "更新"}记忆「${value.topic}」（${value.entry_type === "fact" ? "L2 事实" : "L3 SOP"}）→ ${value.path} [${value.namespace}]${value.index?.compressed ? `\n📦 L1 超限已自动按热度压缩${(value.index?.facts_hidden || value.index?.sops_hidden) ? `（隐藏 L2=${value.index.facts_hidden || 0}、L3=${value.index.sops_hidden || 0}，可用 memory_list 查看）` : ""}` : ""}${value.index?.over_limit ? "\n⚠️ L1 索引压缩后仍超过限制（多为 RULES 手动段过长），建议手动精简 [RULES]" : ""}`
 			}]
 		},
 		async execute(args) {

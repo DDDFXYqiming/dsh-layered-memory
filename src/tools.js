@@ -100,30 +100,7 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: {
-				type: "object",
-				additionalProperties: true,
-				properties: {
-					name: { type: "string", required: true },
-					source: { type: "string", required: true },
-					content: { type: "string", required: true },
-					namespace: { type: "string", required: true },
-					meta: {
-						type: "object",
-						additionalProperties: true,
-						properties: {
-							sourceSession: { type: "string" },
-							sourceSeqs: { type: "array", items: { type: "integer" } },
-							evidence: { type: "string" },
-							archived: { type: "boolean" },
-							createdAt: { type: "string" },
-							updatedAt: { type: "string" },
-							related: { type: "array", items: { type: "string" } }
-						}
-					},
-					not_found: { type: "boolean" }
-				}
-			},
+			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
 				text: value.not_found
@@ -210,17 +187,7 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: {
-				type: "object",
-				additionalProperties: true,
-				properties: {
-					namespace: { type: "string", required: true },
-					index_lines: { type: "integer", required: true },
-					facts: { type: "array", items: { type: "string" }, required: true },
-					sops: { type: "array", items: { type: "string" }, required: true },
-					pending: { type: "array", items: { type: "string" }, required: true }
-				}
-			},
+			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
 				text: `记忆库[${value.namespace}]（${value.index_lines} 行索引）\nL2 事实: ${value.facts.join("、") || "（空）"}\nL3 SOP: ${value.sops.join("、") || "（空）"}\nPending: ${value.pending.join("、") || "（空）"}`
@@ -286,29 +253,7 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: {
-				type: "object",
-				additionalProperties: true,
-				properties: {
-					entry_type: { type: "string", required: true },
-					topic: { type: "string", required: true },
-					path: { type: "string", required: true },
-					namespace: { type: "string", required: true },
-					action: { type: "string", required: true },
-					index: {
-						type: "object",
-						additionalProperties: true,
-						properties: {
-							index_lines: { type: "integer" },
-							max_index_lines: { type: "integer" },
-							over_limit: { type: "boolean" },
-							compressed: { type: "boolean" },
-							facts_hidden: { type: "integer" },
-							sops_hidden: { type: "integer" }
-						}
-					}
-				}
-			},
+			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
 				text: `✅ 已${value.action === "created" ? "新建" : "更新"}记忆「${value.topic}」（${value.entry_type === "fact" ? "L2 事实" : "L3 SOP"}）→ ${value.path} [${value.namespace}]${value.index?.compressed ? `\n📦 L1 超限已自动按热度压缩${(value.index?.facts_hidden || value.index?.sops_hidden) ? `（隐藏 L2=${value.index.facts_hidden || 0}、L3=${value.index.sops_hidden || 0}，可用 memory_list 查看）` : ""}` : ""}${value.index?.over_limit ? "\n⚠️ L1 索引压缩后仍超过限制（多为 RULES 手动段过长），建议手动精简 [RULES]" : ""}`
@@ -354,17 +299,7 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: {
-				type: "object",
-				additionalProperties: true,
-				properties: {
-					namespace: { type: "string", required: true },
-					index_lines: { type: "integer", required: true },
-					over_limit: { type: "boolean", required: true },
-					facts: { type: "array", items: { type: "string" }, required: true },
-					sops: { type: "array", items: { type: "string" }, required: true }
-				}
-			},
+			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
 				text: `索引已重建[${value.namespace}]（${value.index_lines} 行${value.over_limit ? "，⚠️ 超过限制建议精简" : ""}）：\nL2: ${value.facts.join("、") || "（空）"}\nL3: ${value.sops.join("、") || "（空）"}`
@@ -392,26 +327,7 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: {
-				type: "object",
-				additionalProperties: true,
-				properties: {
-					namespace: { type: "string", required: true },
-					stats: {
-						type: "object",
-						additionalProperties: true,
-						properties: {
-							facts: { type: "integer", required: true },
-							sops: { type: "integer", required: true },
-							pending: { type: "integer", required: true },
-							archived: { type: "integer", required: true },
-							size_bytes: { type: "integer", required: true },
-							updatedAt: { type: "string", required: true }
-						},
-						required: true
-					}
-				}
-			},
+			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
 				text: `统计[${value.namespace}]：L2=${value.stats.facts} L3=${value.stats.sops} pending=${value.stats.pending} archived=${value.stats.archived} size=${value.stats.size_bytes}B`
@@ -438,25 +354,7 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: {
-				type: "object",
-				additionalProperties: true,
-				properties: {
-					namespace: { type: "string", required: true },
-					report: {
-						type: "object",
-						additionalProperties: true,
-						properties: {
-							runAt: { type: "string" },
-							dedupe: { type: "object", additionalProperties: true },
-							compress: { type: "object", additionalProperties: true },
-							stats: { type: "object", additionalProperties: true },
-							mergeCandidates: { type: "array", items: { type: "object", additionalProperties: true } }
-						},
-						required: true
-					}
-				}
-			},
+			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
 				text: `维护完成[${value.namespace}]：去重移除 ${value.report.dedupe?.removed?.length || 0} 条，索引保留 L2=${value.report.compress?.facts_kept || 0}/${value.report.compress?.total_facts || 0} L3=${value.report.compress?.sops_kept || 0}/${value.report.compress?.total_sops || 0}${(value.report.compress?.facts_hidden || value.report.compress?.sops_hidden) ? `（隐藏 L2=${value.report.compress?.facts_hidden || 0}、L3=${value.report.compress?.sops_hidden || 0}，可用 memory_list 查看）` : ""}，合并候选 ${value.report.mergeCandidates?.length || 0} 组`
@@ -484,25 +382,7 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: {
-				type: "object",
-				additionalProperties: true,
-				properties: {
-					namespace: { type: "string", required: true },
-					pending: {
-						type: "array",
-						items: {
-							type: "object",
-							additionalProperties: true,
-							properties: {
-								name: { type: "string", required: true },
-								content: { type: "string", required: true }
-							}
-						},
-						required: true
-					}
-				}
-			},
+			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
 				text: `Pending[${value.namespace}]：\n` + (value.pending.map((p) => `- ${p.name}: ${(p.content.split("\n").slice(-1)[0] || "").slice(0, 120)}`).join("\n") || "（空）")
@@ -553,16 +433,7 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: {
-				type: "object",
-				additionalProperties: true,
-				properties: {
-					accepted: { type: "boolean", required: true },
-					topic: { type: "string", required: true },
-					entry_type: { type: "string", required: true },
-					namespace: { type: "string", required: true }
-				}
-			},
+			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
 				text: value.accepted ? `✅ 已接受 pending → 记忆「${value.topic}」（${value.entry_type}）[${value.namespace}]` : `未接受：${value.reason || "未知原因"}`
@@ -650,17 +521,7 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: {
-				type: "object",
-				additionalProperties: true,
-				properties: {
-					topic: { type: "string", required: true },
-					entry_type: { type: "string", required: true },
-					action: { type: "string", required: true },
-					namespace: { type: "string", required: true },
-					history: { type: "string" }
-				}
-			},
+			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
 				text: `✅ 已${value.action}「${value.topic}」[${value.namespace}]${value.history ? `，旧版本保留在 ${value.history}` : ""}`
@@ -733,16 +594,7 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: {
-				type: "object",
-				additionalProperties: true,
-				properties: {
-					topic: { type: "string", required: true },
-					entry_type: { type: "string", required: true },
-					namespace: { type: "string", required: true },
-					archived: { type: "boolean", required: true }
-				}
-			},
+			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
 				text: value.archived ? `📦 已归档「${value.topic}」[${value.namespace}]（可用 memory_rollback 恢复，或 memory_search 检索到）` : `未找到「${value.topic}」`
@@ -787,17 +639,7 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: {
-				type: "object",
-				additionalProperties: true,
-				properties: {
-					topic: { type: "string", required: true },
-					entry_type: { type: "string", required: true },
-					namespace: { type: "string", required: true },
-					restored: { type: "boolean", required: true },
-					source: { type: "string" }
-				}
-			},
+			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
 				text: value.restored ? `♻️ 已回滚「${value.topic}」[${value.namespace}] ← ${value.source}` : `未找到可回滚的历史「${value.topic}」`
@@ -858,31 +700,7 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: {
-				type: "object",
-				additionalProperties: true,
-				properties: {
-					topic: { type: "string", required: true },
-					entry_type: { type: "string", required: true },
-					available: { type: "boolean", required: true },
-					message: { type: "string" },
-					sourceSession: { type: "string" },
-					sourceSeqs: { type: "array", items: { type: "integer" } },
-					events: {
-						type: "array",
-						items: {
-							type: "object",
-							additionalProperties: true,
-							properties: {
-								seq: { type: "integer" },
-								type: { type: "string" },
-								time: { type: "integer" },
-								text: { type: "string" }
-							}
-						}
-					}
-				}
-			},
+			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
 				text: value.available
@@ -953,30 +771,7 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: {
-				type: "object",
-				additionalProperties: true,
-				properties: {
-					query: { type: "string", required: true },
-					namespaces_searched: { type: "array", items: { type: "string" }, required: true },
-					results: {
-						type: "array",
-						required: true,
-						items: {
-							type: "object",
-							additionalProperties: true,
-							properties: {
-								namespace: { type: "string", required: true },
-								kind: { type: "string", required: true },
-								name: { type: "string", required: true },
-								archived: { type: "boolean", required: true },
-								score: { type: "number", required: true },
-								snippet: { type: "string", required: true }
-							}
-						}
-					}
-				}
-			},
+			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
 				text: value.results.length === 0
@@ -1033,18 +828,7 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: {
-				type: "object",
-				additionalProperties: true,
-				properties: {
-					promoted: { type: "boolean", required: true },
-					topic: { type: "string", required: true },
-					entry_type: { type: "string", required: true },
-					from: { type: "string", required: true },
-					to: { type: "string", required: true },
-					source_archived: { type: "boolean" }
-				}
-			},
+			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
 				text: value.promoted

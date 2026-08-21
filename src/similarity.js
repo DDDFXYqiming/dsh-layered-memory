@@ -22,22 +22,6 @@ export function tokenize(text) {
 	return tokens;
 }
 
-/** 字符 n-gram 集合（跳过纯空白）。用于 Jaccard 近重复检测。 */
-export function shingles(text, k = 3) {
-	const s = " " + normalizeText(text).replace(/[\s]+/g, " ") + " ";
-	const out = new Set();
-	if (s.length <= k) {
-		if (s.trim()) out.add(s.trim());
-		return out;
-	}
-	for (let i = 0; i + k <= s.length; i++) {
-		const g = s.slice(i, i + k);
-		if (g.trim().length === 0) continue;
-		out.add(g);
-	}
-	return out;
-}
-
 /** Jaccard 相似度 = |A∩B| / |A∪B|，空集对空集定义为 1（等价于完全一致）。 */
 export function jaccard(a, b) {
 	if (a.size === 0 && b.size === 0) return 1;

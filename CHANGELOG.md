@@ -4,9 +4,12 @@ All notable changes to `dsh-layered-memory` are documented here.
 
 ## [Unreleased]
 
+### Removed
+- **全量瘦身：删除全部输出校验声明（净删 236 行）**。14 个工具的 output schema 塌缩为宿主编译器允许的最小开放形态 `{ type: "object", additionalProperties: true }`——校验层从此只保证结果可传输，不再约束内容；任何字段漂移都不可能拒绝写入。render 展示层与 pruneUndefined 出口消毒保留。死码 `similarity.shingles`（零引用）一并删除；schema 一致性回归测试替换为无损 JSON 往返回归。
+
 ### Fixed
-- **`memory_write` 压缩路径输出校验崩溃**：L1 索引超限触发"写入即压缩"时，返回值携带 `index.facts_hidden` / `index.sops_hidden`，但 output schema 声明了 `additionalProperties: false` 且未声明这两个字段，宿主校验直接拒绝整个工具结果（表现为持续内部错误）。已在 schema 中补声明两个计数字段，render 同步展示隐藏数量；新增回归测试断言 execute 返回的 index 键全部被 schema 覆盖。
-- **全部工具出口统一无损 JSON 消毒**：`memory_update(supersede=false)` 返回 `history: historyPath || undefined`，显式 undefined 键在 JSON 序列化时被丢弃，触发宿主"lossless JSON"校验整包拒收。不再逐处打补丁——新增 `pruneUndefined` 出口消毒层包装所有 14 个工具的 execute，从构造上保证任何返回值可无损 JSON 往返；新增 `memory_update(supersede=false)` 无损往返回归测试。
+- **`memory_write` 压缩路径输出校验崩溃**：L1 索引超限触发"写入即压缩"时，返回值携带 `index.facts_hidden` / `index.sops_hidden`，但 output schema 声明了 `additionalProperties: false` 且未声明这两个字段，宿主校验直接拒绝整个工具结果（表现为持续内部错误）。已在 schema 中补声明两个计数字段，render 同步展示隐藏数量。
+- **全部工具出口统一无损 JSON 消毒**：`memory_update(supersede=false)` 返回 `history: historyPath || undefined`，显式 undefined 键在 JSON 序列化时被丢弃，触发宿主"lossless JSON"校验整包拒收。新增 `pruneUndefined` 出口消毒层包装所有 14 个工具的 execute，从构造上保证任何返回值可无损 JSON 往返。
 
 ## [0.5.0] - 2026-08-21
 

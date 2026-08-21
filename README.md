@@ -1,3 +1,5 @@
+简体中文 | [English](README.en.md)
+
 # dsh-layered-memory
 
 **DeepSeek Harness（DSH）跨会话长期记忆插件** —— 命名空间隔离 + L1 索引注入（存在性编码）+ L2 环境事实 + L3 任务经验 + 自动蒸馏候选 + 溯源/归档/回滚 + 自动维护 + 渐进式工具暴露。

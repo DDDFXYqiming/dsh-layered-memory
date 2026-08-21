@@ -1,7 +1,7 @@
 {
   "name": "dsh-layered-memory",
-  "version": "0.4.0",
-  "description": "DSH 跨会话长期记忆：命名空间隔离 + L1 索引注入（存在性编码）+ 行动验证写入 + 自动蒸馏候选 + 溯源/归档/回滚 + 自动维护（去重/压缩/统计/合并候选）。",
+  "version": "0.5.0",
+  "description": "DSH 跨会话长期记忆：命名空间隔离 + L1 索引注入（存在性编码）+ 行动验证写入 + 内容级近重复去重 + BM25 全文检索 + 跨命名空间提升 + 自动蒸馏候选 + 溯源/归档/回滚 + 自动维护。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -12,15 +12,18 @@
   },
   "files": [
     "lib",
-    "SKILL.md",
+    "src",
     "README.md",
+    "README.en.md",
     "cordis.patch.yml",
     "LICENSE",
     "test"
   ],
   "scripts": {
-    "build": "node --check lib/index.js",
-    "test": "vitest run",
+    "build": "node -e \"const fs=require('fs'),p=require('path');let fail=0;for(const f of fs.readdirSync('src')){if(!f.endsWith('.js'))continue;try{require('node:child_process').execFileSync(process.execPath,['--check',p.join('src',f)],{stdio:'pipe'})}catch(e){fail=1;console.error(e.stderr.toString())}};for(const f of ['lib/index.js']){try{require('node:child_process').execFileSync(process.execPath,['--check',f],{stdio:'pipe'})}catch(e){fail=1;console.error(e.stderr.toString())}};process.exit(fail)\"",
+    "check:lib": "node --check lib/index.js",
+    "test": "pnpm build && vitest run",
+    "check": "pnpm test",
     "test:smoke": "dsh --profile headless --dump-config"
   },
   "dsh": {

@@ -211,6 +211,27 @@ test("memory_write auto-compresses oversized index without manual maintain", asy
 	expect(hidden.not_found).not.toBe(true);
 });
 
+// ── 出口无损 JSON（宿主 lossless 校验回归）──
+
+test("memory_update with supersede=false returns lossless JSON (no undefined-valued keys)", async () => {
+	await tool("memory_write").execute({
+		topic: "lossless-check",
+		entry_type: "fact",
+		content: "初始内容",
+		evidence: "unit test",
+		namespace: "test",
+	});
+	const r = await tool("memory_update").execute({
+		topic: "lossless-check",
+		entry_type: "fact",
+		content: "更新内容",
+		supersede: false,
+	});
+	// 显式 undefined 键会被 JSON.stringify 丢弃 → 宿主判整个结果非无损并拒收
+	expect(JSON.parse(JSON.stringify(r))).toEqual(r);
+	expect(r.action).toBe("updated");
+});
+
 // ── related 关联链接 ──
 
 test("memory_write stores related links and memory_read surfaces them", async () => {

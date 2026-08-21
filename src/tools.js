@@ -4,7 +4,7 @@
 
 import { existsSync, readFileSync, readdirSync, writeFileSync, copyFileSync, rmSync } from "node:fs";
 import { join, basename } from "node:path";
-import { defineTool } from "@deepseek-ai/dsh-tools";
+import { defineTool as defineToolRaw } from "@deepseek-ai/dsh-tools";
 import {
 	PENDING_DIR,
 	ARCHIVE_DIR,
@@ -34,6 +34,30 @@ import { runMaintain } from "./maintain.js";
 import { listNamespaces, searchNamespaces } from "./search.js";
 
 const EMPTY_META = { sourceSession: "", sourceSeqs: [], evidence: "", archived: false, createdAt: "", updatedAt: "" };
+
+/**
+ * 递归剥离 undefined 值的键。宿主对工具结果有两条硬校验：可无损 JSON 往返
+ * （显式 undefined 键会被 JSON.stringify 丢弃 → 整个结果判死）与 output schema
+ * 声明一致性。纯文本记忆系统的可用性优先：在出口统一消毒，任何工具返回值
+ * 都不再可能因单个字段翻车被整包拒收。
+ */
+function pruneUndefined(value) {
+	if (Array.isArray(value)) return value.map(pruneUndefined);
+	if (value !== null && typeof value === "object") {
+		const out = {};
+		for (const [k, v] of Object.entries(value)) if (v !== undefined) out[k] = pruneUndefined(v);
+		return out;
+	}
+	return value;
+}
+
+/** 出口消毒版 defineTool：execute 结果先过 pruneUndefined 再交还宿主。 */
+const defineTool = (def) => defineToolRaw({
+	...def,
+	async execute(...args) {
+		return pruneUndefined(await def.execute(...args));
+	},
+});
 
 function normalizeMeta(m) {
 	return {

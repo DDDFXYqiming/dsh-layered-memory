@@ -102,7 +102,7 @@ export function buildTools(ctx, cfg) {
 		output: {
 			schema: {
 				type: "object",
-				additionalProperties: false,
+				additionalProperties: true,
 				properties: {
 					name: { type: "string", required: true },
 					source: { type: "string", required: true },
@@ -212,7 +212,7 @@ export function buildTools(ctx, cfg) {
 		output: {
 			schema: {
 				type: "object",
-				additionalProperties: false,
+				additionalProperties: true,
 				properties: {
 					namespace: { type: "string", required: true },
 					index_lines: { type: "integer", required: true },
@@ -288,7 +288,7 @@ export function buildTools(ctx, cfg) {
 		output: {
 			schema: {
 				type: "object",
-				additionalProperties: false,
+				additionalProperties: true,
 				properties: {
 					entry_type: { type: "string", required: true },
 					topic: { type: "string", required: true },
@@ -297,7 +297,7 @@ export function buildTools(ctx, cfg) {
 					action: { type: "string", required: true },
 					index: {
 						type: "object",
-						additionalProperties: false,
+						additionalProperties: true,
 						properties: {
 							index_lines: { type: "integer" },
 							max_index_lines: { type: "integer" },
@@ -356,7 +356,7 @@ export function buildTools(ctx, cfg) {
 		output: {
 			schema: {
 				type: "object",
-				additionalProperties: false,
+				additionalProperties: true,
 				properties: {
 					namespace: { type: "string", required: true },
 					index_lines: { type: "integer", required: true },
@@ -394,12 +394,12 @@ export function buildTools(ctx, cfg) {
 		output: {
 			schema: {
 				type: "object",
-				additionalProperties: false,
+				additionalProperties: true,
 				properties: {
 					namespace: { type: "string", required: true },
 					stats: {
 						type: "object",
-						additionalProperties: false,
+						additionalProperties: true,
 						properties: {
 							facts: { type: "integer", required: true },
 							sops: { type: "integer", required: true },
@@ -440,7 +440,7 @@ export function buildTools(ctx, cfg) {
 		output: {
 			schema: {
 				type: "object",
-				additionalProperties: false,
+				additionalProperties: true,
 				properties: {
 					namespace: { type: "string", required: true },
 					report: {
@@ -486,14 +486,14 @@ export function buildTools(ctx, cfg) {
 		output: {
 			schema: {
 				type: "object",
-				additionalProperties: false,
+				additionalProperties: true,
 				properties: {
 					namespace: { type: "string", required: true },
 					pending: {
 						type: "array",
 						items: {
 							type: "object",
-							additionalProperties: false,
+							additionalProperties: true,
 							properties: {
 								name: { type: "string", required: true },
 								content: { type: "string", required: true }
@@ -555,7 +555,7 @@ export function buildTools(ctx, cfg) {
 		output: {
 			schema: {
 				type: "object",
-				additionalProperties: false,
+				additionalProperties: true,
 				properties: {
 					accepted: { type: "boolean", required: true },
 					topic: { type: "string", required: true },
@@ -652,7 +652,7 @@ export function buildTools(ctx, cfg) {
 		output: {
 			schema: {
 				type: "object",
-				additionalProperties: false,
+				additionalProperties: true,
 				properties: {
 					topic: { type: "string", required: true },
 					entry_type: { type: "string", required: true },
@@ -735,7 +735,7 @@ export function buildTools(ctx, cfg) {
 		output: {
 			schema: {
 				type: "object",
-				additionalProperties: false,
+				additionalProperties: true,
 				properties: {
 					topic: { type: "string", required: true },
 					entry_type: { type: "string", required: true },
@@ -789,7 +789,7 @@ export function buildTools(ctx, cfg) {
 		output: {
 			schema: {
 				type: "object",
-				additionalProperties: false,
+				additionalProperties: true,
 				properties: {
 					topic: { type: "string", required: true },
 					entry_type: { type: "string", required: true },
@@ -860,7 +860,7 @@ export function buildTools(ctx, cfg) {
 		output: {
 			schema: {
 				type: "object",
-				additionalProperties: false,
+				additionalProperties: true,
 				properties: {
 					topic: { type: "string", required: true },
 					entry_type: { type: "string", required: true },
@@ -955,7 +955,7 @@ export function buildTools(ctx, cfg) {
 		output: {
 			schema: {
 				type: "object",
-				additionalProperties: false,
+				additionalProperties: true,
 				properties: {
 					query: { type: "string", required: true },
 					namespaces_searched: { type: "array", items: { type: "string" }, required: true },
@@ -964,7 +964,7 @@ export function buildTools(ctx, cfg) {
 						required: true,
 						items: {
 							type: "object",
-							additionalProperties: false,
+							additionalProperties: true,
 							properties: {
 								namespace: { type: "string", required: true },
 								kind: { type: "string", required: true },
@@ -1035,7 +1035,7 @@ export function buildTools(ctx, cfg) {
 		output: {
 			schema: {
 				type: "object",
-				additionalProperties: false,
+				additionalProperties: true,
 				properties: {
 					promoted: { type: "boolean", required: true },
 					topic: { type: "string", required: true },

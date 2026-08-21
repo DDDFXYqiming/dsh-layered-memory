@@ -7,29 +7,45 @@ import { apply } from "../lib/index.js";
 let memDir;
 let disposer;
 let tools;
+let eventHandlers;
+let registrationDisposals;
+let eventDisposals;
 
-function setup({ maxIndexLines = 30 } = {}) {
+function setup({ maxIndexLines = 30, progressive = false, agents = null, autoPending = true } = {}) {
 	memDir = mkdtempSync(join(tmpdir(), "dsh-memory-test-"));
 	const registered = [];
+	eventHandlers = new Map();
+	registrationDisposals = 0;
+	eventDisposals = 0;
 	const ctx = {
 		get(service) {
 			if (service === "systemPrompt") {
 				return { context: () => () => {} };
 			}
-			if (service === "agents") return null;
+			if (service === "agents") return agents;
 			if (service === "sessionQuery") return null;
 			return undefined;
 		},
-		on() { return () => {}; },
+		on(type, handler) {
+			eventHandlers.set(type, handler);
+			return () => {
+				eventDisposals++;
+				eventHandlers.delete(type);
+			};
+		},
 		skills: { register: () => () => {} },
 		tools: {
-			register(def) { registered.push(def); return () => {}; },
-			restrict() { return () => {}; },
+			register(def) {
+				registered.push(def);
+				return () => { registrationDisposals++; };
+			},
+			restrict() { return () => { registrationDisposals++; }; },
 		},
 	};
 	disposer = apply(ctx, {
 		memoryDir: memDir,
-		progressive: false,
+		progressive,
+		autoPending,
 		autoNamespace: false,
 		defaultNamespace: "test",
 		maxIndexLines,
@@ -278,4 +294,85 @@ test("compress keeps freshly created entries via recency bonus when unaccessed",
 	expect(report.report.compress.sops_kept).toBe(1);
 	expect(index).toContain("new-a");
 	expect(index).not.toContain("old-a");
+});
+
+test("host tool registrations are fully cleaned up and disposer is idempotent", () => {
+	const first = disposer;
+	expect(tools).toHaveLength(12);
+	first();
+	expect(registrationDisposals).toBe(12);
+	const eventCount = eventDisposals;
+	first();
+	expect(registrationDisposals).toBe(12);
+	expect(eventDisposals).toBe(eventCount);
+});
+
+test("progressive memory_activate registration is also cleaned up", () => {
+	if (typeof disposer === "function") disposer();
+	if (memDir) rmSync(memDir, { recursive: true, force: true });
+	setup({ progressive: true, agents: { get() { return undefined; } } });
+	expect(tools.map((entry) => entry.name)).toEqual(["memory_activate"]);
+	disposer();
+	expect(registrationDisposals).toBe(1);
+});
+
+test("successful tool results follow agent.session.id instead of agent.id", async () => {
+	if (typeof disposer === "function") disposer();
+	if (memDir) rmSync(memDir, { recursive: true, force: true });
+	const agent = { id: "agent-1", session: { id: "session-1" } };
+	setup({ agents: { get(id) { return id === "session-1" ? agent : undefined; } } });
+	eventHandlers.get("tools/result")({ name: "bash", agent }, { isError: false });
+	eventHandlers.get("session/event")({ id: "session-1" }, { type: "turn/end", seq: 7 });
+	const pending = await tool("memory_pending").execute({ namespace: "test" });
+	expect(pending.pending).toHaveLength(1);
+	const candidate = pending.pending[0].content;
+	expect(candidate).toContain("bash");
+});
+
+test("pending metadata can supply memory_accept defaults", async () => {
+	const pendingPath = join(memDir, "test", "pending", "candidate.md");
+	writeFileSync(pendingPath, [
+		"# Pending Memory Candidate",
+		"",
+		"- sourceSession: session-1",
+		"- sourceSeqs: [7]",
+		"- topic: metadata-fact",
+		"- entryType: fact",
+		"- evidence: verified by unit test",
+		"- capturedAt: test",
+		"- tools: bash",
+		"",
+		"metadata body",
+		"",
+	].join("\n"), "utf8");
+	const accepted = await tool("memory_accept").execute({ name: "candidate.md", namespace: "test" });
+	expect(accepted.accepted).toBe(true);
+	const fact = await tool("memory_read").execute({ name: "metadata-fact", namespace: "test" });
+	expect(fact.not_found).not.toBe(true);
+	expect(fact.content).toContain("metadata body");
+});
+
+test("memory_write compresses L1 immediately when the configured budget is exceeded", async () => {
+	if (typeof disposer === "function") disposer();
+	if (memDir) rmSync(memDir, { recursive: true, force: true });
+	setup({ maxIndexLines: 14 });
+	for (let i = 1; i <= 5; i++) {
+		await tool("memory_write").execute({ topic: `immediate-fact-${i}`, entry_type: "fact", content: `fact ${i}`, evidence: "unit test", namespace: "test" });
+		await tool("memory_write").execute({ topic: `immediate-sop-${i}`, entry_type: "sop", content: `sop ${i}`, evidence: "unit test", namespace: "test" });
+	}
+	const index = readFileSync(join(memDir, "test", "index.txt"), "utf8");
+	expect(index).toContain("另有");
+	const hidden = await tool("memory_read").execute({ name: "immediate-fact-5", namespace: "test" });
+	expect(hidden.not_found).not.toBe(true);
+});
+
+test("explicit namespace traversal is rejected instead of collapsing to default", async () => {
+	await expect(tool("memory_write").execute({
+		topic: "must-not-write",
+		entry_type: "fact",
+		content: "blocked",
+		evidence: "unit test",
+		namespace: "../",
+	})).rejects.toThrow(/非法命名空间/);
+	expect(existsSync(join(memDir, "facts.md"))).toBe(false);
 });

@@ -65,7 +65,7 @@ dsh plugin --profile web add <本目录>
     maintainEveryTurns: 20     # 每 N 轮自动维护
 ```
 
-`memory_maintain` 只有在完整 L1 索引超过 `maxIndexLines` 时才会裁剪：按访问热度排序，**7 天内创建且无访问热度的新条目获得 recency 加分**（配合 `memory_write` 的写入即热，新记忆不会被压缩立刻挤出 L1）；未进入 L1 的记忆不会被删除，并会保留“还有 N 条，请调用 `memory_list` 查看”的提示。维护过程会清理自动段周围的多余空行。
+`memory_write` 在写入后会按 `maxIndexLines` 立即压缩 L1（只隐藏指针，不删除底层记忆）；`memory_maintain` 只有在完整 L1 索引超过 `maxIndexLines` 时才会裁剪：按访问热度排序，**7 天内创建且无访问热度的新条目获得 recency 加分**（配合写入即热，新记忆不会被压缩立刻挤出 L1）。未进入 L1 的记忆不会被删除，并会保留“还有 N 条，请调用 `memory_list` 查看”的提示。自动蒸馏的 pending 通常只有工具/溯源元数据，接受时需补齐 `topic`、`entry_type`、`evidence`；含完整元数据的候选可省略这些参数。显式 namespace 只允许安全单段名称，非法路径会拒绝。维护过程会清理自动段周围的多余空行。
 
 ## 存储布局
 

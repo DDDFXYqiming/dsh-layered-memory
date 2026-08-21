@@ -10,11 +10,14 @@ All notable changes to `dsh-layered-memory` are documented here.
 - 补齐 `memory-meta.json` 的 `createdAt`：首建记录、更新保留原创建时间（此前仅写 `updatedAt`，recency 无据可查）。
 - 新增回归测试：README/LICENSE 过滤、recency 保护（陈旧条目被裁时新鲜条目保留）。
 - 文档：README/SKILL 补充 recency 保护、写入即热、保留名过滤说明。
-
-### Fixed
+- 修复热重载后宿主工具注册未撤销的问题；progressive 与非 progressive 注册都可完整清理，disposer 幂等。
+- 修复 `tools/result` 使用 agent.id、`turn/end` 使用 session.id 导致自动 pending 丢失的问题。
+- pending 支持 topic/entryType/evidence 元数据；自动候选缺少元数据时，`memory_accept` 的说明与行为一致。
+- `memory_write` 写入后立即按 `maxIndexLines` 压缩 L1 指针，不删除底层记忆。
+- 显式 namespace 拒绝路径穿越/歧义归一化，记忆名称拒绝绝对路径与反斜杠。
 - 修复 `memory_maintain` 因尾部空行、错误行数预算而过度裁剪 L1 索引的问题。
 - L1 指针改为逐条逻辑行；索引未超限时完整保留，超限时两层至少各保留一个指针并显示隐藏数量。
-- 增加 `memory_maintain` 的完整索引、空行、超限裁剪和底层记忆可读性回归测试。
+- 增加工具清理、session key、pending 元数据、即时压缩与 namespace 安全回归测试。
 
 ## [0.4.0] - 2026-08-16
 

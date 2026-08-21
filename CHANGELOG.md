@@ -2,6 +2,28 @@
 
 All notable changes to `dsh-layered-memory` are documented here.
 
+## [0.5.0] - 2026-08-21
+
+### Added
+- **`memory_search`（BM25 全文检索）**：覆盖 L2 facts / L3 sops / 归档条目，`all_namespaces` 跨库检索——L1 被裁剪的隐藏条目从此可主动找回。分词为 ASCII 词 + 单数字 + CJK bigram（无模型）。
+- **内容级近重复去重**：分词集合 Jaccard ≥0.85 判近重复（同事实微编辑版本）自动归档并保留 citation；过短内容（<12 词元）只走精确 hash，防误判。
+- **内容级合并候选**：`memory_maintain` 的合并候选改为内容 Jaccard ≥0.45 报告（旧版按文件名分词配对，实测全部误报）；名称重叠仅作提示字段。
+- **`memory_promote`**：跨命名空间提升记忆（项目局部经验 → 全局 default），源条目归档保留可回溯。
+- **记忆链接（related）**：`memory_write`/`memory_update`/`memory_accept` 支持关联条目，`memory_read` 回显关联指针与状态。
+- **写入即压缩**：`memory_write` 检测到 L1 超限立即按热度压缩（贪心装入、逐步真实行数核算，含空层占位行）；告警只在压缩后仍超限时出现一次。
+- **热度衰减**：访问计数按 14 天半衰衰减（`{count, lastAt}` v2 格式，旧版纯数字自动迁移）；写入不再计入热度（写≠读）；新建 7 天 recency 保护保留。
+- **阈值反思注入**：废除每 10 轮固定提醒；pending≥`reflectPendingThreshold`(5) / SOP≥`reflectSopsThreshold`(40) / 索引超限时注入带具体内容的整理请求（10 轮冷却）。
+- **turn 计数持久化**：`turn-state.json` 跨会话累计，headless 一次性会话也能触发周期维护。
+
+### Changed
+- **auto-pending 重做**：只捕获「同工具先失败后成功」的重试序列（含错误/结果尾部摘要）写入 pending；普通成功调用不再产生垃圾候选。
+- **源码化**：单文件 65.7KB `lib/index.js` 拆分为 `src/` 11 个模块（templates/similarity/store/l1index/memory-ops/maintain/search/tools/events/apply/skill-content），`lib/index.js` 变为薄出口；修复文件头 v0.3 与 package.json 0.4.0 的版本漂移。
+- **移除 SKILL.md**：dsh 插件不是 skill；runtime skill 内容内联至 `src/skill-content.js`。
+- 测试从 10 个扩展到 23 个（新增相似度/近重复/合并候选/检索/写入即压缩/关联/promote/重试序列/热度衰减覆盖）。
+
+### Fixed
+- 压缩预算核算修复：空层占位行（`[L3] （空）`）此前不计入预算，导致压缩结果可能仍超限 1 行（v0.4 遗留）。
+
 ## [Unreleased]
 
 ### Fixed

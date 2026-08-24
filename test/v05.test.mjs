@@ -250,6 +250,63 @@ test("memory_write stores related links and memory_read surfaces them", async ()
 	expect(r.meta.related).toEqual(["base-entry"]);
 });
 
+test("memory_read surfaces resolved related_states without breaking related (v0.5.2)", async () => {
+	await tool("memory_write").execute({
+		topic: "rel-b",
+		entry_type: "fact",
+		content: "关系目标",
+		evidence: "unit test",
+		namespace: "test",
+	});
+	await tool("memory_write").execute({
+		topic: "rel-a",
+		entry_type: "sop",
+		content: "带关系的条目",
+		evidence: "unit test",
+		namespace: "test",
+		related: ["rel-b"],
+	});
+	const r = await tool("memory_read").execute({ name: "rel-a", namespace: "test" });
+	// related 保持历史字符串数组契约
+	expect(r.meta.related).toEqual(["rel-b"]);
+	// 新字段给出解析后的状态（活跃/已归档/未找到）
+	expect(r.meta.related_states).toEqual([{ name: "rel-b", state: "active" }]);
+	// 归档后状态变为 archived
+	await tool("memory_archive").execute({ topic: "rel-b", entry_type: "fact", namespace: "test" });
+	const r2 = await tool("memory_read").execute({ name: "rel-a", namespace: "test" });
+	expect(r2.meta.related_states).toEqual([{ name: "rel-b", state: "archived" }]);
+});
+
+test("memory_read strips duplicated leading '# title' in sop content (v0.5.2)", async () => {
+	await tool("memory_write").execute({
+		topic: "dup-title-sop",
+		entry_type: "sop",
+		content: "# dup-title-sop\n\n正文内容\n## 小节\n- 要点",
+		evidence: "unit test",
+		namespace: "test",
+	});
+	const r = await tool("memory_read").execute({ name: "dup-title-sop", namespace: "test" });
+	expect(r.content.startsWith("# dup-title-sop")).toBe(false);
+	expect(r.content).toContain("正文内容");
+	expect(r.content).toContain("## 小节");
+});
+
+test("pendingSummary prefers retry error line over empty tail (v0.5.2)", async () => {
+	const summary = (await import("../src/tools.js")).pendingSummary;
+	const candidate = [
+		"# Pending Memory Candidate",
+		"- kind: retry-sequence",
+		"- 错误尾部: Error: tool call timed out after 30000ms",
+		"- 成功结果尾部: No files found",
+		"",
+	].join("\n");
+	const s = summary(candidate);
+	expect(s).toContain("retry-sequence");
+	expect(s).toContain("timed out");
+	// 旧策略取最后一行只会得到空串；新策略必须输出错误尾部
+	expect(s.length).toBeGreaterThan(10);
+});
+
 // ── memory_promote ──
 
 test("memory_promote copies to target namespace and archives source", async () => {

@@ -89,11 +89,13 @@ dsh plugin --profile web add <本目录>
 ```bash
 pnpm install
 pnpm build        # node --check lib/index.js
-pnpm test         # vitest
+pnpm test         # vitest（pnpm 11 可直接运行，见下）
 pnpm test:smoke   # dsh --profile headless --dump-config
 ```
 
 > 单元测试会 import `@deepseek-ai/dsh-tools` / `@deepseek-ai/schemastery`（DSH 内置包）。本机若有已安装的 DSH 环境，可将 `node_modules/@deepseek-ai` 等以 junction/链接方式指过去；`.npmrc` 已写 `auto-install-peers=false` 防 pnpm 解析私有 peer。
+>
+> **预检环境坑（实测踩过）**：pnpm 11 的 `run` 前置依赖检查会尝试解析 peer 链中的 DSH 私有包（如 `@deepseek-ai/dsh-type-meta`，不在 npm registry）→ `pnpm test` 报 `ERR_PNPM_FETCH_404`。修复：`pnpm-workspace.yaml` 顶层声明 `verifyDepsBeforeRun: false`（pnpm 11 认可的位置；`.npmrc` 的 kebab 写法对 pnpm 11 无效）。仓库已配好，`pnpm test` 直接可用；若仍被拦截，兜底走 `./node_modules/.bin/vitest run`。
 
 ## 相关
 

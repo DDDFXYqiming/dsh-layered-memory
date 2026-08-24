@@ -2,6 +2,20 @@
 
 All notable changes to `dsh-layered-memory` are documented here.
 
+## [0.5.2] - 2026-08-21
+
+### Fixed
+- **`memory_pending` 列表摘要失效**：渲染逻辑取"候选内容最后一行"的前 120 字符，而末行通常是空行 → 列表看起来只有文件名。新增 `pendingSummary`：按优先级提取 `kind=`、`错误尾部`、`成功结果尾部`、"本回合有 N 个…"统计行或首个非空正文行（带 `[kind]` 前缀，上限 160 字符）。`pendingSummary` 已导出供测试引用。
+- **`memory_read` 的 related 指针显示 `undefined（未找到）`**：`resolveRelated` 是死代码（只定义未调用），`meta.related` 原样字符串数组被 render 当对象读。修复：execute 时生成 `meta.related_states`（`[{name,state}]`，state∈active/archived/missing），`meta.related` 保持历史字符串数组契约不变（既有测试断言语义保留）；`formatRelated` 兼容两种形态。
+- **L3 读取出现重复一级标题**：写入模板自动加 `# 标题`，若 content 首行自带同名标题则文件有两行标题。新增 `stripLeadingTitle`：循环删除与 topic/slug 同名的首部标题行（含紧随空行），正文其他一级标题不动。
+- **pnpm 11 预检拦截 `pnpm test`**：`verify-deps-before-run` 的 `.npmrc` kebab 写法对 pnpm 11 无效，run 前依赖检查尝试解析 peer 链中的私有包 `@deepseek-ai/dsh-type-meta`（registry 404）。修复：`pnpm-workspace.yaml` 顶层声明 `verifyDepsBeforeRun: false`（实测生效）；README 记录兜底 `./node_modules/.bin/vitest run`。
+
+### Added
+- Regression 测试 ×3：related_states 解析（含归档后状态翻转）、L3 重复标题 strip、pendingSummary 提取优先级。
+
+### Verification
+- `pnpm test` 27/27 green（10 + 17；含新增 3 例）；`dsh --profile headless` 隔离 CLI 全量自测（selftest-cli 命名空间，10 个工具闭环 write/read/search/list/update/archive/rollback/expand/index/stats/maintain/pending）RESULT: PASS。
+
 ## [0.5.1] - 2026-08-21
 
 ### Fixed

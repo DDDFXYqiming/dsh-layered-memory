@@ -71,7 +71,7 @@ function normalizeMeta(m) {
 	};
 }
 
-/** 解析关联指针的存在状态，供 memory_read 回显。 */
+/** 解析关联指针的存在状态，供 memory_read 回显（[v0.5.2] 修复：此前是死代码，related 原样字符串数组被 render 读取导致显示 undefined）。 */
 function resolveRelated(root, related) {
 	if (!Array.isArray(related) || related.length === 0) return [];
 	return related.map((name) => {
@@ -82,6 +82,34 @@ function resolveRelated(root, related) {
 		}
 		return { name: key, state };
 	});
+}
+
+/**
+ * [v0.5.2] pending 摘要：从候选正文提取“最有信息量”的行，替代之前
+ * “取最后一行的前 120 字符”（末行通常是空行 → 列表看起来只有文件名）。
+ * 优先级：kind=retry-sequence 的“错误尾部”行 > “成功结果尾部”行 > “本回合有 N 个…”统计行 > 首个非空正文行。
+ */
+export function pendingSummary(content) {
+	if (!content) return "";
+	const lines = content.split(/\r?\n/);
+	const pick = (prefix) => {
+		for (const line of lines) {
+			const t = line.trim();
+			if (t.startsWith(prefix)) return t.slice(prefix.length).trim();
+		}
+		return "";
+	};
+	const kind = pick("- kind:");
+	const err = pick("- 错误尾部:");
+	const ok = pick("- 成功结果尾部:");
+	const count = pick("- 本回合有") || "";
+	const fallback = lines.find((l) => {
+		const t = l.trim();
+		return t && !t.startsWith("#") && !t.startsWith("-") && t.length > 10;
+	}) || "";
+	const body = kind ? `[${kind}] ` : "";
+	const detail = err || ok || (count ? `本回合有 ${count}` : "") || fallback;
+	return `${body}${detail || "（无摘要）"}`.slice(0, 160);
 }
 
 export function buildTools(ctx, cfg) {
@@ -105,7 +133,7 @@ export function buildTools(ctx, cfg) {
 				type: "text",
 				text: value.not_found
 					? `记忆「${value.name}」未找到（可用 memory_list 查看全部，或用 memory_search 全文检索）`
-					: `记忆「${value.name}」（来源: ${value.source}, namespace: ${value.namespace}${value.meta?.archived ? ", 已归档" : ""}）：\n\n${value.content}${formatRelated(value.meta?.related)}`
+					: `记忆「${value.name}」（来源: ${value.source}, namespace: ${value.namespace}${value.meta?.archived ? ", 已归档" : ""}）：\n\n${value.content}${formatRelated(value.meta?.related_states)}`
 			}]
 		},
 		async execute(args) {
@@ -139,9 +167,10 @@ export function buildTools(ctx, cfg) {
 					return {
 						name: key,
 						source: `sops/${c}.md`,
-						content: readFileSync(sopPath, "utf8"),
+						// [v0.5.2] content 首行若恰好是“# 标题”（写入侧模板也会加一次）则去重，避免 read 时标题重复
+						content: stripLeadingTitle(readFileSync(sopPath, "utf8"), c),
 						namespace: ns,
-						meta: normalizeMeta(m),
+						meta: { ...normalizeMeta(m), ...(Array.isArray(m?.related) && m.related.length ? { related_states: resolveRelated(root, m.related) } : {}) },
 					};
 				}
 			}
@@ -157,7 +186,7 @@ export function buildTools(ctx, cfg) {
 					source: "facts.md",
 					content: fact,
 					namespace: ns,
-					meta: normalizeMeta(m),
+					meta: { ...normalizeMeta(m), ...(Array.isArray(m?.related) && m.related.length ? { related_states: resolveRelated(root, m.related) } : {}) },
 				};
 			}
 			if (key.includes("sops/")) {
@@ -385,7 +414,7 @@ export function buildTools(ctx, cfg) {
 			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
-				text: `Pending[${value.namespace}]：\n` + (value.pending.map((p) => `- ${p.name}: ${(p.content.split("\n").slice(-1)[0] || "").slice(0, 120)}`).join("\n") || "（空）")
+				text: `Pending[${value.namespace}]：\n` + (value.pending.map((p) => `- ${p.name}: ${pendingSummary(p.content)}`).join("\n") || "（空）")
 			}]
 		},
 		execute(args) {
@@ -875,8 +904,35 @@ export function buildTools(ctx, cfg) {
 	return [readTool, listTool, writeTool, indexTool, statsTool, maintainTool, pendingTool, acceptTool, updateTool, archiveTool, rollbackTool, expandTool, searchTool, promoteTool];
 }
 
+/**
+ * [v0.5.2] 去掉 L3 文件首部的重复“# 标题”：写入模板自动加一次标题，若 content
+ * 自带同名一级标题则 read 时会出现重复标题行（可能不止一个）。循环删除与
+ * topic/slug 同名的首行标题，顺带吃掉紧随的空行；正文里的其他一级标题不动。
+ */
+function stripLeadingTitle(content, slug) {
+	if (!content) return content;
+	const expected = `# ${String(slug).trim()}`;
+	const expectedSlug = `# ${slugify(String(slug))}`;
+	const normalized = (s) => s.toLowerCase().replace(/^#\s+/, "").replace(/-/g, " ").trim();
+	const target = normalized(expected);
+	let lines = content.split(/\r?\n/);
+	while (lines.length > 0) {
+		const first = lines[0].trim();
+		const isDup = first === expected || first === expectedSlug ||
+			(/^#\s+/.test(first) && normalized(first) === target);
+		if (!isDup) break;
+		lines = lines.slice(1);
+		while (lines.length > 0 && lines[0].trim() === "") lines = lines.slice(1);
+	}
+	return lines.join("\n");
+}
+
 function formatRelated(related) {
 	if (!Array.isArray(related) || related.length === 0) return "";
-	const parts = related.map((r) => `  · ${r.name}（${r.state === "active" ? "活跃" : r.state === "archived" ? "已归档" : "未找到"}）`);
+	const parts = related.map((r) => {
+		// [v0.5.2] 兼容两种形态：resolveRelated 产出的 {name,state} 对象，或历史字符串数组
+		if (typeof r === "string") return `  · ${r}（未知状态）`;
+		return `  · ${r.name}（${r.state === "active" ? "活跃" : r.state === "archived" ? "已归档" : "未找到"}）`;
+	});
 	return `\n\n关联记忆:\n${parts.join("\n")}`;
 }

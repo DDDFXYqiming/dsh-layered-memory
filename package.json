@@ -1,6 +1,6 @@
 {
   "name": "dsh-layered-memory",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "DSH 跨会话长期记忆：命名空间隔离 + L1 索引注入（存在性编码）+ 行动验证写入 + 内容级近重复去重 + BM25 全文检索 + 跨命名空间提升 + 自动蒸馏候选 + 溯源/归档/回滚 + 自动维护。",
   "type": "module",
   "main": "lib/index.js",

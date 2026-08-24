@@ -2,6 +2,16 @@
 
 All notable changes to `dsh-layered-memory` are documented here.
 
+## [0.5.1] - 2026-08-21
+
+### Fixed
+- **memory_write 输出被 output schema 拒绝**：压缩路径返回 `index.facts_hidden` / `index.sops_hidden` 未在 schema 声明（`additionalProperties: false`），宿主工具运行器报 `value.index.facts_hidden is not a declared property`。
+- **memory_update 输出 lossless JSON 违规**：`history: historyPath || undefined` 在无历史快照时产生显式 `undefined` 键，被 JSON 序列化丢弃后判为不可无损往返。
+
+### Changed
+- **全量瘦身：删除全部输出校验声明（净删 236 行）**。14 个工具的 output schema 塌缩为宿主编译器允许的最小开放形态 `{ type: "object", additionalProperties: true }`——校验层从此只保证结果可传输，不再约束内容；任何字段漂移都不可能拒绝写入。render 展示层与 `pruneUndefined` 出口消毒保留（递归剥离显式 `undefined` 键，从根上消除 lossless JSON 违规这一类问题）。
+- 死码 `similarity.shingles`（零引用）一并删除；schema 一致性回归测试替换为无损 JSON 往返回归（覆盖 memory_write 压缩路径与 memory_update 无历史快照路径）。
+
 ## [Unreleased]
 
 ### Removed

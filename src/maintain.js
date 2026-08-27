@@ -2,8 +2,9 @@
 // [v0.5] 相似度从"文件名分词 + 精确内容相等"升级为 shingle Jaccard，
 // 消灭纯名称匹配产生的大量误报（实测 20/20 全错）。
 
-import { existsSync, readFileSync, writeFileSync, copyFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, copyFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { atomicWriteFileSync } from "./atomic-write.js";
 import {
 	ARCHIVE_DIR,
 	factSections,
@@ -112,7 +113,7 @@ export function dedupeEntries(root) {
 		if (duplicateOf) {
 			const ts = Date.now();
 			try {
-				writeFileSync(join(root, ARCHIVE_DIR, `fact-${slugify(topic)}-${ts}.md`), factArchiveText(root, topic), "utf8");
+				atomicWriteFileSync(join(root, ARCHIVE_DIR, `fact-${slugify(topic)}-${ts}.md`), factArchiveText(root, topic));
 			} catch { /* 忽略 */ }
 			setEntryMeta(root, "fact", topic, { archived: true, duplicateOf, archivedAt: new Date().toISOString() });
 			report.removed.push(`fact:${topic} -> duplicate of ${duplicateOf}`);
@@ -171,7 +172,7 @@ export function runMaintain(root, maxLines) {
 		stats,
 		mergeCandidates,
 	};
-	writeFileSync(join(root, "maintenance-report.json"), JSON.stringify(report, null, 2), "utf8");
+	atomicWriteFileSync(join(root, "maintenance-report.json"), JSON.stringify(report, null, 2));
 	return report;
 }
 

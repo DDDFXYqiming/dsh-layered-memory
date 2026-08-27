@@ -1,4 +1,4 @@
-// L0/L1/L2 模板与索引标记常量。文本内容被 ensureIndexRule 等逻辑按锚点匹配，
+// L0/L1/L2 模板与索引标记常量。文本内容被索引重建逻辑按锚点匹配，
 // 修改措辞前先检查 lib 侧的锚点字符串。
 
 export const AUTO_BEGIN = "<!-- AUTO-BEGIN -->";

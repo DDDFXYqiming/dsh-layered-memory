@@ -1,11 +1,12 @@
 // 存储原语：命名空间、目录布局、facts/sops/pending 读写、meta 溯源、访问热度（带衰减）。
 // 本模块不依赖索引逻辑（l1index），保持单向依赖。
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, basename } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { atomicWriteFileSync } from "./atomic-write.js";
 import { FACTS_TEMPLATE, INDEX_TEMPLATE, L0_TEMPLATE } from "./templates.js";
 
 export const META_FILE = "memory-meta.json";
@@ -82,7 +83,7 @@ export function ensureNamespaceLayout(root) {
 	];
 	for (const [file, content] of seeds) {
 		const p = join(root, file);
-		if (!existsSync(p)) writeFileSync(p, content, "utf8");
+		if (!existsSync(p)) atomicWriteFileSync(p, content);
 	}
 }
 
@@ -140,7 +141,7 @@ export function readMeta(root) {
 }
 
 export function writeMeta(root, meta) {
-	writeFileSync(join(root, META_FILE), JSON.stringify(meta, null, 2), "utf8");
+	atomicWriteFileSync(join(root, META_FILE), JSON.stringify(meta, null, 2));
 }
 
 export function getEntryMeta(root, kind, key) {
@@ -218,10 +219,10 @@ export function upsertFact(root, topic, content) {
 	}
 	if (start >= 0) {
 		const updated = [...lines.slice(0, start), `## ${topic}`, content, "", ...lines.slice(end)];
-		writeFileSync(p, updated.join("\n"), "utf8");
+		atomicWriteFileSync(p, updated.join("\n"));
 		return "updated";
 	}
-	writeFileSync(p, text.replace(/\s*$/, "\n") + `## ${topic}\n${content}\n\n`, "utf8");
+	atomicWriteFileSync(p, text.replace(/\s*$/, "\n") + `## ${topic}\n${content}\n\n`);
 	return "created";
 }
 
@@ -267,7 +268,7 @@ export function bumpAccess(root, key) {
 		const prev = raw[key];
 		const count = (typeof prev === "number" ? prev : prev?.count ?? 0) + 1;
 		raw[key] = { count, lastAt: new Date().toISOString() };
-		writeFileSync(join(root, ACCESS_FILE), JSON.stringify(raw, null, 2), "utf8");
+		atomicWriteFileSync(join(root, ACCESS_FILE), JSON.stringify(raw, null, 2));
 	} catch { /* 热度统计失败不影响主流程 */ }
 }
 
@@ -309,7 +310,7 @@ export function bumpTurnCounter(root) {
 		try { state = JSON.parse(readFileSync(p, "utf8")); } catch { /* 首次 */ }
 		state.totalTurns = (Number(state.totalTurns) || 0) + 1;
 		state.lastAt = new Date().toISOString();
-		writeFileSync(p, JSON.stringify(state, null, 2), "utf8");
+		atomicWriteFileSync(p, JSON.stringify(state, null, 2));
 		return state.totalTurns;
 	} catch {
 		return 0;

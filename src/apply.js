@@ -41,6 +41,17 @@ function apply(ctx, config = {}) {
 	ensureNamespaceLayout(nsRoot(cfg.memoryDir, resolveNamespace(cfg)));
 
 	// ── 记忆注入（L1 存在性索引每轮可见）──
+	// [v0.5.3] 注入面防护：index.txt 由 memory_write 的 topic/content 拼接而成，
+	// 属用户可写数据。注入 system prompt 前做长度熔断 + 控制字符剥离，
+	// 并用 sentinel 标记为不可信段，防止 topic 里的指令字串污染系统上下文。
+	const L1_MAX_CHARS = 8192;
+	function sanitizeIndexForPrompt(idx) {
+		let s = String(idx ?? "").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
+		if (s.length > L1_MAX_CHARS) s = s.slice(0, L1_MAX_CHARS) + "\n[memory:index 已截断]";
+		const trimmed = s.trim();
+		if (!trimmed) return "";
+		return `<memory_index source="user-writable">\n${trimmed}\n</memory_index>`;
+	}
 	const sysPrompt = ctx.get("systemPrompt");
 	if (sysPrompt) {
 		disposers.push(sysPrompt.context({
@@ -48,8 +59,7 @@ function apply(ctx, config = {}) {
 			order: 10,
 			text: () => {
 				try {
-					const idx = readIndex(resolveRoot());
-					return idx.trim() ? idx : "";
+					return sanitizeIndexForPrompt(readIndex(resolveRoot()));
 				} catch {
 					return "";
 				}

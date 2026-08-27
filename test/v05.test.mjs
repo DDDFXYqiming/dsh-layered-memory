@@ -386,3 +386,68 @@ test("entryHeat decays access counts with 14-day half-life", () => {
 	expect(hot).toBeCloseTo(8, 1);
 	expect(cold).toBeCloseTo(2, 1); // 28 天 = 两个半衰期 → 8/4
 });
+
+// ── 原子写与注入面防护（v0.5.3）──
+
+test("atomic write leaves no temp files and survives on disk", async () => {
+	await tool("memory_write").execute({
+		topic: "atomic-probe",
+		entry_type: "fact",
+		content: "原子写验证内容",
+		evidence: "regression test",
+		namespace: "test",
+	});
+	const files = readdirSync(join(memDir, "test"));
+	expect(files.some((f) => f.includes(".tmp-"))).toBe(false);
+	const fact = readFileSync(join(memDir, "test", "facts.md"), "utf8");
+	expect(fact).toContain("## atomic-probe");
+});
+
+test("writeMemory rejects topics with newline or control characters", async () => {
+	await expect(
+		tool("memory_write").execute({
+			topic: "evil\ntopic",
+			entry_type: "fact",
+			content: "x",
+			evidence: "regression test",
+			namespace: "test",
+		}),
+	).rejects.toThrow(/控制字符/);
+	await expect(
+		tool("memory_write").execute({
+			topic: "bad\u0000topic",
+			entry_type: "sop",
+			content: "x",
+			evidence: "regression test",
+			namespace: "test",
+		}),
+	).rejects.toThrow(/控制字符/);
+});
+
+test("L1 injection into systemPrompt is capped and wrapped in a sentinel", () => {
+	let captured = "";
+	const injected = new Map();
+	const agentsService = { get(id) { return injected.get(id) ?? null; } };
+	const sysCtx = {
+		context(entry) {
+			captured = entry.text();
+			return () => {};
+		},
+	};
+	const ctx = {
+		get(service) {
+			if (service === "systemPrompt") return sysCtx;
+			if (service === "agents") return agentsService;
+			if (service === "sessionQuery") return null;
+			return undefined;
+		},
+		on() { return () => {}; },
+		skills: { register: () => () => {} },
+		tools: { register() { return () => {}; }, restrict() { return () => {}; } },
+		logger: { info() {}, warn() {} },
+	};
+	apply(ctx, { memoryDir: memDir, progressive: false, autoNamespace: false, defaultNamespace: "test" });
+	expect(captured.startsWith("<memory_index source=\"user-writable\">")).toBe(true);
+	expect(captured.endsWith("</memory_index>")).toBe(true);
+	expect(captured.length).toBeLessThan(9000);
+});

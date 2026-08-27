@@ -1,8 +1,9 @@
 // 记忆写操作与 pending 候选：writeMemory / pending 读写解析。
 // 依赖方向：memory-ops → store + l1index（单向，无循环）。
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { atomicWriteFileSync } from "./atomic-write.js";
 import {
 	PENDING_DIR,
 	setEntryMeta,
@@ -22,6 +23,11 @@ import { compressIndexEntries, readIndex, syncIndex } from "./l1index.js";
  */
 export function writeMemory(root, { topic, entryType, content, evidence, sourceSession, sourceSeqs, namespace, related, maxIndexLines = 30 }) {
 	const safeTopic = String(topic).trim();
+	// topic 会进入 facts.md 的 ## section 与 L1 索引（再注入 system prompt）：
+	// 含换行/控制字符会让 section 解析错位，也会成为提示词注入载体，直接拒绝。
+	if (/[\n\r\u0000-\u001f\u007f]/.test(safeTopic)) {
+		throw new Error(`memory_write: topic 含换行或控制字符，拒绝写入: ${JSON.stringify(safeTopic.slice(0, 40))}`);
+	}
 	const body = `${String(content).trim()}\n\n> 证据: ${evidence}\n`;
 	let path;
 	let action;
@@ -41,7 +47,7 @@ export function writeMemory(root, { topic, entryType, content, evidence, sourceS
 		path = join(root, "sops", `${slug}.md`);
 		const existed = existsSync(path);
 		const header = `# ${safeTopic}\n\n`;
-		writeFileSync(path, header + body, "utf8");
+		atomicWriteFileSync(path, header + body);
 		action = existed ? "updated" : "created";
 		setEntryMeta(root, "sop", slug, {
 			sourceSession: sourceSession || null,
@@ -104,7 +110,7 @@ export function pendingContent({ sourceSession, sourceSeqs, retries, reason }) {
 export function writePending(root, payload) {
 	const fileName = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.md`;
 	const p = join(root, PENDING_DIR, fileName);
-	writeFileSync(p, pendingContent(payload), "utf8");
+	atomicWriteFileSync(p, pendingContent(payload));
 	return fileName;
 }
 

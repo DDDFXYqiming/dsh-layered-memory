@@ -2,8 +2,9 @@
 // [v0.5] 新增 memory_search（BM25 全文检索）/ memory_promote（跨命名空间提升）；
 // memory_write/update 支持 related 关联链接；memory_read 回显关联指针。
 
-import { existsSync, readFileSync, readdirSync, writeFileSync, copyFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, copyFileSync, rmSync } from "node:fs";
 import { join, basename } from "node:path";
+import { atomicWriteFileSync } from "./atomic-write.js";
 import { defineTool as defineToolRaw } from "@deepseek-ai/dsh-tools";
 import {
 	PENDING_DIR,
@@ -573,13 +574,13 @@ export function buildTools(ctx, cfg) {
 					const old = readFact(root, topic);
 					if (old !== null) {
 						historyPath = join(HISTORY_DIR, `fact-${slugify(topic)}-${ts}.md`);
-						writeFileSync(join(root, historyPath), `# ${topic}\n\n${old}\n`, "utf8");
+						atomicWriteFileSync(join(root, historyPath), `# ${topic}\n\n${old}\n`);
 					}
 				} else {
 					const old = readSop(root, key);
 					if (old !== null) {
 						historyPath = join(HISTORY_DIR, `sop-${key}-${ts}.md`);
-						writeFileSync(join(root, historyPath), old, "utf8");
+						atomicWriteFileSync(join(root, historyPath), old);
 					}
 				}
 			}
@@ -697,7 +698,7 @@ export function buildTools(ctx, cfg) {
 				upsertFact(root, topic, clean);
 				setEntryMeta(root, "fact", topic, { archived: false, restoredFrom: latest });
 			} else {
-				writeFileSync(join(root, "sops", `${key}.md`), content, "utf8");
+				atomicWriteFileSync(join(root, "sops", `${key}.md`), content);
 				setEntryMeta(root, "sop", key, { archived: false, restoredFrom: latest });
 			}
 			syncIndex(root, cfg.maxIndexLines);

@@ -70,7 +70,6 @@ dsh plugin --profile web add <repo dir>
 │   ├── pending/*.md
 │   ├── archive/ / .history/
 │   ├── memory-meta.json
-│   ├── memory_stats.json
 │   ├── maintenance-report.json
 │   ├── turn-state.json
 │   └── file_access_stats.json

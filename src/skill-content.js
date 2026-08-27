@@ -55,7 +55,7 @@ export const SKILL_CONTENT = `# 记忆管理（DSH 版）
 │   ├── facts.md                   L2 环境事实
 │   ├── sops/*.md                  L3 任务经验
 │   ├── pending/ / archive/ / .history/
-│   ├── memory-meta.json / memory_stats.json
+│   ├── memory-meta.json / maintenance-report.json
 │   ├── maintenance-report.json / turn-state.json
 │   └── file_access_stats.json
 └── （namespace=default 时兼容旧根目录布局）

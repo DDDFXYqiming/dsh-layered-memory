@@ -2,6 +2,24 @@
 
 All notable changes to `dsh-layered-memory` are documented here.
 
+## [Unreleased]
+
+### Fixed
+- **新条目"写完即隐身"修复**：`memory_write` 写入后立即 bump 热度；`memory_maintain` 压缩排序加入 recency 保护（7 天内创建、无访问热度的条目获得加分），新写入的 fact/sop 不再被压缩立刻裁出 L1。
+- **非 SOP 文件混入 L3 修复**：`sopNames()` 过滤保留名（README/LICENSE/index，大小写不敏感），安装/文档文件不再计入 L3 统计、索引与合并候选。
+- 补齐 `memory-meta.json` 的 `createdAt`：首建记录、更新保留原创建时间（此前仅写 `updatedAt`，recency 无据可查）。
+- 新增回归测试：README/LICENSE 过滤、recency 保护（陈旧条目被裁时新鲜条目保留）。
+- 文档：README/SKILL 补充 recency 保护、写入即热、保留名过滤说明。
+- 修复 `memory_maintain` 因尾部空行、错误行数预算而过度裁剪 L1 索引的问题。
+- L1 指针改为逐条逻辑行；索引未超限时完整保留，超限时两层至少各保留一个指针并显示隐藏数量。
+- 增加 `memory_maintain` 的完整索引、空行、超限裁剪和底层记忆可读性回归测试。
+
+### Changed
+- **持久化全部改为原子写**（`atomic-write.js`：同目录临时文件 + rename 覆盖，21 处写点）：宿主崩溃/强杀不再留下写一半的 `memory-meta.json` / `index.txt` / `facts.md` / `file_access_stats.json` / `turn-state.json` / 归档与历史快照。
+- **L1 注入面防护**：system prompt 注入前对索引做 ≤8KB 熔断 + 控制字符剥离，并包在 `<memory_index source="user-writable">` sentinel 内；`memory_write` 拒绝含换行/控制字符的 topic（防 section 解析错位与提示词注入载体）。
+- 移除死代码 `ensureIndexRule`（零引用）；README/SKILL 的 `memory_stats.json` 更正为实际写出的 `maintenance-report.json`；合并重复的 `[Unreleased]` 节。
+- 新增回归测试 ×3：原子写无残留临时文件、topic 控制字符拒绝、L1 sentinel/熔断注入。
+
 ## [0.5.2] - 2026-08-21
 
 ### Fixed
@@ -26,15 +44,6 @@ All notable changes to `dsh-layered-memory` are documented here.
 - **全量瘦身：删除全部输出校验声明（净删 236 行）**。14 个工具的 output schema 塌缩为宿主编译器允许的最小开放形态 `{ type: "object", additionalProperties: true }`——校验层从此只保证结果可传输，不再约束内容；任何字段漂移都不可能拒绝写入。render 展示层与 `pruneUndefined` 出口消毒保留（递归剥离显式 `undefined` 键，从根上消除 lossless JSON 违规这一类问题）。
 - 死码 `similarity.shingles`（零引用）一并删除；schema 一致性回归测试替换为无损 JSON 往返回归（覆盖 memory_write 压缩路径与 memory_update 无历史快照路径）。
 
-## [Unreleased]
-
-### Removed
-- **全量瘦身：删除全部输出校验声明（净删 236 行）**。14 个工具的 output schema 塌缩为宿主编译器允许的最小开放形态 `{ type: "object", additionalProperties: true }`——校验层从此只保证结果可传输，不再约束内容；任何字段漂移都不可能拒绝写入。render 展示层与 pruneUndefined 出口消毒保留。死码 `similarity.shingles`（零引用）一并删除；schema 一致性回归测试替换为无损 JSON 往返回归。
-
-### Fixed
-- **`memory_write` 压缩路径输出校验崩溃**：L1 索引超限触发"写入即压缩"时，返回值携带 `index.facts_hidden` / `index.sops_hidden`，但 output schema 声明了 `additionalProperties: false` 且未声明这两个字段，宿主校验直接拒绝整个工具结果（表现为持续内部错误）。已在 schema 中补声明两个计数字段，render 同步展示隐藏数量。
-- **全部工具出口统一无损 JSON 消毒**：`memory_update(supersede=false)` 返回 `history: historyPath || undefined`，显式 undefined 键在 JSON 序列化时被丢弃，触发宿主"lossless JSON"校验整包拒收。新增 `pruneUndefined` 出口消毒层包装所有 14 个工具的 execute，从构造上保证任何返回值可无损 JSON 往返。
-
 ## [0.5.0] - 2026-08-21
 
 ### Added
@@ -56,20 +65,6 @@ All notable changes to `dsh-layered-memory` are documented here.
 
 ### Fixed
 - 压缩预算核算修复：空层占位行（`[L3] （空）`）此前不计入预算，导致压缩结果可能仍超限 1 行（v0.4 遗留）。
-
-## [Unreleased]
-
-### Fixed
-- **新条目"写完即隐身"修复**：`memory_write` 写入后立即 bump 热度；`memory_maintain` 压缩排序加入 recency 保护（7 天内创建、无访问热度的条目获得加分），新写入的 fact/sop 不再被压缩立刻裁出 L1。
-- **非 SOP 文件混入 L3 修复**：`sopNames()` 过滤保留名（README/LICENSE/index，大小写不敏感），安装/文档文件不再计入 L3 统计、索引与合并候选。
-- 补齐 `memory-meta.json` 的 `createdAt`：首建记录、更新保留原创建时间（此前仅写 `updatedAt`，recency 无据可查）。
-- 新增回归测试：README/LICENSE 过滤、recency 保护（陈旧条目被裁时新鲜条目保留）。
-- 文档：README/SKILL 补充 recency 保护、写入即热、保留名过滤说明。
-
-### Fixed
-- 修复 `memory_maintain` 因尾部空行、错误行数预算而过度裁剪 L1 索引的问题。
-- L1 指针改为逐条逻辑行；索引未超限时完整保留，超限时两层至少各保留一个指针并显示隐藏数量。
-- 增加 `memory_maintain` 的完整索引、空行、超限裁剪和底层记忆可读性回归测试。
 
 ## [0.4.0] - 2026-08-16
 

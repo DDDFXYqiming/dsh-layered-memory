@@ -1,7 +1,8 @@
 // L1 索引：读取/分段/重建/按热度压缩。行为与 v0.4 保持一致（测试锁定）。
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { atomicWriteFileSync } from "./atomic-write.js";
 import { AUTO_BEGIN, AUTO_END, INDEX_TEMPLATE } from "./templates.js";
 import { activeEntries, entryHeat, loadAccess, readMeta } from "./store.js";
 
@@ -11,26 +12,6 @@ export function readIndex(root) {
 	} catch {
 		return "";
 	}
-}
-
-/** 确保 L1 固定段含常驻规则行、表述与最新模板一致（对已存在的旧索引也生效）。 */
-export function ensureIndexRule(root) {
-	const p = join(root, "index.txt");
-	if (!existsSync(p)) return;
-	let cur = readFileSync(p, "utf8");
-	cur = cur.replace("4层记忆: L0规则", "分层记忆: L0规则");
-	cur = cur.replace("4层记忆", "分层记忆");
-	if (cur.includes("任务完成且【行动验证成功】")) {
-		if (cur !== readFileSync(p, "utf8")) writeFileSync(p, cur, "utf8");
-		return;
-	}
-	const anchor = "新增经验用 memory_write（须带证据）";
-	if (cur.includes(anchor)) {
-		cur = cur.replace(anchor, anchor + "\n任务完成且【行动验证成功】时主动 memory_write 沉淀（无需等用户提醒；无验证信息则不写）");
-	} else {
-		cur = cur.replace("# [Memory Index - L1]", "# [Memory Index - L1]\n任务完成且【行动验证成功】时主动 memory_write 沉淀（无需等用户提醒；无验证信息则不写）");
-	}
-	writeFileSync(p, cur, "utf8");
 }
 
 /** 规范化索引布局空白：保留手动内容，只消除会挤占预算的多余空行。 */
@@ -91,7 +72,7 @@ export function syncIndex(root, maxIndexLines = 30) {
 	const { head, tail } = readIndexSections(root);
 	const { facts, sops } = activeEntries(root);
 	const rebuilt = composeIndex(head, buildAutoLines(facts, sops), tail);
-	writeFileSync(p, rebuilt, "utf8");
+	atomicWriteFileSync(p, rebuilt);
 	const lines = countIndexLines(rebuilt);
 	return { index_lines: lines, max_index_lines: maxIndexLines, over_limit: lines > maxIndexLines };
 }
@@ -118,7 +99,7 @@ export function compressIndexEntries(root, maxLines) {
 
 	// 未超限时也写回规范化后的完整索引，但绝不裁剪条目。
 	if (totalLines <= maxLines) {
-		writeFileSync(join(root, "index.txt"), fullIndex, "utf8");
+		atomicWriteFileSync(join(root, "index.txt"), fullIndex);
 		return {
 			facts_kept: facts.length,
 			sops_kept: sops.length,
@@ -159,7 +140,7 @@ export function compressIndexEntries(root, maxLines) {
 	const keptFacts = facts.slice(0, factCount);
 	const keptSops = sops.slice(0, sopCount);
 	const autoLines = buildAutoLines(keptFacts, keptSops, hiddenFacts, hiddenSops);
-	writeFileSync(join(root, "index.txt"), composeIndex(head, autoLines, tail), "utf8");
+	atomicWriteFileSync(join(root, "index.txt"), composeIndex(head, autoLines, tail));
 	return {
 		facts_kept: keptFacts.length,
 		sops_kept: keptSops.length,

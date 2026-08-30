@@ -2,21 +2,21 @@
 
 # dsh-layered-memory
 
-**DeepSeek Harness（DSH）跨会话长期记忆插件** —— 命名空间隔离 + L1 索引注入 + L2 环境事实 + L3 任务经验 + BM25 全文检索 + 内容级近重复去重 + 跨命名空间提升 + 重试序列蒸馏 + 溯源/归档/回滚 + 自动维护 + 渐进式工具暴露。
+**DeepSeek Harness（DSH）的跨会话长期记忆插件。** 会话结束后上下文会被清空，这个插件把值得留下的信息写成文件放在磁盘上，之后的会话再按需取回。功能覆盖命名空间隔离、L1 索引注入、L2 环境事实、L3 任务经验、BM25 全文检索、内容级近重复去重、跨命名空间提升、重试序列蒸馏、溯源、归档与回滚、自动维护，以及渐进式工具暴露。
 
 ## 能力
 
-`memory:index` 注入 —— `ctx.systemPrompt.context` 把 L1 索引实时注入每轮模型上下文，改动即时生效。
+`memory:index` 注入。`ctx.systemPrompt.context` 把 L1 索引实时注入每轮模型上下文，改动即时生效。
 
-runtime skill `memory` —— 触发语义：何时读、何时写、何时同步索引（内容见 `SKILL.md`）。
+runtime skill `memory`。这份 skill 约定了读记忆、写记忆和同步索引的时机，内容见 `SKILL.md`。
 
-工具（progressive 模式下经 `memory_activate` 挂载，14 个）：
+工具共 14 个，progressive 模式下经 `memory_activate` 挂载，也就是 Agent 按需调用一次 `memory_activate`，这批工具才进入它的工具列表。
 
 | 工具 | 用途 |
 |---|---|
 | `memory_list` | 列出全部记忆（L2 facts + L3 sops + pending + 索引行数） |
 | `memory_read` | 读取指定记忆（index / fact 主题 / sop 文件名），返回溯源 meta 与 related 关联指针 |
-| `memory_search` | **BM25 全文检索**（含已归档条目；`all_namespaces` 跨库）——L1 被裁剪的条目也能找回 |
+| `memory_search` | **BM25 全文检索**（含已归档条目；`all_namespaces` 跨库），L1 被裁剪的条目也能找回 |
 | `memory_write` | 写入记忆（fact/sop，**evidence 必填** = 行动验证公理；可选 `related` 关联链接） |
 | `memory_index` | 重建 L1 索引自动段（保留 [RULES] 手动段） |
 | `memory_pending` | 查看重试序列蒸馏候选（同工具先失败后成功） |
@@ -56,7 +56,7 @@ dsh plugin --profile web add <本目录>
     reflectSopsThreshold: 40   # L3 SOP 达到该值时注入整合请求
 ```
 
-**`memory_maintain` 何时裁剪 L1**：只在完整索引超过 `maxIndexLines` 时触发；贪心装入、每步按真实行数核算（含空层占位行），按衰减热度排序（14 天半衰 + 7 天内新建条目 recency 加分），被裁剪的记忆**不会丢失**——可直接 `memory_search` 找回。`memory_write` 检测到超限也会立即触发同款压缩，告警只在压缩后仍超限时出现一次。
+**`memory_maintain` 何时裁剪 L1。** 只在完整索引超过 `maxIndexLines` 时触发。裁剪按贪心装入，每步按真实行数核算，空层占位行也计入，排序依据衰减热度（14 天半衰，7 天内新建条目有 recency 加分）。被裁剪只是离开 L1 索引，条目本身还在，用 `memory_search` 随时能找回。`memory_write` 检测到超限也会立即触发同款压缩。告警只在压缩后仍超限时出现一次。
 
 ## 存储布局
 
@@ -78,14 +78,14 @@ dsh plugin --profile web add <本目录>
 
 ## 核心公理
 
-1. **行动验证**：No Execution, No Memory —— `memory_write` 的 evidence 必填，只写成功验证过的信息
-2. **神圣不可删改**：已验证事实可压缩/迁移/supersede/archive，但严禁物理丢弃
-3. **禁易变状态**：时间戳/PID/临时路径不存
-4. **最小充分指针**：L1 只写存在性，细节在 L2/L3 按需取
+1. **行动验证（No Execution, No Memory）。** `memory_write` 的 evidence 必填，只写成功验证过的信息
+2. **神圣不可删改。** 已验证事实可压缩/迁移/supersede/archive，但严禁物理丢弃
+3. **禁易变状态。** 时间戳/PID/临时路径不存
+4. **最小充分指针。** L1 只写存在性，细节在 L2/L3 按需取
 
 ## 一致性边界
 
-系统不做自动矛盾检测。一致性由三层流程保障：写入前查重——同主题演进走 `memory_update`（supersede，旧版快照入 `.history/`）→ `memory_maintain` 对高相似条目产出合并候选 → 条目携带 `updatedAt` 与 evidence，跨条目矛盾在读取时按时间线裁决。
+系统不做自动矛盾检测。一致性靠三层流程保障。写入前先查重，同主题演进走 `memory_update`，supersede 会把旧版快照放进 `.history/`。`memory_maintain` 对高相似条目产出合并候选。条目自带 `updatedAt` 和 evidence，跨条目矛盾在读取时按时间线裁决。
 
 ## 开发与测试
 
@@ -96,12 +96,12 @@ pnpm test         # vitest（pnpm 11 可直接运行，见下）
 pnpm test:smoke   # dsh --profile headless --dump-config
 ```
 
-> 单元测试会 import `@deepseek-ai/dsh-tools` / `@deepseek-ai/schemastery`（DSH 内置包）。本机若有已安装的 DSH 环境，可将 `node_modules/@deepseek-ai` 等以 junction/链接方式指过去；`.npmrc` 已写 `auto-install-peers=false` 防 pnpm 解析私有 peer。
+> 单元测试会 import `@deepseek-ai/dsh-tools` / `@deepseek-ai/schemastery`（DSH 内置包）。本机若有已安装的 DSH 环境，可将 `node_modules/@deepseek-ai` 等以 junction/链接方式指过去；`.npmrc` 已写 `auto-install-peers=false`，防止 pnpm 解析私有 peer。
 >
-> **预检环境坑（实测踩过）**：pnpm 11 的 `run` 前置依赖检查会尝试解析 peer 链中的 DSH 私有包（如 `@deepseek-ai/dsh-type-meta`，不在 npm registry）→ `pnpm test` 报 `ERR_PNPM_FETCH_404`。修复：`pnpm-workspace.yaml` 顶层声明 `verifyDepsBeforeRun: false`（pnpm 11 认可的位置；`.npmrc` 的 kebab 写法对 pnpm 11 无效）。仓库已配好，`pnpm test` 直接可用；若仍被拦截，兜底走 `./node_modules/.bin/vitest run`。
+> **预检环境坑（实测踩过）。** pnpm 11 的 `run` 前置依赖检查会尝试解析 peer 链中的 DSH 私有包（如 `@deepseek-ai/dsh-type-meta`，不在 npm registry），`pnpm test` 因此报 `ERR_PNPM_FETCH_404`。修复办法是在 `pnpm-workspace.yaml` 顶层声明 `verifyDepsBeforeRun: false`，pnpm 11 认这个位置，`.npmrc` 的 kebab 写法对 pnpm 11 无效。仓库已配好，`pnpm test` 可以直接跑。若仍被拦截，兜底走 `./node_modules/.bin/vitest run`。
 
 ## 相关
 
-- 底层接缝：`ctx.systemPrompt.context` / `ctx.skills.register` / `ctx.tools.register` / `session/event` 事件 + `ctx.sessionQuery`
-- 完整更新历史：[CHANGELOG.md](./CHANGELOG.md)
-- 授权：MIT
+- 底层依赖的宿主接缝有 `ctx.systemPrompt.context` / `ctx.skills.register` / `ctx.tools.register` / `session/event` 事件 + `ctx.sessionQuery`
+- 完整更新历史见 [CHANGELOG.md](./CHANGELOG.md)
+- 采用 MIT 授权

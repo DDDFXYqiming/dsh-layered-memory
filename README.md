@@ -83,6 +83,10 @@ dsh plugin --profile web add <本目录>
 3. **禁易变状态**：时间戳/PID/临时路径不存
 4. **最小充分指针**：L1 只写存在性，细节在 L2/L3 按需取
 
+## 一致性边界
+
+系统不做自动矛盾检测。一致性由三层流程保障：写入前查重——同主题演进走 `memory_update`（supersede，旧版快照入 `.history/`）→ `memory_maintain` 对高相似条目产出合并候选 → 条目携带 `updatedAt` 与 evidence，跨条目矛盾在读取时按时间线裁决。
+
 ## 开发与测试
 
 ```bash

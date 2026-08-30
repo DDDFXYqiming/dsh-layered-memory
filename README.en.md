@@ -83,6 +83,10 @@ dsh plugin --profile web add <repo dir>
 3. **No volatile state**: timestamps / PIDs / temp paths / one-shot IDs are not stored
 4. **Minimal pointers**: L1 holds only existence; details in L2 / L3
 
+## Consistency boundary
+
+No automatic contradiction detection. Consistency relies on three layers: pre-write dedupe — same-topic evolution goes through `memory_update` (supersede, old snapshot kept in `.history/`) → `memory_maintain` surfaces high-similarity merge candidates → entries carry `updatedAt` and evidence, so cross-entry conflicts are resolved by timeline at read time.
+
 ## Develop & test
 
 ```bash

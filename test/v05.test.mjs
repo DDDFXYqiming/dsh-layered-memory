@@ -12,6 +12,7 @@ let memDir;
 let disposer;
 let tools;
 let eventHandlers;
+let effects = [];
 
 function setup({ maxIndexLines = 30, autoPending = true } = {}) {
 	memDir = mkdtempSync(join(tmpdir(), "dsh-memory-v05-test-"));
@@ -40,7 +41,12 @@ function setup({ maxIndexLines = 30, autoPending = true } = {}) {
 			restrict() { return () => {}; },
 		},
 		logger: { info() {}, warn() {} },
+		effect(factory) {
+			const d = factory();
+			if (typeof d === "function") effects.push(d);
+		},
 	};
+	effects = [];
 	disposer = apply(ctx, {
 		memoryDir: memDir,
 		progressive: false,
@@ -65,6 +71,8 @@ beforeEach(() => {
 
 afterEach(() => {
 	if (typeof disposer === "function") disposer();
+	for (const f of effects) f();
+	effects = [];
 	if (memDir) rmSync(memDir, { recursive: true, force: true });
 });
 
@@ -445,6 +453,7 @@ test("L1 injection into systemPrompt is capped and wrapped in a sentinel", () =>
 		skills: { register: () => () => {} },
 		tools: { register() { return () => {}; }, restrict() { return () => {}; } },
 		logger: { info() {}, warn() {} },
+		effect(factory) { factory(); },
 	};
 	apply(ctx, { memoryDir: memDir, progressive: false, autoNamespace: false, defaultNamespace: "test" });
 	expect(captured.startsWith("<memory_index source=\"user-writable\">")).toBe(true);

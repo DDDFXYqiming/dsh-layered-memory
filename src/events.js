@@ -10,8 +10,6 @@ import { readIndex } from "./l1index.js";
 import { runMaintain } from "./maintain.js";
 import { writePending } from "./memory-ops.js";
 
-const REFLECTION_COOLDOWN_TURNS = 10;
-
 /** 从工具结果对象里尽力抽取文本尾部（结构未知，防御式）。 */
 function resultTail(result, max = 200) {
 	try {
@@ -97,7 +95,7 @@ export function wireEvents(ctx, cfg, io) {
 
 			// ── 周期维护（持久全局计数）──
 			if (cfg.maintainEveryTurns > 0 && totalTurns > 0 && totalTurns % cfg.maintainEveryTurns === 0) {
-				runMaintain(root, cfg.maxIndexLines);
+				runMaintain(root, cfg.maxIndexLines, cfg.maintainOpts);
 			}
 
 			// ── 阈值反思注入（带冷却，替代旧的每 10 轮固定提醒）──
@@ -109,7 +107,7 @@ export function wireEvents(ctx, cfg, io) {
 				const overSops = sopCount >= cfg.reflectSopsThreshold;
 				const overIndex = indexLines > cfg.maxIndexLines;
 				const state = reflectionState.get(sessionId) ?? { lastReflectionTurn: -Infinity };
-				const cooled = totalTurns - state.lastReflectionTurn >= REFLECTION_COOLDOWN_TURNS;
+				const cooled = totalTurns - state.lastReflectionTurn >= cfg.reflectCooldownTurns;
 				if ((overPending || overSops || overIndex) && cooled) {
 					const agentsService = ctx.get("agents");
 					const agent = agentsService?.get?.(sessionId);

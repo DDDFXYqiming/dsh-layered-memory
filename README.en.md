@@ -8,7 +8,7 @@
 
 `memory:index` injection. `ctx.systemPrompt.context` injects the L1 index into every model turn in real time, and changes are live.
 
-Runtime skill `memory`. This skill spells out the timing rules for reading memory, writing memory, and syncing the index. Content is in `SKILL.md`.
+Runtime skill `memory`. This skill spells out the timing rules for reading memory, writing memory, and syncing the index. Content is inlined in `src/skill-content.js` (runtime skill, no separate SKILL.md file).
 
 There are 14 tools in total. In progressive mode they are mounted via `memory_activate`, meaning an Agent calls `memory_activate` once on demand and the tools then join its tool list.
 

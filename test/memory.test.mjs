@@ -7,6 +7,7 @@ import { apply } from "../lib/index.js";
 let memDir;
 let disposer;
 let tools;
+let effects = [];
 
 function setup({ maxIndexLines = 30 } = {}) {
 	memDir = mkdtempSync(join(tmpdir(), "dsh-memory-test-"));
@@ -26,7 +27,12 @@ function setup({ maxIndexLines = 30 } = {}) {
 			register(def) { registered.push(def); return () => {}; },
 			restrict() { return () => {}; },
 		},
+		effect(factory) {
+			const d = factory();
+			if (typeof d === "function") effects.push(d);
+		},
 	};
+	effects = [];
 	disposer = apply(ctx, {
 		memoryDir: memDir,
 		progressive: false,
@@ -49,6 +55,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	if (typeof disposer === "function") disposer();
+	for (const f of effects || []) f();
 	if (memDir) rmSync(memDir, { recursive: true, force: true });
 });
 

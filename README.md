@@ -8,7 +8,7 @@
 
 `memory:index` 注入。`ctx.systemPrompt.context` 把 L1 索引实时注入每轮模型上下文，改动即时生效。
 
-runtime skill `memory`。这份 skill 约定了读记忆、写记忆和同步索引的时机，内容见 `SKILL.md`。
+runtime skill `memory`。这份 skill 约定了读记忆、写记忆和同步索引的时机，内容内联在 `src/skill-content.js`（runtime skill，无独立 SKILL.md 文件）。
 
 工具共 14 个，progressive 模式下经 `memory_activate` 挂载，也就是 Agent 按需调用一次 `memory_activate`，这批工具才进入它的工具列表。
 

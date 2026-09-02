@@ -311,6 +311,7 @@ export function buildTools(ctx, cfg) {
 				namespace: ns,
 				related: Array.isArray(args.related) ? args.related : [],
 				maxIndexLines: cfg.maxIndexLines,
+				heat: cfg.heat,
 			});
 			return { entry_type: type, topic, path: r.path, namespace: ns, action: r.action, index: r.index };
 		},
@@ -394,7 +395,7 @@ export function buildTools(ctx, cfg) {
 			const ns = resolveNamespace(cfg, args.namespace);
 			const root = nsRoot(cfg.memoryDir, ns);
 			ensureNamespaceLayout(root);
-			const report = runMaintain(root, cfg.maxIndexLines);
+			const report = runMaintain(root, cfg.maxIndexLines, cfg.maintainOpts);
 			return { namespace: ns, report };
 		},
 		presentCall() {
@@ -496,6 +497,7 @@ export function buildTools(ctx, cfg) {
 				namespace: ns,
 				related: Array.isArray(args.related) ? args.related : [],
 				maxIndexLines: cfg.maxIndexLines,
+				heat: cfg.heat,
 			});
 			// 接受成功后删除 pending（先归档副本到 archive/，再移除原文件）
 			try {
@@ -595,6 +597,7 @@ export function buildTools(ctx, cfg) {
 				namespace: ns,
 				related: Array.isArray(args.related) ? args.related : (getEntryMeta(root, type, key)?.related || []),
 				maxIndexLines: cfg.maxIndexLines,
+				heat: cfg.heat,
 			});
 			return { topic, entry_type: type, action: supersede ? "superseded" : "updated", namespace: ns, history: historyPath || undefined };
 		},
@@ -889,6 +892,7 @@ export function buildTools(ctx, cfg) {
 				namespace: toNs,
 				related: Array.isArray(meta.related) ? meta.related : [],
 				maxIndexLines: cfg.maxIndexLines,
+				heat: cfg.heat,
 			});
 			const archiveSource = args.archive_source !== false;
 			if (archiveSource) {

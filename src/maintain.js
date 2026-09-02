@@ -38,8 +38,8 @@ function tokenSet(text) {
 }
 
 /** 模糊比对资格：双方词元数都达到 MIN_TOKENS_FOR_FUZZY 才参与 Jaccard 判定。 */
-function fuzzyEligible(a, b) {
-	return a.size >= MIN_TOKENS_FOR_FUZZY && b.size >= MIN_TOKENS_FOR_FUZZY;
+function fuzzyEligible(a, b, minTokens = MIN_TOKENS_FOR_FUZZY) {
+	return a.size >= minTokens && b.size >= minTokens;
 }
 
 /**
@@ -48,7 +48,9 @@ function fuzzyEligible(a, b) {
  * 2) [v0.5] shingle Jaccard ≥ NEAR_DUPE_THRESHOLD 的近重复（同事实改写/微调）。
  * 重复项归档并保留 citation（不物理删除）。
  */
-export function dedupeEntries(root) {
+export function dedupeEntries(root, opts = {}) {
+	const nearDupe = opts.nearDupeThreshold ?? NEAR_DUPE_THRESHOLD;
+	const minTokens = opts.minTokensForFuzzy ?? MIN_TOKENS_FOR_FUZZY;
 	const report = { removed: [], merged: [] };
 	const meta = readMeta(root);
 
@@ -68,8 +70,8 @@ export function dedupeEntries(root) {
 			// 近重复：与之前每个 SOP 比 Jaccard（条目量级为百以内，O(n²) 可接受）
 			const cur = tokenSet(norm);
 			for (const [prevSlug, prevSh] of sopShingles) {
-				if (!fuzzyEligible(cur, prevSh)) continue;
-				if (jaccard(cur, prevSh) >= NEAR_DUPE_THRESHOLD) {
+				if (!fuzzyEligible(cur, prevSh, minTokens)) continue;
+				if (jaccard(cur, prevSh) >= nearDupe) {
 					duplicateOf = prevSlug;
 					break;
 				}
@@ -103,8 +105,8 @@ export function dedupeEntries(root) {
 		} else {
 			const cur = tokenSet(norm);
 			for (const [prevTopic, prevSh] of factShingles) {
-				if (!fuzzyEligible(cur, prevSh)) continue;
-				if (jaccard(cur, prevSh) >= NEAR_DUPE_THRESHOLD) {
+				if (!fuzzyEligible(cur, prevSh, minTokens)) continue;
+				if (jaccard(cur, prevSh) >= nearDupe) {
 					duplicateOf = prevTopic;
 					break;
 				}
@@ -130,7 +132,9 @@ export function dedupeEntries(root) {
  * [v0.5] 不再按文件名分词配对——名称只作为提示字段（nameOverlap）附带。
  * 仅报告，需模型/用户确认后真正合并。
  */
-export function findMergeCandidates(root) {
+export function findMergeCandidates(root, opts = {}) {
+	const mergeThreshold = opts.mergeCandidateThreshold ?? MERGE_CANDIDATE_THRESHOLD;
+	const minTokens = opts.minTokensForFuzzy ?? MIN_TOKENS_FOR_FUZZY;
 	const names = sopNames(root).filter((s) => !isArchived(root, "sop", s));
 	const shingleByName = new Map();
 	for (const slug of names) {
@@ -146,9 +150,9 @@ export function findMergeCandidates(root) {
 			const b = sorted[j];
 			const setA = shingleByName.get(a);
 			const setB = shingleByName.get(b);
-			if (!fuzzyEligible(setA, setB)) continue;
+			if (!fuzzyEligible(setA, setB, minTokens)) continue;
 			const score = jaccard(setA, setB);
-			if (score < MERGE_CANDIDATE_THRESHOLD) continue;
+			if (score < mergeThreshold) continue;
 			const wordsA = a.replace(/[-_]/g, " ").toLowerCase().split(" ").filter(Boolean);
 			const wordsB = b.replace(/[-_]/g, " ").toLowerCase().split(" ").filter(Boolean);
 			const nameOverlap = wordsA.filter((w) => wordsB.includes(w)).length;
@@ -160,11 +164,11 @@ export function findMergeCandidates(root) {
 }
 
 /** 执行一次完整维护：去重 + 压缩索引 + 统计 + 合并候选。 */
-export function runMaintain(root, maxLines) {
-	const dedupe = dedupeEntries(root);
-	const compress = compressIndexEntries(root, maxLines);
+export function runMaintain(root, maxLines, opts = {}) {
+	const dedupe = dedupeEntries(root, opts);
+	const compress = compressIndexEntries(root, maxLines, opts.heat);
 	const stats = computeNamespaceStats(root);
-	const mergeCandidates = findMergeCandidates(root);
+	const mergeCandidates = findMergeCandidates(root, opts);
 	const report = {
 		runAt: new Date().toISOString(),
 		dedupe,

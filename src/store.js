@@ -242,7 +242,9 @@ export function loadAccess(root) {
  *
  * @param access loadAccess(root) 的结果（调用方复用，避免逐条重读文件）。
  */
-export function entryHeat(access, meta, kind, key) {
+export function entryHeat(access, meta, kind, key, heat = {}) {
+	const halfLifeDays = heat.halfLifeDays ?? HEAT_HALF_LIFE_DAYS;
+	const recencyWindowMs = heat.recencyWindowMs ?? RECENCY_WINDOW_MS;
 	const entry = access[`${kind}:${key}`];
 	let decayed = 0;
 	if (typeof entry === "number") decayed = entry;
@@ -252,13 +254,13 @@ export function entryHeat(access, meta, kind, key) {
 		const ageDays = Number.isFinite(lastAt)
 			? Math.max(0, (Date.now() - lastAt) / 86400000)
 			: 0;
-		decayed = count * Math.pow(0.5, ageDays / HEAT_HALF_LIFE_DAYS);
+		decayed = count * Math.pow(0.5, ageDays / halfLifeDays);
 	}
 	if (decayed > 0) return decayed;
 	const e = (kind === "fact" ? meta.facts : meta.sops)[key];
 	if (!e?.createdAt) return 0;
 	const age = Date.now() - new Date(e.createdAt).getTime();
-	return age >= 0 && age <= RECENCY_WINDOW_MS ? RECENCY_BONUS : 0;
+	return age >= 0 && age <= recencyWindowMs ? RECENCY_BONUS : 0;
 }
 
 /** 记录一次真实读取（v2 格式：count + lastAt）。写入不再计入热度（写≠读）。 */

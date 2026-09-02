@@ -3,7 +3,9 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { defineTool } from "@deepseek-ai/dsh-tools";
-import { ensureNamespaceLayout, nsRoot, resolveNamespace, defaultMemDir } from "./store.js";
+import Schema from "@deepseek-ai/schemastery";
+import { ensureNamespaceLayout, nsRoot, resolveNamespace, defaultMemDir, HEAT_HALF_LIFE_DAYS, RECENCY_WINDOW_MS } from "./store.js";
+import { NEAR_DUPE_THRESHOLD, MERGE_CANDIDATE_THRESHOLD, MIN_TOKENS_FOR_FUZZY } from "./maintain.js";
 import { readIndex } from "./l1index.js";
 import { buildTools } from "./tools.js";
 import { wireEvents } from "./events.js";
@@ -13,18 +15,50 @@ import { SKILL_NAME, SKILL_DESCRIPTION, SKILL_WHEN_TO_USE, SKILL_CONTENT } from 
 // 实测 cordis ctx.get() 只查插件隔离层已登记的服务，未 inject 时 ctx.get 恒返回 undefined。
 const inject = ["skills", "tools", "agents", "systemPrompt", "sessionQuery"];
 
+/** Schemastery 配置 schema（官方 config 约定：加载期校验 + 默认值填充）。可调常量的默认值取自各自归属模块的导出常量，保持单一来源。 */
+export const Config = Schema.object({
+	memoryDir: Schema.string().default(""),
+	maxIndexLines: Schema.number().default(30),
+	// [spec-audit 2026-08-14] 纯 boolean：非法配置在加载期响亮失败（config.md §Fail loudly）
+	progressive: Schema.boolean().default(true),
+	// v0.3 命名空间
+	defaultNamespace: Schema.string().default(""),
+	autoNamespace: Schema.boolean().default(true),
+	// v0.3 自动蒸馏（v0.5 起只捕获「先失败后成功」的重试序列）
+	autoPending: Schema.boolean().default(true),
+	// v0.4 自动维护（v0.5 起计数持久化，跨会话累计触发）
+	maintainEveryTurns: Schema.number().default(20),
+	// v0.5 反思注入阈值：pending 候选数达到该值时提示宿主整理
+	reflectPendingThreshold: Schema.number().default(5),
+	// v0.5 反思注入阈值：L3 SOP 条数达到该值时提示宿主整合
+	reflectSopsThreshold: Schema.number().default(40),
+	// [spec-fix 2026-09] 原散落的启发式/容量阈值提为配置
+	l1MaxChars: Schema.number().min(1024).default(8192),
+	reflectCooldownTurns: Schema.number().min(0).default(10),
+	nearDupeThreshold: Schema.number().min(0).max(1).default(NEAR_DUPE_THRESHOLD),
+	mergeCandidateThreshold: Schema.number().min(0).max(1).default(MERGE_CANDIDATE_THRESHOLD),
+	minTokensForFuzzy: Schema.number().min(1).default(MIN_TOKENS_FOR_FUZZY),
+	heatHalfLifeDays: Schema.number().min(1).default(HEAT_HALF_LIFE_DAYS),
+	recencyWindowDays: Schema.number().min(1).default(RECENCY_WINDOW_MS / (24 * 60 * 60 * 1000)),
+});
+
 function apply(ctx, config = {}) {
-	const cfg = {
-		memoryDir: config.memoryDir || defaultMemDir(),
-		maxIndexLines: config.maxIndexLines ?? 30,
-		progressive: config.progressive !== false,
-		defaultNamespace: config.defaultNamespace || "",
-		autoNamespace: config.autoNamespace !== false,
-		autoPending: config.autoPending !== false,
-		maintainEveryTurns: config.maintainEveryTurns ?? 20,
-		// [v0.5] 反思注入阈值：pending 数 / SOP 数 / 索引超限任一触发，带冷却
-		reflectPendingThreshold: config.reflectPendingThreshold ?? 5,
-		reflectSopsThreshold: config.reflectSopsThreshold ?? 40,
+	// 默认值唯一来源 = Config schema；profile 层的空串按未提供处理。
+	const provided = {};
+	for (const [key, value] of Object.entries(config)) {
+		if (value !== "") provided[key] = value;
+	}
+	const cfg = Config(provided);
+	if (!cfg.memoryDir) cfg.memoryDir = defaultMemDir();
+	cfg.heat = {
+		halfLifeDays: cfg.heatHalfLifeDays,
+		recencyWindowMs: cfg.recencyWindowDays * 24 * 60 * 60 * 1000,
+	};
+	cfg.maintainOpts = {
+		nearDupeThreshold: cfg.nearDupeThreshold,
+		mergeCandidateThreshold: cfg.mergeCandidateThreshold,
+		minTokensForFuzzy: cfg.minTokensForFuzzy,
+		heat: cfg.heat,
 	};
 
 	const disposers = [];
@@ -44,7 +78,7 @@ function apply(ctx, config = {}) {
 	// [v0.5.3] 注入面防护：index.txt 由 memory_write 的 topic/content 拼接而成，
 	// 属用户可写数据。注入 system prompt 前做长度熔断 + 控制字符剥离，
 	// 并用 sentinel 标记为不可信段，防止 topic 里的指令字串污染系统上下文。
-	const L1_MAX_CHARS = 8192;
+	const L1_MAX_CHARS = cfg.l1MaxChars;
 	function sanitizeIndexForPrompt(idx) {
 		let s = String(idx ?? "").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
 		if (s.length > L1_MAX_CHARS) s = s.slice(0, L1_MAX_CHARS) + "\n[memory:index 已截断]";
@@ -159,10 +193,10 @@ function apply(ctx, config = {}) {
 		});
 	}
 
-	return () => {
+	ctx.effect(() => () => {
 		for (const agent of [...agentStates.keys()]) detach(agent);
 		disposeAll(disposers);
-	};
+	}, "layered-memory: teardown");
 }
 
 export { apply, inject };

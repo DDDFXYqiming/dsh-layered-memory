@@ -16,8 +16,7 @@
     "README.md",
     "README.en.md",
     "cordis.patch.yml",
-    "LICENSE",
-    "test"
+    "LICENSE"
   ],
   "scripts": {
     "build": "node -e \"const fs=require('fs'),p=require('path');let fail=0;for(const f of fs.readdirSync('src')){if(!f.endsWith('.js'))continue;try{require('node:child_process').execFileSync(process.execPath,['--check',p.join('src',f)],{stdio:'pipe'})}catch(e){fail=1;console.error(e.stderr.toString())}};for(const f of ['lib/index.js']){try{require('node:child_process').execFileSync(process.execPath,['--check',f],{stdio:'pipe'})}catch(e){fail=1;console.error(e.stderr.toString())}};process.exit(fail)\"",

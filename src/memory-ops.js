@@ -21,7 +21,7 @@ import { compressIndexEntries, readIndex, syncIndex } from "./l1index.js";
  * - 写入后若 L1 超限，立即执行一次热度压缩（毫秒级本地操作），
  *   告警只在压缩后仍超限时出现——消灭"反复提示 over_limit"。
  */
-export function writeMemory(root, { topic, entryType, content, evidence, sourceSession, sourceSeqs, namespace, related, maxIndexLines = 30 }) {
+export function writeMemory(root, { topic, entryType, content, evidence, sourceSession, sourceSeqs, namespace, related, maxIndexLines = 30, heat = {} }) {
 	const safeTopic = String(topic).trim();
 	// topic 会进入 facts.md 的 ## section 与 L1 索引（再注入 system prompt）：
 	// 含换行/控制字符会让 section 解析错位，也会成为提示词注入载体，直接拒绝。
@@ -61,7 +61,7 @@ export function writeMemory(root, { topic, entryType, content, evidence, sourceS
 	let index = syncIndex(root, maxIndexLines);
 	if (index.over_limit) {
 		// 写入即压缩：热度排序裁剪 L1 指针，记忆文件不动。
-		const compressed = compressIndexEntries(root, maxIndexLines);
+		const compressed = compressIndexEntries(root, maxIndexLines, heat);
 		const linesAfter = readIndex(root).replace(/\r\n?/g, "\n").replace(/\n+$/, "").split("\n").length;
 		index = {
 			...index,

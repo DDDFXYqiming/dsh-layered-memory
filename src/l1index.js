@@ -81,11 +81,11 @@ export function syncIndex(root, maxIndexLines = 30) {
  * 压缩 L1 索引：只有完整索引超过 maxIndexLines 时才按访问热度裁剪。
  * 实际记忆文件不删除；被裁剪的层仍保留隐藏数量提示，避免完全不可发现。
  */
-export function compressIndexEntries(root, maxLines) {
+export function compressIndexEntries(root, maxLines, heat = {}) {
 	const { facts: allFacts, sops: allSops } = activeEntries(root);
 	const access = loadAccess(root);
 	const meta = readMeta(root);
-	const heatOf = (kind, key) => entryHeat(access, meta, kind, key);
+	const heatOf = (kind, key) => entryHeat(access, meta, kind, key, heat);
 	const rank = (kind) => (a, b) => {
 		const heat = heatOf(kind, b) - heatOf(kind, a);
 		return heat || String(a).localeCompare(String(b));

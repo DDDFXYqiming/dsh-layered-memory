@@ -1,5 +1,5 @@
 // 维护：近重复去重（内容级）、合并候选（内容级）、完整维护流程。
-// [v0.5] 相似度从"文件名分词 + 精确内容相等"升级为 shingle Jaccard，
+// [v0.5] 相似度从"文件名分词 + 精确内容相等"升级为词元集合 Jaccard，
 // 消灭纯名称匹配产生的大量误报（实测 20/20 全错）。
 
 import { existsSync, readFileSync, copyFileSync, readdirSync } from "node:fs";
@@ -45,7 +45,7 @@ function fuzzyEligible(a, b, minTokens = MIN_TOKENS_FOR_FUZZY) {
 /**
  * 去重：两级检测。
  * 1) 精确内容 hash（快速路径，行为与 v0.4 一致）；
- * 2) [v0.5] shingle Jaccard ≥ NEAR_DUPE_THRESHOLD 的近重复（同事实改写/微调）。
+ * 2) [v0.5] 词元集合 Jaccard ≥ NEAR_DUPE_THRESHOLD 的近重复（同事实改写/微调）。
  * 重复项归档并保留 citation（不物理删除）。
  */
 export function dedupeEntries(root, opts = {}) {
@@ -56,7 +56,7 @@ export function dedupeEntries(root, opts = {}) {
 
 	// ── SOP：精确 hash 快速路径 ──
 	const seenSopHash = new Map();
-	const sopShingles = new Map();
+	const sopTokenSets = new Map();
 	for (const slug of sopNames(root)) {
 		if (isArchived(root, "sop", slug)) continue;
 		const content = readSop(root, slug);
@@ -69,9 +69,9 @@ export function dedupeEntries(root, opts = {}) {
 		} else {
 			// 近重复：与之前每个 SOP 比 Jaccard（条目量级为百以内，O(n²) 可接受）
 			const cur = tokenSet(norm);
-			for (const [prevSlug, prevSh] of sopShingles) {
-				if (!fuzzyEligible(cur, prevSh, minTokens)) continue;
-				if (jaccard(cur, prevSh) >= nearDupe) {
+			for (const [prevSlug, prevSet] of sopTokenSets) {
+				if (!fuzzyEligible(cur, prevSet, minTokens)) continue;
+				if (jaccard(cur, prevSet) >= nearDupe) {
 					duplicateOf = prevSlug;
 					break;
 				}
@@ -86,13 +86,13 @@ export function dedupeEntries(root, opts = {}) {
 			report.removed.push(`sop:${slug} -> duplicate of ${duplicateOf}`);
 		} else {
 			seenSopHash.set(h, slug);
-			sopShingles.set(slug, tokenSet(norm));
+			sopTokenSets.set(slug, tokenSet(norm));
 		}
 	}
 
 	// ── fact：同样两级 ──
 	const seenFactHash = new Map();
-	const factShingles = new Map();
+	const factTokenSets = new Map();
 	for (const topic of factSections(root)) {
 		if (isArchived(root, "fact", topic)) continue;
 		const content = readFact(root, topic);
@@ -104,9 +104,9 @@ export function dedupeEntries(root, opts = {}) {
 			duplicateOf = seenFactHash.get(h);
 		} else {
 			const cur = tokenSet(norm);
-			for (const [prevTopic, prevSh] of factShingles) {
-				if (!fuzzyEligible(cur, prevSh, minTokens)) continue;
-				if (jaccard(cur, prevSh) >= nearDupe) {
+			for (const [prevTopic, prevSet] of factTokenSets) {
+				if (!fuzzyEligible(cur, prevSet, minTokens)) continue;
+				if (jaccard(cur, prevSet) >= nearDupe) {
 					duplicateOf = prevTopic;
 					break;
 				}
@@ -121,14 +121,14 @@ export function dedupeEntries(root, opts = {}) {
 			report.removed.push(`fact:${topic} -> duplicate of ${duplicateOf}`);
 		} else {
 			seenFactHash.set(h, topic);
-			factShingles.set(topic, tokenSet(norm));
+			factTokenSets.set(topic, tokenSet(norm));
 		}
 	}
 	return report;
 }
 
 /**
- * 合并候选：内容 shingle Jaccard ≥ MERGE_CANDIDATE_THRESHOLD 的活跃 SOP 对。
+ * 合并候选：内容词元集合 Jaccard ≥ MERGE_CANDIDATE_THRESHOLD 的活跃 SOP 对。
  * [v0.5] 不再按文件名分词配对——名称只作为提示字段（nameOverlap）附带。
  * 仅报告，需模型/用户确认后真正合并。
  */

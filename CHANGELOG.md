@@ -5,6 +5,7 @@ All notable changes to `dsh-layered-memory` are documented here.
 ## [Unreleased]
 
 ### Fixed
+- `memory_update` 在新旧条目均无证据时不再以占位串 `memory_update（历史更新）` 伪造 evidence 落库；与 `memory_write`/`memory_accept` 一致硬性要求证据，缺失即抛错。
 - **新条目"写完即隐身"修复**：`memory_write` 写入后立即 bump 热度；`memory_maintain` 压缩排序加入 recency 保护（7 天内创建、无访问热度的条目获得加分），新写入的 fact/sop 不再被压缩立刻裁出 L1。
 - **非 SOP 文件混入 L3 修复**：`sopNames()` 过滤保留名（README/LICENSE/index，大小写不敏感），安装/文档文件不再计入 L3 统计、索引与合并候选。
 - 补齐 `memory-meta.json` 的 `createdAt`：首建记录、更新保留原创建时间（此前仅写 `updatedAt`，recency 无据可查）。
@@ -15,6 +16,7 @@ All notable changes to `dsh-layered-memory` are documented here.
 - 增加 `memory_maintain` 的完整索引、空行、超限裁剪和底层记忆可读性回归测试。
 
 ### Changed
+- `maintain.js` 近重复检测的注释与内部变量命名精确化：实际为词元集合 Jaccard（忽略词频与顺序），非 shingle Jaccard；零逻辑变更。
 - **持久化全部改为原子写**（`atomic-write.js`：同目录临时文件 + rename 覆盖，21 处写点）：宿主崩溃/强杀不再留下写一半的 `memory-meta.json` / `index.txt` / `facts.md` / `file_access_stats.json` / `turn-state.json` / 归档与历史快照。
 - **L1 注入面防护**：system prompt 注入前对索引做 ≤8KB 熔断 + 控制字符剥离，并包在 `<memory_index source="user-writable">` sentinel 内；`memory_write` 拒绝含换行/控制字符的 topic（防 section 解析错位与提示词注入载体）。
 - 移除死代码 `ensureIndexRule`（零引用）；README/SKILL 的 `memory_stats.json` 更正为实际写出的 `maintenance-report.json`；合并重复的 `[Unreleased]` 节。

@@ -536,7 +536,7 @@ export function buildTools(ctx, cfg) {
 			},
 			evidence: {
 				type: "string",
-				description: "本次更新的验证证据（建议提供）"
+				description: "本次更新的验证证据（旧条目无可继承证据时必填）"
 			},
 			related: {
 				type: "array",
@@ -587,11 +587,12 @@ export function buildTools(ctx, cfg) {
 				}
 			}
 			const evidence = String(args.evidence || "").trim() || getEntryMeta(root, type, key)?.evidence || "";
+			if (!evidence) throw new Error("memory_update: 需要 evidence（行动验证公理：新旧条目均无证据，不写）");
 			const r = writeMemory(root, {
 				topic,
 				entryType: type,
 				content,
-				evidence: evidence || "memory_update（历史更新）",
+				evidence,
 				sourceSession: getEntryMeta(root, type, key)?.sourceSession || null,
 				sourceSeqs: getEntryMeta(root, type, key)?.sourceSeqs || [],
 				namespace: ns,

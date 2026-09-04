@@ -29,6 +29,13 @@ function resultTail(result, max = 200) {
 	}
 }
 
+// ⚠ 键混用是有意假设，勿当 bug 顺手改：tools/result 以 exec.agent.id 写入
+// retryTrackers/capturedSequences，turn/end 以 session.id 读取，agent/disposed 以
+// agent.id 清理——依赖 DSH 主会话 agent.id === session.id（2026-08-17 起蒸馏持续
+// 产出实证，2026-09-04 review 复核）。若宿主未来解耦两种 id，此处不报错但蒸馏会
+// 静默停摆（不再有 pending），届时应让序列携带 session 引用、turn/end 按其归并，
+// 而不是只换 key 类型。子代理内重试序列是否成对蒸馏属未验证路径（依赖其是否触发
+// 自身 session 的 turn/end）。
 /**
  * @param ctx cordis context
  * @param cfg 生效配置

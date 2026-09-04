@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { join, basename } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { atomicWriteFileSync } from "./atomic-write.js";
+import { atomicWriteFileSync, stageWrite, commitStaged } from "./atomic-write.js";
 import { FACTS_TEMPLATE, INDEX_TEMPLATE, L0_TEMPLATE } from "./templates.js";
 
 export const META_FILE = "memory-meta.json";
@@ -140,8 +140,44 @@ export function readMeta(root) {
 	}
 }
 
-export function writeMeta(root, meta) {
-	atomicWriteFileSync(join(root, META_FILE), JSON.stringify(meta, null, 2));
+const SLEEP_BUF = new Int32Array(new SharedArrayBuffer(4));
+/**
+ * 跨进程更新丢失防护：CAS 读改写（无锁无死锁），三段关窗。
+ * 1) 暂存：内容先写进唯一下 tmp（rename 的弹药备好，正式文件未动）；
+ * 2) 关窗复核：rename 前一刻重读正式文件，仍等于本方基座才提交——校验与
+ *    rename 之间不再夹任何耗时操作（tmp 已备好），窗口压到微秒级；
+ * 3) 回读兜底：rename 成功后回读确认。EPERM 退避的每轮 sleep 后同样复核基座，
+ *    基座已被并发改写则放弃本次 rename 回炉重算（新基座已含胜者内容，单调收敛）。
+ * 持续冲突超预算抛错，绝不静默丢。单进程内写都在同一同步段，本防护只针对多宿主
+ * 进程共享同一命名空间的场景。compute(text) 必须是仅依赖传入文本的纯函数；
+ * 返回 null 表示无需写入。
+ */
+export function casRewrite(path, compute, budgetMs = 3000) {
+	const t0 = Date.now();
+	for (;;) {
+		const text = existsSync(path) ? readFileSync(path, "utf8") : null;
+		const next = compute(text);
+		if (next === null) return;
+		const tmp = stageWrite(path, next);
+		const cur = existsSync(path) ? readFileSync(path, "utf8") : null;
+		let settled = false;
+		if (cur === text) {
+			const r = commitStaged(tmp, path, () => {
+				const now = existsSync(path) ? readFileSync(path, "utf8") : null;
+				return now === text;
+			});
+			if (r === "ok") {
+				const done = existsSync(path) ? readFileSync(path, "utf8") : null;
+				if (done === next) settled = true;
+			}
+		}
+		try { rmSync(tmp, { force: true }); } catch { /* 已 rename 时不存在，忽略 */ }
+		if (settled) return;
+		if (Date.now() - t0 > budgetMs) {
+			throw new Error(`casRewrite: 并发冲突持续超 ${budgetMs}ms 预算，放弃写入（防更新丢失）: ${path}`);
+		}
+		Atomics.wait(SLEEP_BUF, 0, 0, 2 + Math.floor(Math.random() * 8));
+	}
 }
 
 export function getEntryMeta(root, kind, key) {
@@ -150,18 +186,24 @@ export function getEntryMeta(root, kind, key) {
 }
 
 export function setEntryMeta(root, kind, key, patch) {
-	const m = readMeta(root);
-	const store = kind === "fact" ? m.facts : m.sops;
-	const prev = store[key] || {};
-	const now = new Date().toISOString();
-	store[key] = {
-		...prev,
-		...patch,
-		createdAt: prev.createdAt || now,
-		updatedAt: now,
-	};
-	writeMeta(root, m);
-	return store[key];
+	let out = null;
+	casRewrite(join(root, META_FILE), (text) => {
+		let m = null;
+		try { m = text === null ? null : JSON.parse(text); } catch { m = null; }
+		if (!m || !m.facts || !m.sops) m = { facts: {}, sops: {} };
+		const store = kind === "fact" ? m.facts : m.sops;
+		const prev = store[key] || {};
+		const now = new Date().toISOString();
+		store[key] = {
+			...prev,
+			...patch,
+			createdAt: prev.createdAt || now,
+			updatedAt: now,
+		};
+		out = store[key];
+		return JSON.stringify(m, null, 2);
+	});
+	return out;
 }
 
 export function isArchived(root, kind, key) {
@@ -204,26 +246,28 @@ export function readSop(root, slug) {
 	return existsSync(p) ? readFileSync(p, "utf8") : null;
 }
 
-/** upsert facts.md 的 ## SECTION（基于行解析）。 */
+/** upsert facts.md 的 ## SECTION（基于行解析；CAS 防跨进程更新丢失）。 */
 export function upsertFact(root, topic, content) {
-	const p = join(root, "facts.md");
-	const text = existsSync(p) ? readFileSync(p, "utf8") : FACTS_TEMPLATE;
-	const lines = text.split("\n");
-	let start = -1;
-	let end = lines.length;
-	for (let i = 0; i < lines.length; i++) {
-		if (lines[i].startsWith("## ")) {
-			if (start >= 0) { end = i; break; }
-			if (lines[i].slice(3).trim() === topic) start = i;
+	let action = "created";
+	casRewrite(join(root, "facts.md"), (text) => {
+		const base = text ?? FACTS_TEMPLATE;
+		const lines = base.split("\n");
+		let start = -1;
+		let end = lines.length;
+		for (let i = 0; i < lines.length; i++) {
+			if (lines[i].startsWith("## ")) {
+				if (start >= 0) { end = i; break; }
+				if (lines[i].slice(3).trim() === topic) start = i;
+			}
 		}
-	}
-	if (start >= 0) {
-		const updated = [...lines.slice(0, start), `## ${topic}`, content, "", ...lines.slice(end)];
-		atomicWriteFileSync(p, updated.join("\n"));
-		return "updated";
-	}
-	atomicWriteFileSync(p, text.replace(/\s*$/, "\n") + `## ${topic}\n${content}\n\n`);
-	return "created";
+		if (start >= 0) {
+			action = "updated";
+			return [...lines.slice(0, start), `## ${topic}`, content, "", ...lines.slice(end)].join("\n");
+		}
+		action = "created";
+		return base.replace(/\s*$/, "\n") + `## ${topic}\n${content}\n\n`;
+	});
+	return action;
 }
 
 export function loadAccess(root) {

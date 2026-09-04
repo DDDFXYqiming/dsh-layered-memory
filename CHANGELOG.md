@@ -5,6 +5,8 @@ All notable changes to `dsh-layered-memory` are documented here.
 ## [Unreleased]
 
 ### Fixed
+- 跨进程更新丢失防护（CAS 读改写，三段关窗）：`facts.md` 与 `memory-meta.json` 的读改写改为「tmp 暂存 → rename 前一刻复核基座（校验与 rename 间不再夹耗时操作，窗口压至微秒级）→ rename 后回读兜底」，EPERM 退避每轮 sleep 后同样复核基座；被并发覆盖则重读重算（新基座已含胜者内容，单调收敛），持续冲突超 3s 预算响亮抛错，无锁无死锁。实测：40 进程错峰写 3×40/40 全收敛；全员同毫秒的极限争抢下残余 1-3 条丢失为无锁方案数学下限（双宿主间隔写不受影响）。`index.txt`（可随时重建）与热度/turn 计数（可容忍漂移）维持直写。
+- 原子写 rename 瞬态重试：Windows 上 rename 覆盖瞬间被其他进程并发读/替换持有时抛 EPERM/EACCES/EBUSY（实测 40 进程争抢可复现），`atomicWriteFileSync` 对 rename 增加 ≤15 次递增退避+随机抖动（极端争抢约 0.6s 封顶），非瞬态错误码原样抛出。
 - `memory_update` 在新旧条目均无证据时不再以占位串 `memory_update（历史更新）` 伪造 evidence 落库；与 `memory_write`/`memory_accept` 一致硬性要求证据，缺失即抛错。
 - **新条目"写完即隐身"修复**：`memory_write` 写入后立即 bump 热度；`memory_maintain` 压缩排序加入 recency 保护（7 天内创建、无访问热度的条目获得加分），新写入的 fact/sop 不再被压缩立刻裁出 L1。
 - **非 SOP 文件混入 L3 修复**：`sopNames()` 过滤保留名（README/LICENSE/index，大小写不敏感），安装/文档文件不再计入 L3 统计、索引与合并候选。
@@ -16,6 +18,7 @@ All notable changes to `dsh-layered-memory` are documented here.
 - 增加 `memory_maintain` 的完整索引、空行、超限裁剪和底层记忆可读性回归测试。
 
 ### Changed
+- `events.js` 注释钉死自动蒸馏的键假设（主会话 `agent.id === session.id`），记录宿主解耦两种 id 时的正确修法方向与子代理路径的未验证状态。
 - `maintain.js` 近重复检测的注释与内部变量命名精确化：实际为词元集合 Jaccard（忽略词频与顺序），非 shingle Jaccard；零逻辑变更。
 - **持久化全部改为原子写**（`atomic-write.js`：同目录临时文件 + rename 覆盖，21 处写点）：宿主崩溃/强杀不再留下写一半的 `memory-meta.json` / `index.txt` / `facts.md` / `file_access_stats.json` / `turn-state.json` / 归档与历史快照。
 - **L1 注入面防护**：system prompt 注入前对索引做 ≤8KB 熔断 + 控制字符剥离，并包在 `<memory_index source="user-writable">` sentinel 内；`memory_write` 拒绝含换行/控制字符的 topic（防 section 解析错位与提示词注入载体）。

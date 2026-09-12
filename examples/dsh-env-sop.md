@@ -1,22 +1,16 @@
-# dsh-env-sop
+# DSH 环境记录示例
 
-本机（Windows 11 / AMD）DSH 环境差异清单（2026-08-13 实测）。
+此模板用于记录某个开发环境的版本和配置差异。填写时使用可移植路径，凭据只记录环境变量名称或配置键，不保存其值。
 
-## 关键前置
-- DSH 全局安装: `C:\Users\<user>\.bun\install\global\node_modules\@deepseek-ai\`
-- Web profile: `C:\Users\<user>\.dsh\profiles\web\`（package.json 管理 bundles + link 依赖；cordis.patch.yml 用户层）
-- 凭证库: `C:\Users\<user>\.dsh\.credentials.yaml`（DEEPSEEK_API_KEY / VISION_API_KEY）
-- 已装自定义插件: dsh-vision-skill（识图 8 工具）+ dsh-layered-memory（记忆 v0.4，命名空间/自动蒸馏/自动维护）
-- MCP: anysearch（streamable-http 直连，凭据在 profile patch 的 Authorization 头）
+## 安装与配置
 
-## 环境事实
-- 宿主重启: `C:\Users\<user>\.dsh\vision-patch\restart-dsh-host.ps1`（12 秒延迟，动态找 PID，轮询 3080）
-- 框架补丁: dsh-host-apiproxy/lib/index.js 2 处 + dsh-llm-deepseek/lib/index.js 2 处（vision-skill patch 标记）
-- 视觉模型: MiniMax-M3 @ https://api.minimaxi.com/v1/chat/completions（thinking disabled）
-- 插件开发目录: `<Agent_Extensions>\dsh-plugins\{dsh-vision-skill,dsh-layered-memory}`（发布仓库同目录，GitHub: DDDFXYqiming/Agent_Extensions）
-- 重启任务名曾用: dsh-vision-patch-restart（脚本自己清理）
+- 宿主版本及安装方式。
+- 使用的 profile 名称与相对配置位置。
+- 插件名称、版本和安装来源。
+- 需要的环境变量名称，以及是否已配置。
 
-## 典型坑
-- 覆盖 bundle 配置用裸条目，禁重复 insert（duplicate loader entry id）
-- pnpm link 版本必须对齐全局（registry rc 更旧）
-- 改 lib/index.js 需重启；改 scripts/*.py 即时生效
+## 运行说明
+
+记录哪些改动需要重启宿主，哪些脚本会在下次调用时重新加载。重启应只影响对应实例，并通过其健康检查确认服务恢复。
+
+宿主升级后检查插件兼容性和配置覆盖关系。避免重复插入同名 loader entry，链接依赖应与当前宿主版本匹配。

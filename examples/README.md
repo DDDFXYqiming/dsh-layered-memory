@@ -19,7 +19,7 @@ Copy-Item examples\*.md "$env:USERPROFILE\.dsh\memory\sops\"
 | `dsh-plugin-dev-sop.md` | L3 SOP | DSH 官方插件开发规范要点（bundle/Config/裸条目覆盖） |
 | `dsh-plugin-test-sop.md` | L3 SOP | 插件自测流程（语法检查 → mock → headless CLI 自测） |
 | `dsh-vision-pitfalls.md` | L3 SOP | dsh-vision-skill 开发踩坑实录 |
-| `dsh-env-sop.md` | L3 SOP | 本机 DSH 环境差异（补丁/凭证/重启/目录） |
+| `dsh-env-sop.md` | L3 SOP | DSH 环境记录模板（版本、配置与运行说明） |
 
 > 示例中的环境事实（路径/凭证引用）来自开发机，复制到新环境前请核对。
 

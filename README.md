@@ -14,19 +14,19 @@ runtime skill `memory`。这份 skill 约定了读记忆、写记忆和同步索
 
 | 工具 | 用途 |
 |---|---|
-| `memory_list` | 列出全部记忆（L2 facts + L3 sops + pending + 索引行数） |
+| `memory_list` | 列出全部记忆（L2 facts + L3 sops + pending + L1 字符数/预算） |
 | `memory_read` | 读取指定记忆（index / fact 主题 / sop 文件名），返回溯源 meta 与 related 关联指针 |
-| `memory_search` | **BM25 全文检索**（含已归档条目；`all_namespaces` 跨库），L1 被裁剪的条目也能找回 |
-| `memory_write` | 写入记忆（fact/sop，**evidence 必填** = 行动验证公理；可选 `related` 关联链接） |
+| `memory_search` | **BM25 全文检索**（含已归档条目；`all_namespaces` 跨库） |
+| `memory_write` | 写入记忆（fact/sop，**evidence 必填** = 行动验证公理；撞名自动快照旧版本；拒密钥明文、拒 fact 正文 `## ` 行；返回 L0 判据） |
 | `memory_index` | 重建 L1 索引自动段（保留 [RULES] 手动段） |
 | `memory_pending` | 查看重试序列蒸馏候选（同工具先失败后成功） |
 | `memory_accept` | 接受 pending 候选入正式记忆 |
 | `memory_update` | 更新记忆（supersede 保留历史快照；支持 related） |
-| `memory_archive` | 归档记忆（L1 隐藏，文件保留在 archive/，可用 `memory_rollback` 恢复或 `memory_search` 检索到） |
+| `memory_archive` | 归档记忆（meta 标志位：从 L1 与 `memory_read` 隐藏，**文件原地不搬**，`memory_search` 仍可命中，`memory_rollback` 可恢复） |
 | `memory_rollback` | 回滚到 `.history/` 中最近快照 |
 | `memory_expand` | 通过 `sessionQuery` 展开 sourceSession/sourceSeqs 原始事件 |
 | `memory_stats` | 统计 L2/L3/pending/archived/大小 |
-| `memory_maintain` | 内容级去重、压缩索引、统计、合并候选 |
+| `memory_maintain` | 内容级去重、L1 索引核对（全量不裁剪）、统计、合并候选、冷条目复核（>90 天零访问） |
 | `memory_promote` | 跨命名空间提升（项目局部经验 → 全局 default） |
 
 ## 安装
@@ -46,17 +46,17 @@ dsh plugin --profile web add <本目录>
 - id: dsh-layered-memory
   config:
     memoryDir: ''              # 默认 <home>/.dsh/memory
-    maxIndexLines: 30
+    l1MaxChars: 12288         # L1 唯一预算（字符数，含注入熔断）；超预算只告警，不隐藏条目
     progressive: true
     defaultNamespace: ''       # 固定默认命名空间；留空则 autoNamespace 生效
-    autoNamespace: true        # 默认取 workspace 目录名 + git 分支名
-    autoPending: true          # turn/end 捕获「先失败后成功」重试序列为 pending 候选
+    autoNamespace: true        # 默认取 workspace 目录名 + git 分支名（家目录归 default）
+    autoPending: false         # [v0.6] 默认关闭：实测候选几乎全是工具用法噪声，且 6 天 108 条无人消费
     maintainEveryTurns: 20     # 每 N 轮自动维护（计数持久化，跨会话累计）
-    reflectPendingThreshold: 5 # pending 达到该值时注入整理请求
+    reflectPendingThreshold: 5 # 仅 autoPending 开启时生效：pending 达到该值时注入整理请求
     reflectSopsThreshold: 40   # L3 SOP 达到该值时注入整合请求
 ```
 
-**`memory_maintain` 何时裁剪 L1。** 只在完整索引超过 `maxIndexLines` 时触发。裁剪按贪心装入，每步按真实行数核算，空层占位行也计入，排序依据衰减热度（14 天半衰，7 天内新建条目有 recency 加分）。被裁剪只是离开 L1 索引，条目本身还在，用 `memory_search` 随时能找回。`memory_write` 检测到超限也会立即触发同款压缩。告警只在压缩后仍超限时出现一次。
+**L1 存在性优先（v0.6 起不再裁剪）。** AUTO 段每层一行、以 `" | "` 全量列出活跃条目名；预算单位是字符数（`l1MaxChars`）而不是行数——旧的行数预算会让"行数合规而 token 失控"，而一行一条目会让 30 行只装得下 16 条、把其余条目挤成永久隐身（模型不会去搜它不知道存在的东西）。超预算时只在返回值与维护报告里告警，请合并/归档条目或精简 `[RULES]`。索引内容未变化时不重写文件，避免打碎 system prompt 前缀缓存。访问热度（14 天半衰）现在只服务于 `memory_maintain` 的**冷条目复核**报告。
 
 ## 存储布局
 

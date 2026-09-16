@@ -14,19 +14,19 @@ There are 14 tools in total. In progressive mode they are mounted via `memory_ac
 
 | Tool | Purpose |
 |---|---|
-| `memory_list` | List all memory (L2 facts + L3 sops + pending + index line count) |
+| `memory_list` | List all memory (L2 facts + L3 sops + pending + L1 chars/budget) |
 | `memory_read` | Read a memory entry (index / fact topic / sop filename); returns provenance meta and `related` links |
-| `memory_search` | **BM25 full-text search** (includes archived; `all_namespaces` cross-search), even entries hidden from L1 are findable |
-| `memory_write` | Write a memory (fact/sop, **evidence required** = action-verified axiom; optional `related` links) |
+| `memory_search` | **BM25 full-text search** (includes archived; `all_namespaces` cross-search) |
+| `memory_write` | Write a memory (fact/sop, **evidence required** = action-verified axiom; overwriting a name auto-snapshots the old version; refuses secret-looking text and `## ` lines inside facts; returns L0 advisories) |
 | `memory_index` | Rebuild the L1 index auto-segment (preserves the `[RULES]` manual segment) |
 | `memory_pending` | List auto-distilled candidates (fail-then-retry sequences) |
 | `memory_accept` | Promote a pending candidate into a real memory entry |
 | `memory_update` | Update a memory (supersede keeps a history snapshot; supports `related`) |
-| `memory_archive` | Archive a memory (hidden from L1 and `memory_read`, file kept in `archive/`; recoverable via `memory_rollback` or `memory_search`) |
+| `memory_archive` | Archive a memory (a meta flag: hidden from L1 and `memory_read`, **file stays in place**, still hit by `memory_search`, restorable via `memory_rollback`) |
 | `memory_rollback` | Roll back to the most recent `.history/` snapshot |
 | `memory_expand` | Use `sessionQuery` to expand the sourceSession / sourceSeqs original events |
 | `memory_stats` | Stats for L2 / L3 / pending / archived / total size |
-| `memory_maintain` | Content-level dedupe, compress index, stats, merge candidates |
+| `memory_maintain` | Content-level dedupe, L1 index audit (full list, no trimming), stats, merge candidates, cold-entry review (>90 days with no access) |
 | `memory_promote` | Cross-namespace promotion (project-local experience → global `default`) |
 
 ## Install
@@ -46,17 +46,17 @@ dsh plugin --profile web add <repo dir>
 - id: dsh-layered-memory
   config:
     memoryDir: ''              # default <home>/.dsh/memory
-    maxIndexLines: 30
+    l1MaxChars: 12288          # the single L1 budget (chars, also the injection fuse); over budget only warns, never hides
     progressive: true
     defaultNamespace: ''       # fixed default namespace; empty = autoNamespace wins
-    autoNamespace: true        # default = workspace dir name + git branch
-    autoPending: true          # turn/end captures fail-then-retry sequences as pending candidates
+    autoNamespace: true        # default = workspace dir name + git branch (home dir falls back to default)
+    autoPending: false         # [v0.6] off by default: candidates were mostly tool-usage noise and went unconsumed (108 in 6 days)
     maintainEveryTurns: 20     # auto-maintain every N turns (counter persisted, accumulates across sessions)
-    reflectPendingThreshold: 5 # inject consolidation request when pending count >= threshold
+    reflectPendingThreshold: 5 # only when autoPending is on: inject consolidation request at this pending count
     reflectSopsThreshold: 40   # inject consolidation request when L3 SOP count >= threshold
 ```
 
-**When `memory_maintain` trims L1.** It runs only once the full index exceeds `maxIndexLines`. Trimming packs entries in greedily and counts real lines at every step (empty-layer placeholder lines included), ranked by decayed heat (a 14-day half-life, plus a recency bonus for entries created within 7 days). Falling out of L1 does not delete an entry; `memory_search` brings it back at any time. `memory_write` triggers the same compression immediately when it detects an over-limit index, so the warning fires at most once, and only when the index still exceeds the limit after compression.
+**L1 existence first (no trimming since v0.6).** The AUTO section lists every active entry name, one line per layer joined by `" | "`. The budget unit is characters (`l1MaxChars`), not lines: the old line budget allowed "compliant lines, runaway tokens", and one-entry-per-line meant 30 lines could only hold 16 entries, silently hiding the rest — which is permanent invisibility, since the model never searches for what it does not know exists. Over budget only warns (tool return + maintenance report); merge/archive entries or trim `[RULES]`. The index file is not rewritten when its content is unchanged, keeping the system-prompt prefix cache stable. Decayed heat (14-day half-life) now feeds the **cold-entry review** list in `memory_maintain` instead of hiding entries.
 
 ## Storage layout
 

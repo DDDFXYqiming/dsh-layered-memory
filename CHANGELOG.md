@@ -2,6 +2,39 @@
 
 All notable changes to `dsh-layered-memory` are documented here.
 
+## [0.6.0] - 2026-09-16
+
+一句话：把「自动治理」重新喂回语义与守恒——L1 不再隐藏任何条目，覆盖写不再丢历史，公理由代码兜底。
+
+### Fixed
+- **`memory_write` 静默覆盖且不留历史（数据丢失级）**：所有覆盖写（write/update/accept/promote 复用）统一在写入前把旧版本快照到 `.history/`，返回体新增 `history` 与 `advisories`。此前只有显式 `memory_update` 会快照，而模型默认用 write。实测：本会话 3 次 write 若撞名即无痕覆盖。
+- **同名 section 折叠**：`upsertFact` 此前只替换第一个同名段，第二个永久隐身且互相覆盖 meta；现在多余段先各自落 `.history/` 快照再折叠为一条（`action: "merged"`）。同时拒绝 fact 正文里的 `"## "` 行——它是幽灵 section 的来源（运行时实测 10+ 条）。
+- **L1「写完即隐身」**：`maxIndexLines` 行数预算 + 热度裁剪整体废除。AUTO 段改为每层一行、`" | "` 全量列出活跃条目，预算单位换成字符数（与注入熔断 `l1MaxChars` 同源，默认 8192→12288）。旧机制实测把 88/104 条事实与 49/59 个 SOP 挤成不可见，而 `entryHeat` 的 recency 加分（=1）在有真实访问计数的老条目前必然排不进去，所以 CHANGELOG 声称的"写完即隐身已修"从未成立。
+- **前缀抖动**：索引内容未变化时不再重写 `index.txt`（此前每次维护都按热度重排 → system prompt 前缀变化，打碎缓存）。
+- **`agent/disposed` 丢缓冲**：dispose 前先把已捕获未消费的重试序列落 `pending/`（此前直接 delete，候选静默蒸发）。
+- **`memory_promote` 证据旁路**：源条目无证据时不再用 `"promoted from namespace:X"` 占位串过关，改为新增 `evidence` 参数 + 缺失即拒绝。
+- **脏命名空间**：`detectNamespace()` 在用户主目录下工作不再产出以用户名命名的空间（运行时实测残留 `39795/`、时间戳目录、`selftest*`、`headless`）。
+- **文档-代码漂移**：CHANGELOG 声称的"写入后立即 bump 热度"与实现（写≠读）矛盾，随热度退出 L1 决策一并消解；README 的 `memory_stats.json`/裁剪段落同步为实际行为。
+
+### Added
+- **写入侧硬约束（公理落地为代码）**：疑似密钥明文（sk-/AKIA/GitHub token/PEM/Bearer/长 base64，纯 hex 哈希不误伤）直接拒写；topic 控制字符校验补正（`` 转义写错会让 `f` 字符误判）。
+- **L0 判据回显**：`memory_write` 返回体附 `advisories`（topic 超长/含日期或 commit/撞名提示走 update/L1 超预算），把方法论放到决策点，借鉴 GA 的"写入动作同屏注入 L0"。
+- **溯源自动补全**：`memory_write` 成功后由 `turn/end` 回写 `sourceSession`/`sourceSeqs`。实测此前 142 条记忆里 141 条 `sourceSeqs` 为空，`memory_expand` 形同虚设。
+- **冷条目复核**：`memory_maintain` 新增 `cold` 段（创建 >90 天且衰减热度 <0.5），让热度遥测有真实消费者；只报告不动数据。
+- **L0 模板新增「L1 词数 ROI 判据」**：存在性指针 vs 行为规则、反直觉触发词判定、改名优于加描述、禁值存储（源自 GA `memory_cleanup_sop.md` 的策展方法论）。
+- 回归测试 `test/v06.test.mjs` 9 例（快照、正文 `##` 拒绝、密钥拒写、promote 证据、dup 折叠、索引幂等不重写、autoPending 默认关、dispose 落盘、溯源回写）；旧压缩用例改写为"超预算仍全量列出"契约。39/39 绿。
+
+### Changed
+- `autoPending` 默认 `true → false`。实测 6 天累积 108 条候选、archive 仅 7 文件（消费≈0），抽样内容全是工具用法噪声（TS 引号解析错、未知工具名、未读先写）。沉淀主路径回到主动 `memory_write`；`memory_pending`/`memory_accept` 保留给人工登记。
+- 配置项 `maxIndexLines` 移除（无 profile 使用），L1 预算统一为 `l1MaxChars`。`memory_index`/`memory_list`/`memory_maintain` 返回体相应改为 `index_chars`/`rewritten`/`facts_listed` 等。
+- 反思注入的 `overPending` 项仅在 `autoPending` 开启时生效；`overIndex` 改为字符预算判定。
+
+### Breaking
+- 配置项 `maxIndexLines` 删除；`memory_maintain` 报告的 `compress` 段改为 `index` + `cold`。L1 语义变化：不再存在"被裁剪的条目"，因此 `memory_search` 的"找回隐藏条目"用途自然消失（检索本身不变）。
+
+### Not borrowed from GA（明确取舍）
+- L4 原始会话归档（其 `compress_session.py` Phase4 连 too-small 原文件一起删，属不可逆丢数据；DSH 用 session log + `memory_expand` 更安全）；OS 级 12h 计划任务（本机红线）；无锁并发写与"只能 patch 禁 overwrite"的纯提示词纪律（已被 CAS/原子写/快照取代）；单命名空间大杂烩。
+
 ## [Unreleased]
 
 ### Fixed

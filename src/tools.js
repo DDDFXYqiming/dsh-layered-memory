@@ -29,7 +29,7 @@ import {
 	bumpAccess,
 	computeNamespaceStats,
 } from "./store.js";
-import { readIndex, syncIndex } from "./l1index.js";
+import { readIndex, syncIndex, indexChars } from "./l1index.js";
 import { writeMemory, readPending, parsePending } from "./memory-ops.js";
 import { runMaintain } from "./maintain.js";
 import { listNamespaces, searchNamespaces } from "./search.js";
@@ -220,7 +220,7 @@ export function buildTools(ctx, cfg) {
 			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
-				text: `记忆库[${value.namespace}]（${value.index_lines} 行索引）\nL2 事实: ${value.facts.join("、") || "（空）"}\nL3 SOP: ${value.sops.join("、") || "（空）"}\nPending: ${value.pending.join("、") || "（空）"}`
+				text: `记忆库[${value.namespace}]（L1 索引 ${value.index_chars} 字符 / 预算 ${value.max_chars}）\nL2 事实: ${value.facts.join("、") || "（空）"}\nL3 SOP: ${value.sops.join("、") || "（空）"}\nPending: ${value.pending.join("、") || "（空）"}`
 			}]
 		},
 		execute(args) {
@@ -230,8 +230,7 @@ export function buildTools(ctx, cfg) {
 			const facts = factSections(root).filter((f) => !isArchived(root, "fact", f));
 			const sops = sopNames(root).filter((s) => !isArchived(root, "sop", s));
 			const pending = pendingNames(root);
-			const lines = readIndex(root).split("\n").length;
-			return { namespace: ns, index_lines: lines, facts, sops, pending };
+			return { namespace: ns, index_chars: indexChars(readIndex(root)), max_chars: cfg.l1MaxChars, facts, sops, pending };
 		},
 		presentCall() {
 			return { card: "generic", title: "列出记忆", kind: "read" };
@@ -240,7 +239,7 @@ export function buildTools(ctx, cfg) {
 
 	const writeTool = defineTool({
 		name: "memory_write",
-		description: "写入跨会话记忆（行动验证公理：evidence 必填，只写【成功验证过】的信息）。entry_type=fact 存 L2 环境事实；entry_type=sop 存 L3 任务经验。可选 namespace 隔离项目；可选 sourceSession/sourceSeqs 记录溯源；可选 related 关联其他记忆条目。写入后自动同步 L1 索引，超限时自动按热度压缩。",
+		description: "写入跨会话记忆（行动验证公理：evidence 必填，只写【成功验证过】的信息）。entry_type=fact 存 L2 环境事实；entry_type=sop 存 L3 任务经验。可选 namespace 隔离项目；可选 sourceSession/sourceSeqs 记录溯源（缺省时由插件按当前会话自动补）；可选 related 关联其他记忆条目。覆盖同名条目会自动把旧版本快照到 .history/（不再静默覆盖）。写入侧硬拒：疑似密钥明文、fact 正文里的 \"## \" 标题行。写入后 L1 全量重建（不隐藏条目），超字符预算只在返回值里提示。",
 		parameters: {
 			topic: {
 				type: "string",
@@ -286,7 +285,11 @@ export function buildTools(ctx, cfg) {
 			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
-				text: `✅ 已${value.action === "created" ? "新建" : "更新"}记忆「${value.topic}」（${value.entry_type === "fact" ? "L2 事实" : "L3 SOP"}）→ ${value.path} [${value.namespace}]${value.index?.compressed ? `\n📦 L1 超限已自动按热度压缩${(value.index?.facts_hidden || value.index?.sops_hidden) ? `（隐藏 L2=${value.index.facts_hidden || 0}、L3=${value.index.sops_hidden || 0}，可用 memory_list 查看）` : ""}` : ""}${value.index?.over_limit ? "\n⚠️ L1 索引压缩后仍超过限制（多为 RULES 手动段过长），建议手动精简 [RULES]" : ""}`
+				text: [`✅ 已${value.action}记忆「${value.topic}」（${value.entry_type === "fact" ? "L2 事实" : "L3 SOP"}）→ ${value.path} [${value.namespace}]`,
+					value.history ? `旧版本已快照：${value.history}（可 memory_rollback）` : "",
+					value.index?.over_limit ? `⚠️ L1 索引 ${value.index.index_chars} 字符超预算 ${value.index.max_chars}：条目不会被隐藏，请合并/归档或精简 [RULES]` : "",
+					...(Array.isArray(value.advisories) ? value.advisories.map((a) => `· 判据：${a}`) : []),
+				].filter(Boolean).join("\n")
 			}]
 		},
 		async execute(args) {
@@ -310,10 +313,10 @@ export function buildTools(ctx, cfg) {
 				sourceSeqs: args.sourceSeqs || [],
 				namespace: ns,
 				related: Array.isArray(args.related) ? args.related : [],
-				maxIndexLines: cfg.maxIndexLines,
-				heat: cfg.heat,
+				maxChars: cfg.l1MaxChars,
+				snapshot: true,
 			});
-			return { entry_type: type, topic, path: r.path, namespace: ns, action: r.action, index: r.index };
+			return { entry_type: type, topic, path: r.path, namespace: ns, action: r.action, history: r.history, index: r.index, advisories: r.advisories };
 		},
 		presentCall(args) {
 			return { card: "generic", title: `写入记忆 ${args.topic}`, kind: "execute" };
@@ -333,15 +336,15 @@ export function buildTools(ctx, cfg) {
 			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
-				text: `索引已重建[${value.namespace}]（${value.index_lines} 行${value.over_limit ? "，⚠️ 超过限制建议精简" : ""}）：\nL2: ${value.facts.join("、") || "（空）"}\nL3: ${value.sops.join("、") || "（空）"}`
+				text: `索引已重建[${value.namespace}]（${value.index_chars} 字符 / 预算 ${value.max_chars}${value.over_limit ? "，⚠️ 超预算：条目不会被隐藏，请合并或归档" : ""}${value.rewritten ? "" : "，内容无变化未重写"}）：\nL2: ${value.facts.join("、") || "（空）"}\nL3: ${value.sops.join("、") || "（空）"}`
 			}]
 		},
 		execute(args) {
 			const ns = resolveNamespace(cfg, args.namespace);
 			const root = nsRoot(cfg.memoryDir, ns);
 			ensureNamespaceLayout(root);
-			const r = syncIndex(root, cfg.maxIndexLines);
-			return { namespace: ns, index_lines: r.index_lines, over_limit: r.over_limit, facts: factSections(root).filter((f) => !isArchived(root, "fact", f)), sops: sopNames(root).filter((s) => !isArchived(root, "sop", s)) };
+			const r = syncIndex(root, cfg.l1MaxChars);
+			return { namespace: ns, index_chars: r.index_chars, max_chars: r.max_chars, over_limit: r.over_limit, rewritten: r.rewritten, facts: factSections(root).filter((f) => !isArchived(root, "fact", f)), sops: sopNames(root).filter((s) => !isArchived(root, "sop", s)) };
 		},
 		presentCall() {
 			return { card: "generic", title: "重建记忆索引", kind: "execute" };
@@ -388,14 +391,17 @@ export function buildTools(ctx, cfg) {
 			schema: { type: "object", additionalProperties: true },
 			render: (_args, value) => [{
 				type: "text",
-				text: `维护完成[${value.namespace}]：去重移除 ${value.report.dedupe?.removed?.length || 0} 条，索引保留 L2=${value.report.compress?.facts_kept || 0}/${value.report.compress?.total_facts || 0} L3=${value.report.compress?.sops_kept || 0}/${value.report.compress?.total_sops || 0}${(value.report.compress?.facts_hidden || value.report.compress?.sops_hidden) ? `（隐藏 L2=${value.report.compress?.facts_hidden || 0}、L3=${value.report.compress?.sops_hidden || 0}，可用 memory_list 查看）` : ""}，合并候选 ${value.report.mergeCandidates?.length || 0} 组`
+				text: [`维护完成[${value.namespace}]：去重归档 ${value.report.dedupe?.removed?.length || 0} 条；L1 索引 ${value.report.index?.index_chars || 0} 字符 / 预算 ${value.report.index?.max_chars || 0}（L2=${value.report.index?.facts_listed || 0}、L3=${value.report.index?.sops_listed || 0} 全量列出，不裁剪）`,
+					`合并候选 ${value.report.mergeCandidates?.length || 0} 组；冷条目（>${value.report.cold?.threshold_days || 90} 天零访问）${value.report.cold?.count || 0} 条，建议复核是否已过时`,
+					value.report.index?.over_limit ? "⚠️ L1 超预算：请合并/归档或精简 [RULES]" : "",
+				].filter(Boolean).join("\n")
 			}]
 		},
 		execute(args) {
 			const ns = resolveNamespace(cfg, args.namespace);
 			const root = nsRoot(cfg.memoryDir, ns);
 			ensureNamespaceLayout(root);
-			const report = runMaintain(root, cfg.maxIndexLines, cfg.maintainOpts);
+			const report = runMaintain(root, cfg.l1MaxChars, cfg.maintainOpts);
 			return { namespace: ns, report };
 		},
 		presentCall() {
@@ -496,8 +502,8 @@ export function buildTools(ctx, cfg) {
 				sourceSeqs: parsed.sourceSeqs || [],
 				namespace: ns,
 				related: Array.isArray(args.related) ? args.related : [],
-				maxIndexLines: cfg.maxIndexLines,
-				heat: cfg.heat,
+				maxChars: cfg.l1MaxChars,
+				snapshot: true,
 			});
 			// 接受成功后删除 pending（先归档副本到 archive/，再移除原文件）
 			try {
@@ -569,23 +575,6 @@ export function buildTools(ctx, cfg) {
 			if (!topic || !content) throw new Error("memory_update: topic 与 content 必填");
 			const supersede = args.supersede !== false;
 			const key = type === "fact" ? topic : slugify(topic);
-			let historyPath = "";
-			if (supersede) {
-				const ts = Date.now();
-				if (type === "fact") {
-					const old = readFact(root, topic);
-					if (old !== null) {
-						historyPath = join(HISTORY_DIR, `fact-${slugify(topic)}-${ts}.md`);
-						atomicWriteFileSync(join(root, historyPath), `# ${topic}\n\n${old}\n`);
-					}
-				} else {
-					const old = readSop(root, key);
-					if (old !== null) {
-						historyPath = join(HISTORY_DIR, `sop-${key}-${ts}.md`);
-						atomicWriteFileSync(join(root, historyPath), old);
-					}
-				}
-			}
 			const evidence = String(args.evidence || "").trim() || getEntryMeta(root, type, key)?.evidence || "";
 			if (!evidence) throw new Error("memory_update: 需要 evidence（行动验证公理：新旧条目均无证据，不写）");
 			const r = writeMemory(root, {
@@ -597,10 +586,10 @@ export function buildTools(ctx, cfg) {
 				sourceSeqs: getEntryMeta(root, type, key)?.sourceSeqs || [],
 				namespace: ns,
 				related: Array.isArray(args.related) ? args.related : (getEntryMeta(root, type, key)?.related || []),
-				maxIndexLines: cfg.maxIndexLines,
-				heat: cfg.heat,
+				maxChars: cfg.l1MaxChars,
+				snapshot: supersede,
 			});
-			return { topic, entry_type: type, action: supersede ? "superseded" : "updated", namespace: ns, history: historyPath || undefined };
+			return { topic, entry_type: type, action: supersede ? "superseded" : "updated", namespace: ns, history: r.history, advisories: r.advisories };
 		},
 		presentCall(args) {
 			return { card: "generic", title: `更新记忆 ${args.topic}`, kind: "execute" };
@@ -644,7 +633,7 @@ export function buildTools(ctx, cfg) {
 			const exists = type === "fact" ? readFact(root, key) !== null : readSop(root, key) !== null;
 			if (!exists) return { topic, entry_type: type, namespace: ns, archived: false };
 			setEntryMeta(root, type, key, { archived: true, archivedAt: new Date().toISOString() });
-			syncIndex(root, cfg.maxIndexLines);
+			syncIndex(root, cfg.l1MaxChars);
 			return { topic, entry_type: type, namespace: ns, archived: true };
 		},
 		presentCall(args) {
@@ -705,7 +694,7 @@ export function buildTools(ctx, cfg) {
 				atomicWriteFileSync(join(root, "sops", `${key}.md`), content);
 				setEntryMeta(root, "sop", key, { archived: false, restoredFrom: latest });
 			}
-			syncIndex(root, cfg.maxIndexLines);
+			syncIndex(root, cfg.l1MaxChars);
 			return { topic, entry_type: type, namespace: ns, restored: true, source: latest };
 		},
 		presentCall(args) {
@@ -859,6 +848,10 @@ export function buildTools(ctx, cfg) {
 			archive_source: {
 				type: "boolean",
 				description: "是否归档源条目（默认 true，保留 citation 可回溯）"
+			},
+			evidence: {
+				type: "string",
+				description: "验证证据（缺省时继承源条目的 evidence；两者都为空则拒绝提升——行动验证公理不允许占位串）"
 			}
 		},
 		output: {
@@ -883,22 +876,27 @@ export function buildTools(ctx, cfg) {
 			const content = type === "fact" ? readFact(fromRoot, key) : readSop(fromRoot, key);
 			if (content === null) return { promoted: false, topic, entry_type: type, from: fromNs, to: toNs };
 			const meta = getEntryMeta(fromRoot, type, key) || {};
+			// [v0.6] 证据不可伪造：源条目无证据时必须显式提供，不再用 "promoted from namespace:X" 占位串过关。
+			const evidenceText = String(args.evidence || "").trim() || String(meta.evidence || "").trim();
+			if (!evidenceText) {
+				throw new Error("memory_promote: 源条目无 evidence，且未提供 evidence 参数（行动验证公理：无行动，不记忆）。请先用 memory_update 补齐证据再提升。");
+			}
 			writeMemory(toRoot, {
 				topic,
 				entryType: type,
 				content,
-				evidence: meta.evidence || `promoted from namespace:${fromNs}`,
+				evidence: evidenceText,
 				sourceSession: meta.sourceSession || null,
 				sourceSeqs: meta.sourceSeqs || [],
 				namespace: toNs,
 				related: Array.isArray(meta.related) ? meta.related : [],
-				maxIndexLines: cfg.maxIndexLines,
-				heat: cfg.heat,
+				maxChars: cfg.l1MaxChars,
+				snapshot: true,
 			});
 			const archiveSource = args.archive_source !== false;
 			if (archiveSource) {
 				setEntryMeta(fromRoot, type, key, { archived: true, promotedTo: `${toNs}:${topic}`, archivedAt: new Date().toISOString() });
-				syncIndex(fromRoot, cfg.maxIndexLines);
+				syncIndex(fromRoot, cfg.l1MaxChars);
 			}
 			return { promoted: true, topic, entry_type: type, from: fromNs, to: toNs, source_archived: archiveSource };
 		},

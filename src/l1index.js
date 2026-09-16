@@ -1,10 +1,14 @@
-// L1 索引：读取/分段/重建/按热度压缩。行为与 v0.4 保持一致（测试锁定）。
+// L1 索引：读取 / 重建。
+// [v0.6] 存在性优先：AUTO 段全量列出 L2/L3 名字（每层一行、" | " 打包），
+// 不再按热度裁剪隐藏条目——被裁掉的条目等于永久隐身（模型不会想到去搜不存在的东西）。
+// 预算单位从"行数"改为"字符数"，与注入熔断 l1MaxChars 同源，杜绝"行数合规而 token 失控"。
+// 另外：内容未变则不重写文件，避免无意义的前缀抖动（system prompt 缓存稳定性）。
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteFileSync } from "./atomic-write.js";
 import { AUTO_BEGIN, AUTO_END, INDEX_TEMPLATE } from "./templates.js";
-import { activeEntries, entryHeat, loadAccess, readMeta } from "./store.js";
+import { activeEntries } from "./store.js";
 
 export function readIndex(root) {
 	try {
@@ -12,6 +16,12 @@ export function readIndex(root) {
 	} catch {
 		return "";
 	}
+}
+
+/** 索引字符数（统一换行、去尾部空白后计数）。 */
+export function indexChars(text) {
+	const s = String(text ?? "").replace(/\r\n?/g, "\n").replace(/\n+$/, "");
+	return s.length;
 }
 
 /** 规范化索引布局空白：保留手动内容，只消除会挤占预算的多余空行。 */
@@ -23,12 +33,7 @@ function normalizeIndexWhitespace(text) {
 		.replace(/^\n+|\n+$/g, "");
 }
 
-function countIndexLines(text) {
-	const normalized = String(text ?? "").replace(/\r\n?/g, "\n").replace(/\n+$/, "");
-	return normalized ? normalized.split("\n").length : 0;
-}
-
-/** 读取 AUTO 标记之外的头部与手动尾部，并规范化空白。 */
+/** 读取 AUTO 标记之外的头部与手动尾部（[RULES] 段），并规范化空白。 */
 function readIndexSections(root) {
 	const templateBegin = INDEX_TEMPLATE.indexOf(AUTO_BEGIN);
 	const templateEnd = INDEX_TEMPLATE.indexOf(AUTO_END);
@@ -52,12 +57,11 @@ function readIndexSections(root) {
 	};
 }
 
-function buildAutoLines(facts, sops, hiddenFacts = 0, hiddenSops = 0) {
-	const l2 = facts.length ? facts.map((f) => `[L2] ${f}`) : ["[L2] （空）"];
-	const l3 = sops.length ? sops.map((s) => `[L3] sops/${s}.md`) : ["[L3] （空）"];
-	if (hiddenFacts > 0) l2[l2.length - 1] += ` | 另有 ${hiddenFacts} 条，调用 memory_list 查看`;
-	if (hiddenSops > 0) l3[l3.length - 1] += ` | 另有 ${hiddenSops} 条，调用 memory_list 查看`;
-	return [...l2, ...l3];
+/** AUTO 段：两层各一行，全量名字 pipe 打包（存在性不可丢）。 */
+export function buildAutoLines(facts, sops) {
+	const l2 = facts.length ? `[L2] ${facts.join(" | ")}` : "[L2] （空）";
+	const l3 = sops.length ? `[L3] ${sops.map((s) => `sops/${s}.md`).join(" | ")}` : "[L3] （空）";
+	return [l2, l3];
 }
 
 function composeIndex(head, autoLines, tail) {
@@ -66,88 +70,30 @@ function composeIndex(head, autoLines, tail) {
 	return parts.join("\n") + "\n";
 }
 
-/** 重建 index.txt 的自动段（活跃 L2 + L3），过滤 archived；保留并清理 RULES 手动段。 */
-export function syncIndex(root, maxIndexLines = 30) {
-	const p = join(root, "index.txt");
+/**
+ * 重建 index.txt 的 AUTO 段（活跃 L2 + L3 全量），保留并清理 [RULES] 手动段。
+ * @param root 命名空间根
+ * @param maxChars L1 字符预算（cfg.l1MaxChars）
+ * @returns {{index_chars:number, max_chars:number, over_limit:boolean, facts_listed:number, sops_listed:number, rewritten:boolean}}
+ */
+export function syncIndex(root, maxChars = 12288) {
 	const { head, tail } = readIndexSections(root);
 	const { facts, sops } = activeEntries(root);
 	const rebuilt = composeIndex(head, buildAutoLines(facts, sops), tail);
-	atomicWriteFileSync(p, rebuilt);
-	const lines = countIndexLines(rebuilt);
-	return { index_lines: lines, max_index_lines: maxIndexLines, over_limit: lines > maxIndexLines };
-}
-
-/**
- * 压缩 L1 索引：只有完整索引超过 maxIndexLines 时才按访问热度裁剪。
- * 实际记忆文件不删除；被裁剪的层仍保留隐藏数量提示，避免完全不可发现。
- */
-export function compressIndexEntries(root, maxLines, heat = {}) {
-	const { facts: allFacts, sops: allSops } = activeEntries(root);
-	const access = loadAccess(root);
-	const meta = readMeta(root);
-	const heatOf = (kind, key) => entryHeat(access, meta, kind, key, heat);
-	const rank = (kind) => (a, b) => {
-		const heat = heatOf(kind, b) - heatOf(kind, a);
-		return heat || String(a).localeCompare(String(b));
-	};
-	const facts = [...allFacts].sort(rank("fact"));
-	const sops = [...allSops].sort(rank("sop"));
-	const { head, tail } = readIndexSections(root);
-	const fullLines = buildAutoLines(facts, sops);
-	const fullIndex = composeIndex(head, fullLines, tail);
-	const totalLines = countIndexLines(fullIndex);
-
-	// 未超限时也写回规范化后的完整索引，但绝不裁剪条目。
-	if (totalLines <= maxLines) {
-		atomicWriteFileSync(join(root, "index.txt"), fullIndex);
-		return {
-			facts_kept: facts.length,
-			sops_kept: sops.length,
-			total_facts: facts.length,
-			total_sops: sops.length,
-			facts_hidden: 0,
-			sops_hidden: 0,
-			compressed: false,
-		};
+	const current = existsSync(join(root, "index.txt")) ? readFileSync(join(root, "index.txt"), "utf8") : null;
+	let rewritten = false;
+	if (current !== rebuilt) {
+		// 只在内容真的变化时写盘：无变化的重写会打碎 system prompt 前缀缓存。
+		atomicWriteFileSync(join(root, "index.txt"), rebuilt);
+		rewritten = true;
 	}
-
-	// [v0.5] 贪心装入：从每层保底 1 条开始，按热度降序逐个尝试加入，
-	// 每步用真实行数核算（含空层占位行），保证压缩结果不超预算。
-	const linesFor = (fc, sc, hf, hs) =>
-		countIndexLines(composeIndex(head, buildAutoLines(facts.slice(0, fc), sops.slice(0, sc), hf, hs), tail));
-	let factCount = facts.length ? 1 : 0;
-	let sopCount = sops.length ? 1 : 0;
-	let hiddenFacts = facts.length - factCount;
-	let hiddenSops = sops.length - sopCount;
-	if (linesFor(factCount, sopCount, hiddenFacts, hiddenSops) <= maxLines) {
-		const candidates = [
-			...facts.slice(factCount).map((topic) => ({ kind: "fact", topic, score: heatOf("fact", topic) })),
-			...sops.slice(sopCount).map((slug) => ({ kind: "sop", topic: slug, score: heatOf("sop", slug) })),
-		].sort((a, b) => (b.score - a.score) || a.kind.localeCompare(b.kind) || a.topic.localeCompare(b.topic));
-		for (const candidate of candidates) {
-			const nextFacts = factCount + (candidate.kind === "fact" ? 1 : 0);
-			const nextSops = sopCount + (candidate.kind === "sop" ? 1 : 0);
-			const nextHiddenFacts = facts.length - nextFacts;
-			const nextHiddenSops = sops.length - nextSops;
-			if (linesFor(nextFacts, nextSops, nextHiddenFacts, nextHiddenSops) <= maxLines) {
-				factCount = nextFacts;
-				sopCount = nextSops;
-				hiddenFacts = nextHiddenFacts;
-				hiddenSops = nextHiddenSops;
-			}
-		}
-	}
-	const keptFacts = facts.slice(0, factCount);
-	const keptSops = sops.slice(0, sopCount);
-	const autoLines = buildAutoLines(keptFacts, keptSops, hiddenFacts, hiddenSops);
-	atomicWriteFileSync(join(root, "index.txt"), composeIndex(head, autoLines, tail));
+	const chars = indexChars(rebuilt);
 	return {
-		facts_kept: keptFacts.length,
-		sops_kept: keptSops.length,
-		total_facts: facts.length,
-		total_sops: sops.length,
-		facts_hidden: hiddenFacts,
-		sops_hidden: hiddenSops,
-		compressed: true,
+		index_chars: chars,
+		max_chars: maxChars,
+		over_limit: chars > maxChars,
+		facts_listed: facts.length,
+		sops_listed: sops.length,
+		rewritten,
 	};
 }

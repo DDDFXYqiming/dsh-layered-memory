@@ -18,14 +18,15 @@ const inject = ["skills", "tools", "agents", "systemPrompt", "sessionQuery"];
 /** Schemastery 配置 schema（官方 config 约定：加载期校验 + 默认值填充）。可调常量的默认值取自各自归属模块的导出常量，保持单一来源。 */
 export const Config = Schema.object({
 	memoryDir: Schema.string().default(""),
-	maxIndexLines: Schema.number().default(30),
 	// [spec-audit 2026-08-14] 纯 boolean：非法配置在加载期响亮失败（config.md §Fail loudly）
 	progressive: Schema.boolean().default(true),
 	// v0.3 命名空间
 	defaultNamespace: Schema.string().default(""),
 	autoNamespace: Schema.boolean().default(true),
 	// v0.3 自动蒸馏（v0.5 起只捕获「先失败后成功」的重试序列）
-	autoPending: Schema.boolean().default(true),
+	// [v0.6] 默认关闭：实测 6 天累积 108 条候选、消费≈0，且内容多为工具用法噪声（TS 引号错、
+	// 未知工具名等），对未来任务零复用价值。需要时显式开启，或直接用 memory_write 主动沉淀。
+	autoPending: Schema.boolean().default(false),
 	// v0.4 自动维护（v0.5 起计数持久化，跨会话累计触发）
 	maintainEveryTurns: Schema.number().default(20),
 	// v0.5 反思注入阈值：pending 候选数达到该值时提示宿主整理
@@ -33,7 +34,9 @@ export const Config = Schema.object({
 	// v0.5 反思注入阈值：L3 SOP 条数达到该值时提示宿主整合
 	reflectSopsThreshold: Schema.number().default(40),
 	// [spec-fix 2026-09] 原散落的启发式/容量阈值提为配置
-	l1MaxChars: Schema.number().min(1024).default(8192),
+	// [v0.6] L1 唯一预算：字符数（旧 maxIndexLines 行数预算废弃——行数合规而 token 失控，
+	// 且一行一条目导致 30 行只能装 16 条、把 88 条事实挤成"永久隐身"）。
+	l1MaxChars: Schema.number().min(1024).default(12288),
 	reflectCooldownTurns: Schema.number().min(0).default(10),
 	nearDupeThreshold: Schema.number().min(0).max(1).default(NEAR_DUPE_THRESHOLD),
 	mergeCandidateThreshold: Schema.number().min(0).max(1).default(MERGE_CANDIDATE_THRESHOLD),
@@ -167,7 +170,7 @@ function apply(ctx, config = {}) {
 		for (const def of allTools) ctx.tools.register(def);
 	}
 
-	ctx.logger?.info?.(`[dsh-layered-memory] v0.5 ready; memoryDir=${cfg.memoryDir}; maxIndexLines=${cfg.maxIndexLines}`);
+	ctx.logger?.info?.(`[dsh-layered-memory] v0.6 ready; memoryDir=${cfg.memoryDir}; l1MaxChars=${cfg.l1MaxChars}; autoPending=${cfg.autoPending}`);
 
 	function defineActivateTool() {
 		return defineTool({

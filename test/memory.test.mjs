@@ -9,7 +9,7 @@ let disposer;
 let tools;
 let effects = [];
 
-function setup({ maxIndexLines = 30 } = {}) {
+function setup({ l1MaxChars = 12288 } = {}) {
 	memDir = mkdtempSync(join(tmpdir(), "dsh-memory-test-"));
 	const registered = [];
 	const ctx = {
@@ -38,7 +38,7 @@ function setup({ maxIndexLines = 30 } = {}) {
 		progressive: false,
 		autoNamespace: false,
 		defaultNamespace: "test",
-		maxIndexLines,
+		l1MaxChars,
 	});
 	tools = registered;
 }
@@ -155,38 +155,37 @@ test("memory_maintain keeps a complete fitting index and normalizes blank paddin
 
 	const report = await tool("memory_maintain").execute({ namespace: "test" });
 	const index = readFileSync(indexPath, "utf8");
-	expect(report.report.compress.compressed).toBe(false);
-	expect(report.report.compress.facts_kept).toBe(3);
-	expect(report.report.compress.sops_kept).toBe(3);
-	expect(index).toContain("[L2] fact-1");
-	expect(index).toContain("[L2] fact-3");
-	expect(index).toContain("[L3] sops/sop-1.md");
-	expect(index).toContain("[L3] sops/sop-3.md");
+	expect(report.report.index.facts_listed).toBe(3);
+	expect(report.report.index.sops_listed).toBe(3);
+	expect(index).toContain("[L2] fact-1 | fact-2 | fact-3");
+	expect(index).toContain("[L3] sops/sop-1.md | sops/sop-2.md | sops/sop-3.md");
 	expect(index).not.toMatch(/\n{3,}/);
 
 	// A full index rebuild followed by maintenance must remain a no-op while it fits.
 	await tool("memory_index").execute({ namespace: "test" });
 	const second = await tool("memory_maintain").execute({ namespace: "test" });
-	expect(second.report.compress.facts_kept).toBe(3);
-	expect(second.report.compress.sops_kept).toBe(3);
+	expect(second.report.index.facts_listed).toBe(3);
+	expect(second.report.index.sops_listed).toBe(3);
+	// 幂等：索引内容未变时不得重写文件（前缀稳定，避免打碎 system prompt 缓存）。
+	expect(second.report.index.rewritten).toBe(false);
 });
 
-test("memory_maintain compresses oversized indexes without hiding either layer", async () => {
-	// Recreate the fixture with a deliberately tiny line budget.
+test("oversized L1 budget still lists every entry and only flags over_limit", async () => {
+	// [v0.6] 存在性优先：预算再小也不隐藏条目——被裁出 L1 等于永久隐身。
 	if (typeof disposer === "function") disposer();
 	if (memDir) rmSync(memDir, { recursive: true, force: true });
-	setup({ maxIndexLines: 8 });
+	setup({ l1MaxChars: 1024 });
 
-	for (let i = 1; i <= 4; i++) {
+	for (let i = 1; i <= 12; i++) {
 		await tool("memory_write").execute({
-			topic: `fact-${i}`,
+			topic: `bulk-fact-with-a-longish-name-${i}`,
 			entry_type: "fact",
 			content: `fact ${i}`,
 			evidence: "unit test",
 			namespace: "test",
 		});
 		await tool("memory_write").execute({
-			topic: `sop-${i}`,
+			topic: `bulk-sop-with-a-longish-name-${i}`,
 			entry_type: "sop",
 			content: `sop ${i}`,
 			evidence: "unit test",
@@ -196,26 +195,23 @@ test("memory_maintain compresses oversized indexes without hiding either layer",
 
 	const report = await tool("memory_maintain").execute({ namespace: "test" });
 	const index = readFileSync(join(memDir, "test", "index.txt"), "utf8");
-	expect(report.report.compress.compressed).toBe(true);
-	expect(report.report.compress.facts_kept).toBeGreaterThanOrEqual(1);
-	expect(report.report.compress.sops_kept).toBeGreaterThanOrEqual(1);
-	expect(index).toContain("[L2]");
-	expect(index).toContain("[L3]");
-	expect(index).toContain("调用 memory_list 查看");
+	expect(report.report.index.over_limit).toBe(true);
+	expect(report.report.index.facts_listed).toBe(12);
+	expect(report.report.index.sops_listed).toBe(12);
+	expect(index).toContain("bulk-fact-with-a-longish-name-1");
+	expect(index).toContain("bulk-fact-with-a-longish-name-12");
+	expect(index).toContain("bulk-sop-with-a-longish-name-12.md");
+	expect(index).not.toContain("memory_list 查看");
 
-	// Compression only affects the L1 pointers; hidden entries remain readable/listable.
-	const hiddenFact = await tool("memory_read").execute({ name: "fact-4", namespace: "test" });
-	expect(hiddenFact.not_found).not.toBe(true);
-	expect(hiddenFact.content).toContain("fact 4");
 	const listed = await tool("memory_list").execute({ namespace: "test" });
-	expect(listed.facts).toHaveLength(4);
-	expect(listed.sops).toHaveLength(4);
+	expect(listed.facts).toHaveLength(12);
+	expect(listed.sops).toHaveLength(12);
 });
 
-test("memory_maintain preserves the only non-empty layer at an impossible budget", async () => {
+test("empty layer renders a placeholder while the other layer lists all entries", async () => {
 	if (typeof disposer === "function") disposer();
 	if (memDir) rmSync(memDir, { recursive: true, force: true });
-	setup({ maxIndexLines: 1 });
+	setup({ l1MaxChars: 1024 });
 	await tool("memory_write").execute({
 		topic: "only-fact",
 		entry_type: "fact",
@@ -226,8 +222,8 @@ test("memory_maintain preserves the only non-empty layer at an impossible budget
 
 	const report = await tool("memory_maintain").execute({ namespace: "test" });
 	const index = readFileSync(join(memDir, "test", "index.txt"), "utf8");
-	expect(report.report.compress.facts_kept).toBe(1);
-	expect(report.report.compress.sops_kept).toBe(0);
+	expect(report.report.index.facts_listed).toBe(1);
+	expect(report.report.index.sops_listed).toBe(0);
 	expect(index).toContain("[L2] only-fact");
 	expect(index).toContain("[L3] （空）");
 });
@@ -248,22 +244,23 @@ test("sopNames excludes reserved non-SOP files (README/LICENSE) from L3", async 
 
 	const report = await tool("memory_maintain").execute({ namespace: "test" });
 	const index = readFileSync(join(memDir, "test", "index.txt"), "utf8");
-	expect(report.report.compress.total_sops).toBe(1);
-	expect(report.report.compress.sops_kept).toBe(1);
+	expect(report.report.index.sops_listed).toBe(1);
+	expect(report.report.index.facts_listed).toBe(0);
 	expect(index).toContain("real-sop");
 	expect(index).not.toContain("README");
 	expect(index).not.toContain("LICENSE");
 });
 
-test("compress keeps freshly created entries via recency bonus when unaccessed", async () => {
+test("L1 lists entries with zero access heat (no recency lottery)", async () => {
+	// [v0.6] 旧行为：热度决定谁进 L1，新写入条目 heat=1 排不进前 N → 写完即隐身。
+	// 现在 AUTO 段无条件全量列出，热度只服务于冷条目复核。
 	if (typeof disposer === "function") disposer();
 	if (memDir) rmSync(memDir, { recursive: true, force: true });
-	setup({ maxIndexLines: 1 });
+	setup({ l1MaxChars: 12288 });
 
 	const fs = await import("node:fs");
 	const sopsDir = join(memDir, "test", "sops");
 	fs.mkdirSync(sopsDir, { recursive: true });
-	// 无访问热度、createdAt 陈旧（30 天前）与新鲜（now）各一条：recency 应保新鲜条目
 	fs.writeFileSync(join(sopsDir, "old-a.md"), "# old-a\n\nstale\n", "utf8");
 	fs.writeFileSync(join(sopsDir, "new-a.md"), "# new-a\n\nfresh\n", "utf8");
 	const oldTs = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -280,9 +277,8 @@ test("compress keeps freshly created entries via recency bonus when unaccessed",
 		"utf8"
 	);
 
-	const report = await tool("memory_maintain").execute({ namespace: "test" });
+	await tool("memory_index").execute({ namespace: "test" });
 	const index = readFileSync(join(memDir, "test", "index.txt"), "utf8");
-	expect(report.report.compress.sops_kept).toBe(1);
 	expect(index).toContain("new-a");
-	expect(index).not.toContain("old-a");
+	expect(index).toContain("old-a");
 });

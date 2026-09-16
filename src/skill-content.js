@@ -33,17 +33,17 @@ export const SKILL_CONTENT = `# 记忆管理（DSH 版）
 - ❌ 易变状态：时间戳、PID、临时路径、一次性 ID
 - ❌ 通用常识、日志记录、推理过程细节
 
-### 候选确认（自动蒸馏）
-- turn/end 只把「同工具先失败后成功」的重试序列写入 \`pending/\`（典型坑点信号）
-- 用 \`memory_pending\` 查看，\`memory_accept\` 确认入正式记忆；不需要的直接忽略
+### 候选确认（自动蒸馏，默认关闭）
+- 需 \`autoPending: true\` 才会把「同工具先失败后成功」的重试序列写入 \`pending/\`。默认关闭的实测理由：候选绝大多数是工具用法噪声（TS 引号错、未知工具名），6 天累积 108 条无人消费。
+- 沉淀经验的主路径因此是主动 \`memory_write\`（带证据）；\`memory_pending\`/\`memory_accept\` 仍可用于人工登记的候选。
 
 ### 维护与检索
-- \`memory_maintain\`：内容级近重复去重（Jaccard ≥0.85）、压缩 L1 索引、统计、合并候选
+- \`memory_maintain\`：内容级近重复去重（词元集合 Jaccard ≥0.85）、L1 索引核对（**全量列出，不裁剪**）、统计、合并候选（≥0.45）、冷条目复核（>90 天零访问）
 - 也可配置 \`maintainEveryTurns\` 自动触发（计数持久化，跨会话累计）
-- \`memory_search\`：BM25 全文检索，L1 被裁剪的条目也能找回；\`all_namespaces=true\` 跨库检索
+- \`memory_search\`：BM25 全文检索（含归档）；\`all_namespaces=true\` 跨库检索
 - \`memory_promote\`：把项目局部经验提升为全局（default）记忆
 - \`memory_stats\` 查看统计
-- 压缩保护：新写入 7 天内的条目有 recency 加分；访问热度按 14 天半衰衰减；\`sops/\` 保留名（README/LICENSE/index）不计入条目
+- 热度：访问计数按 14 天半衰衰减，现在只服务于「冷条目复核」报告；不再决定谁出现在 L1（被裁出 L1 = 永久隐身，该机制已废除）
 
 ## 存储布局
 
@@ -65,11 +65,11 @@ export const SKILL_CONTENT = `# 记忆管理（DSH 版）
 
 | 工具 | 用途 |
 |---|---|
-| \`memory_list\` | 列出全部记忆（facts + sops + pending + 索引行数） |
+| \`memory_list\` | 列出全部记忆（facts + sops + pending + L1 字符数/预算） |
 | \`memory_read\` | 读取指定记忆（index / fact 主题 / sop 文件名），含溯源 meta 与关联指针 |
 | \`memory_search\` | BM25 全文检索（含归档；可跨命名空间） |
 | \`memory_activate\` | 渐进式暴露兜底：skill 加载后工具未自动出现时调用一次 |
-| \`memory_write\` | 写入记忆（fact/sop，**evidence 必填**；可选 related 关联） |
+| \`memory_write\` | 写入记忆（fact/sop，**evidence 必填**；覆盖同名自动快照 .history/；疑似密钥明文与 fact 正文的 "## " 行直接拒绝；返回体附 L0 判据） |
 | \`memory_index\` | 重建 L1 索引自动段 |
 | \`memory_pending\` | 查看重试序列蒸馏候选 |
 | \`memory_accept\` | 接受 pending 候选入正式记忆 |
@@ -78,7 +78,7 @@ export const SKILL_CONTENT = `# 记忆管理（DSH 版）
 | \`memory_rollback\` | 回滚到最近历史快照 |
 | \`memory_expand\` | 展开 sourceSession/sourceSeqs 原始事件 |
 | \`memory_stats\` | 查看统计 |
-| \`memory_maintain\` | 去重/压缩/统计/合并候选 |
+| \`memory_maintain\` | 去重/索引核对/统计/合并候选/冷条目复核 |
 | \`memory_promote\` | 跨命名空间提升记忆 |
 
 ## 原则
@@ -86,5 +86,6 @@ export const SKILL_CONTENT = `# 记忆管理（DSH 版）
 1. **行动验证**：No Execution, No Memory. 只写成功验证过的信息。
 2. **最小充分**：内容尽可能短；只记"遗忘会导致高成本重试"的信息。
 3. **不删改验证事实**：可以压缩、迁移、supersede、archive，严禁物理丢弃。
-4. **主动写入 + 候选确认**：自动蒸馏只进 pending，正式记忆必须经确认。
+4. **主动写入优先**：沉淀靠 \`memory_write\`（带证据）；自动蒸馏候选默认关闭，开启后也只进候选区，正式记忆必须经确认。
+5. **存在性不可丢**：L1 全量列出活跃条目，超预算由人合并/归档解决，系统不替你藏。
 `;

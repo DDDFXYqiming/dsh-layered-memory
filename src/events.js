@@ -5,8 +5,8 @@
 // - turn 计数持久化到命名空间（跨会话累计），headless 一次性会话也能触发周期维护。
 
 import { join } from "node:path";
-import { bumpTurnCounter, pendingNames, sopNames, isArchived } from "./store.js";
-import { readIndex } from "./l1index.js";
+import { bumpTurnCounter, pendingNames, sopNames, isArchived, nsRoot, resolveNamespace, setEntryMeta, getEntryMeta, slugify } from "./store.js";
+import { readIndex, indexChars } from "./l1index.js";
 import { runMaintain } from "./maintain.js";
 import { writePending } from "./memory-ops.js";
 
@@ -45,12 +45,26 @@ export function wireEvents(ctx, cfg, io) {
 	const retryTrackers = new Map(); // agentId -> Map(tool -> { fails, lastErrorTail })
 	const capturedSequences = new Map(); // agentId -> [{ tool, fails, errorTail, successTail }]
 	const reflectionState = new Map(); // sessionId -> { lastReflectionTurn }
+	const writeProvenance = new Map(); // agentId -> [{ kind, key }]，turn/end 时补 sourceSession/sourceSeqs
 	const disposers = [];
 
 	disposers.push(ctx.on("tools/result", (exec, result) => {
 		try {
 			io.onSkillResult?.(exec, result);
 		} catch { /* 激活失败不影响蒸馏 */ }
+		// [v0.6] 溯源自动补全：memory_write 成功后记下条目，turn/end 用真实 session/seq 回写 meta。
+		// 此前 142 条记忆里 141 条 sourceSeqs 为空，memory_expand 形同虚设。
+		if (exec?.name === "memory_write" && !result?.isError && exec?.agent?.id) {
+			const a = exec.arguments || {};
+			const topic = String(a.topic || "").trim();
+			if (topic) {
+				const kind = a.entry_type === "sop" ? "sop" : "fact";
+				const key = kind === "sop" ? slugify(topic) : topic;
+				const list = writeProvenance.get(String(exec.agent.id)) ?? [];
+				list.push({ kind, key, namespace: String(a.namespace || "") || null });
+				writeProvenance.set(String(exec.agent.id), list);
+			}
+		}
 		if (!cfg.autoPending || !exec?.agent?.id) return undefined;
 		const id = String(exec.agent.id);
 		const toolName = exec.name || "unknown";
@@ -86,6 +100,26 @@ export function wireEvents(ctx, cfg, io) {
 			const root = io.resolveRoot();
 			const totalTurns = bumpTurnCounter(root);
 
+			// ── 溯源回写：把本次会话 id 与该 turn 的 seq 补进刚写入条目的 meta ──
+			{
+				const writes = writeProvenance.get(sessionId);
+				if (Array.isArray(writes) && writes.length) {
+					const seqs = typeof event?.seq === "number" ? [event.seq] : [];
+					for (const w of writes) {
+						try {
+							const wRoot = w.namespace ? nsRoot(cfg.memoryDir, resolveNamespace(cfg, w.namespace)) : root;
+							const prev = getEntryMeta(wRoot, w.kind, w.key);
+							if (!prev) continue;
+							const patch = {};
+							if (!prev.sourceSession) patch.sourceSession = sessionId;
+							if (!Array.isArray(prev.sourceSeqs) || prev.sourceSeqs.length === 0) patch.sourceSeqs = seqs;
+							if (Object.keys(patch).length) setEntryMeta(wRoot, w.kind, w.key, patch);
+						} catch { /* 溯源补全失败不影响主流程 */ }
+					}
+					writeProvenance.delete(sessionId);
+				}
+			}
+
 			// ── 自动蒸馏：只有重试序列才写候选 ──
 			if (cfg.autoPending && sessionId) {
 				const seqs = capturedSequences.get(sessionId);
@@ -102,17 +136,17 @@ export function wireEvents(ctx, cfg, io) {
 
 			// ── 周期维护（持久全局计数）──
 			if (cfg.maintainEveryTurns > 0 && totalTurns > 0 && totalTurns % cfg.maintainEveryTurns === 0) {
-				runMaintain(root, cfg.maxIndexLines, cfg.maintainOpts);
+				runMaintain(root, cfg.l1MaxChars, cfg.maintainOpts);
 			}
 
 			// ── 阈值反思注入（带冷却，替代旧的每 10 轮固定提醒）──
 			if (sessionId) {
 				const pendingCount = pendingNames(root).length;
 				const sopCount = sopNames(root).filter((s) => !isArchived(root, "sop", s)).length;
-				const indexLines = readIndex(root).split("\n").length;
-				const overPending = pendingCount >= cfg.reflectPendingThreshold;
+				const indexSize = indexChars(readIndex(root));
+				const overPending = cfg.autoPending && pendingCount >= cfg.reflectPendingThreshold;
 				const overSops = sopCount >= cfg.reflectSopsThreshold;
-				const overIndex = indexLines > cfg.maxIndexLines;
+				const overIndex = indexSize > cfg.l1MaxChars;
 				const state = reflectionState.get(sessionId) ?? { lastReflectionTurn: -Infinity };
 				const cooled = totalTurns - state.lastReflectionTurn >= cfg.reflectCooldownTurns;
 				if ((overPending || overSops || overIndex) && cooled) {
@@ -122,7 +156,7 @@ export function wireEvents(ctx, cfg, io) {
 						const parts = [];
 						if (overPending) parts.push(`pending 候选已累积 ${pendingCount} 条（阈值 ${cfg.reflectPendingThreshold}），请 memory_pending 逐条审阅：有价值的用 memory_accept 落库，其余忽略`);
 						if (overSops) parts.push(`L3 SOP 已达 ${sopCount} 条（阈值 ${cfg.reflectSopsThreshold}），请考虑用 memory_maintain 查看合并候选并整合相近条目`);
-						if (overIndex) parts.push(`L1 索引超过 ${cfg.maxIndexLines} 行，建议 memory_maintain 压缩或精简 [RULES]`);
+						if (overIndex) parts.push(`L1 索引 ${indexSize} 字符超预算 ${cfg.l1MaxChars}（存在性不裁剪）：请 memory_maintain 看合并候选/冷条目，并精简 [RULES]`);
 						agent.inject({
 							content: [{ type: "text", text: `[记忆整理请求] ${parts.join("；")}。（行动验证公理照旧：只沉淀有证据的内容）` }],
 							source: { kind: "plugin", plugin: "memory" },
@@ -138,9 +172,24 @@ export function wireEvents(ctx, cfg, io) {
 	disposers.push(ctx.on("agent/disposed", ({ agent }) => {
 		if (!agent) return undefined;
 		const id = String(agent.id);
+		// [v0.6] 先落盘再清账：此前直接 delete 会丢掉已捕获但未等到 turn/end 的重试序列。
+		if (cfg.autoPending) {
+			const seqs = capturedSequences.get(id);
+			if (Array.isArray(seqs) && seqs.length > 0) {
+				try {
+					writePending(io.resolveRoot(), {
+						sourceSession: id,
+						sourceSeqs: [],
+						retries: seqs,
+						reason: `会话 dispose 前捕获 ${seqs.length} 个「先失败后成功」的重试序列（${seqs.map((s) => s.tool).join(", ")}），未等到 turn/end，先落候选。`,
+					});
+				} catch { /* 清理失败不阻断 dispose */ }
+			}
+		}
 		retryTrackers.delete(id);
 		capturedSequences.delete(id);
 		reflectionState.delete(id);
+		writeProvenance.delete(id);
 		return undefined;
 	}));
 

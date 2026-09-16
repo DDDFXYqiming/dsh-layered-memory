@@ -17,8 +17,11 @@ import {
 	hashText,
 	slugify,
 	computeNamespaceStats,
+	activeEntries,
+	loadAccess,
+	entryHeat,
 } from "./store.js";
-import { compressIndexEntries } from "./l1index.js";
+import { syncIndex, readIndex, indexChars } from "./l1index.js";
 import { normalizeText, tokenize, jaccard } from "./similarity.js";
 
 /** 近重复判定阈值：分词集合 Jaccard 达到该值视为同一记忆的微编辑版本。 */
@@ -163,18 +166,47 @@ export function findMergeCandidates(root, opts = {}) {
 	return candidates.slice(0, 20);
 }
 
-/** 执行一次完整维护：去重 + 压缩索引 + 统计 + 合并候选。 */
-export function runMaintain(root, maxLines, opts = {}) {
+/** 零访问复核窗口：创建超过该天数且衰减热度 < 0.5 的条目列入"待复核"（不自动隐藏、不自动删）。 */
+export const COLD_REVIEW_DAYS = 90;
+
+/**
+ * 冷条目复核清单：让访问热度有真实消费者（此前热度只服务于 L1 裁剪，
+ * 而裁剪本身已被证明是"能力永久隐身"的来源）。这里只做报告，不动数据。
+ */
+export function findColdEntries(root, { heat = {}, days = COLD_REVIEW_DAYS, limit = 10 } = {}) {
+	const access = loadAccess(root);
+	const meta = readMeta(root);
+	const { facts, sops } = activeEntries(root);
+	const now = Date.now();
+	const rows = [];
+	for (const [kind, list] of [["fact", facts], ["sop", sops]]) {
+		for (const key of list) {
+			const createdAt = (kind === "fact" ? meta.facts : meta.sops)[key]?.createdAt;
+			const ageDays = createdAt ? (now - Date.parse(createdAt || "")) / 86400000 : Infinity;
+			if (ageDays < days) continue;
+			const score = entryHeat(access, meta, kind, key, heat);
+			if (score >= 0.5) continue;
+			rows.push({ kind, name: key, heat: Number(score.toFixed(3)), age_days: Math.round(ageDays) });
+		}
+	}
+	rows.sort((a, b) => a.heat - b.heat || a.name.localeCompare(b.name));
+	return { threshold_days: days, count: rows.length, entries: rows.slice(0, limit) };
+}
+
+/** 执行一次完整维护：去重 + 索引核对（存在性全量，不裁剪）+ 统计 + 合并候选 + 冷条目复核。 */
+export function runMaintain(root, maxChars = 12288, opts = {}) {
 	const dedupe = dedupeEntries(root, opts);
-	const compress = compressIndexEntries(root, maxLines, opts.heat);
+	const index = syncIndex(root, maxChars);
 	const stats = computeNamespaceStats(root);
 	const mergeCandidates = findMergeCandidates(root, opts);
+	const cold = findColdEntries(root, opts);
 	const report = {
 		runAt: new Date().toISOString(),
 		dedupe,
-		compress,
+		index: { ...index, index_chars_actual: indexChars(readIndex(root)) },
 		stats,
 		mergeCandidates,
+		cold,
 	};
 	atomicWriteFileSync(join(root, "maintenance-report.json"), JSON.stringify(report, null, 2));
 	return report;

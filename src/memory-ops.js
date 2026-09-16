@@ -1,5 +1,9 @@
 // 记忆写操作与 pending 候选：writeMemory / pending 读写解析。
 // 依赖方向：memory-ops → store + l1index（单向，无循环）。
+// [v0.6] 三处硬约束（把 L0 公理从提示词变成代码）：
+//  - 覆盖已有条目必须先快照到 .history/（神圣不可删改：任何调用方都走这条路径）；
+//  - facts 正文禁止出现 "## " 行（否则会被解析成幽灵 section，实测已产生 10+ 条脏数据）；
+//  - 疑似密钥形态直接拒写（L0：凭证只允许存"引用"）。
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,76 +14,134 @@ import {
 	getEntryMeta,
 	slugify,
 	upsertFact,
+	snapshotEntry,
+	readFact,
 } from "./store.js";
-import { compressIndexEntries, readIndex, syncIndex } from "./l1index.js";
+import { syncIndex } from "./l1index.js";
+
+/** 疑似密钥形态（宁可响亮拒写，也不让凭证明文进记忆库再被检索回灌进上下文）。 */
+const SECRET_PATTERNS = [
+	/\bsk-[A-Za-z0-9_-]{16,}\b/,
+	/\bAKIA[0-9A-Z]{12,}\b/,
+	/\b(?:ghp|gho|ghs|github_pat)[_A-Za-z0-9]{16,}/,
+	/\bxox[baprs]-[A-Za-z0-9-]{10,}/,
+	/-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+	/\bBearer\s+[A-Za-z0-9._~+\/-]{16,}/i,
+];
+const LONG_TOKEN = /\b[A-Za-z0-9+/]{28,}={1,2}\b/;
+
+export function detectSecret(text) {
+	const s = String(text ?? "");
+	for (const re of SECRET_PATTERNS) if (re.test(s)) return re.source;
+	const m = s.match(LONG_TOKEN);
+	if (m) {
+		const tok = m[0];
+		const isPureHex = /^[0-9a-fA-F]+$/.test(tok.replace(/=+$/, ""));
+		const mixed = /[a-z]/.test(tok) && /[A-Z]/.test(tok) && /[0-9]/.test(tok);
+		if (!isPureHex && mixed) return "long-token";
+	}
+	return "";
+}
+
+/**
+ * 写入侧 L0 判据回显：把方法论放到决策点（借鉴 GA 的 "'This is L0:' + 写入动作同屏"）。
+ * 只提示不阻断——阻断只用于上面三条硬约束。
+ */
+export function buildAdvisories({ topic, content, existing, index, maxTopicChars = 40 }) {
+	const out = [];
+	if (String(topic).length > maxTopicChars) {
+		out.push(`topic ${String(topic).length} 字符，超过最小充分指针建议（≤${maxTopicChars}）：名字应自解释，细节放正文`);
+	}
+	if (/20\d\d[-/]\d\d|commit\s+[0-9a-f]{6,}/i.test(String(topic))) {
+		out.push("topic 含日期/commit 等易变状态（L0 公理 3）：这类信息放正文或删除，名字要能长期定位");
+	}
+	if (existing) {
+		out.push("该主题已存在：本次已自动把旧版本快照到 .history/，同主题演进更推荐 memory_update（可显式 supersede:false）");
+	}
+	if (index?.over_limit) {
+		out.push(`L1 索引 ${index.index_chars} 字符已超预算 ${index.max_chars}：请 memory_maintain 合并相近条目或归档冷条目（系统不会自动隐藏任何条目）`);
+	}
+	if (!String(content ?? "").trim()) out.push("content 为空");
+	return out;
+}
 
 /**
  * 写入正式记忆（fact/sop），带溯源 meta 与可选关联链接。
- * [v0.5 变更]
- * - related: string[] 存入 meta（A-MEM 轻量链接），memory_read 时回显。
- * - 写入不再计入访问热度（写≠读）；recency 保护由 entryHeat 的 createdAt 分支承担。
- * - 写入后若 L1 超限，立即执行一次热度压缩（毫秒级本地操作），
- *   告警只在压缩后仍超限时出现——消灭"反复提示 over_limit"。
+ * 所有覆盖写都必须经过这里快照（memory_write / memory_update / memory_accept 共用）。
  */
-export function writeMemory(root, { topic, entryType, content, evidence, sourceSession, sourceSeqs, namespace, related, maxIndexLines = 30, heat = {} }) {
+export function writeMemory(root, {
+	topic, entryType, content, evidence, sourceSession, sourceSeqs, namespace, related,
+	maxChars = 12288, snapshot = true,
+}) {
 	const safeTopic = String(topic).trim();
 	// topic 会进入 facts.md 的 ## section 与 L1 索引（再注入 system prompt）：
 	// 含换行/控制字符会让 section 解析错位，也会成为提示词注入载体，直接拒绝。
 	if (/[\n\r\u0000-\u001f\u007f]/.test(safeTopic)) {
 		throw new Error(`memory_write: topic 含换行或控制字符，拒绝写入: ${JSON.stringify(safeTopic.slice(0, 40))}`);
 	}
-	const body = `${String(content).trim()}\n\n> 证据: ${evidence}\n`;
+	const body = String(content ?? "").trim();
+	const secretHit = detectSecret(body);
+	if (secretHit) {
+		throw new Error(`memory_write: 内容疑似含密钥（命中 ${secretHit}）。行动验证公理之外还有 L0 红线「密钥仅引用」：请改存引用名/路径（如 keychain:<name> 或配置文件路径），不要写明文凭证。`);
+	}
+	if (entryType === "fact" && /^##\s+/m.test(body)) {
+		throw new Error("memory_write: fact 正文禁止以 \"## \" 开头的行——它会被解析成新的 L2 section（幽灵条目）。需要小标题请用 \"### \" 或列表。");
+	}
+	const evidenceText = String(evidence ?? "").trim();
+	if (!evidenceText) {
+		throw new Error("memory_write: evidence 必填（行动验证公理：无行动，不记忆）");
+	}
+	const wrapped = `${body}\n\n> 证据: ${evidenceText}\n`;
+
 	let path;
 	let action;
+	let history = "";
+	let existing = false;
 	if (entryType === "fact") {
 		path = join(root, "facts.md");
-		action = upsertFact(root, safeTopic, body.trim());
-		setEntryMeta(root, "fact", safeTopic, {
-			sourceSession: sourceSession || null,
-			sourceSeqs: Array.isArray(sourceSeqs) ? sourceSeqs.map(Number).filter(Number.isFinite) : [],
-			evidence: evidence || "",
-			namespace: namespace || null,
-			archived: getEntryMeta(root, "fact", safeTopic)?.archived || false,
-			...(Array.isArray(related) && related.length ? { related: related.map(String) } : {}),
-		});
+		existing = readFact(root, safeTopic) !== null;
+		if (existing && snapshot) history = snapshotEntry(root, "fact", safeTopic) || "";
+		action = upsertFact(root, safeTopic, wrapped.trim());
+		setEntryMeta(root, "fact", safeTopic, metaPatch({ sourceSession, sourceSeqs, evidence: evidenceText, namespace, related, root, kind: "fact", key: safeTopic }));
 	} else {
 		const slug = slugify(safeTopic);
 		path = join(root, "sops", `${slug}.md`);
-		const existed = existsSync(path);
-		const header = `# ${safeTopic}\n\n`;
-		atomicWriteFileSync(path, header + body);
-		action = existed ? "updated" : "created";
-		setEntryMeta(root, "sop", slug, {
-			sourceSession: sourceSession || null,
-			sourceSeqs: Array.isArray(sourceSeqs) ? sourceSeqs.map(Number).filter(Number.isFinite) : [],
-			evidence: evidence || "",
-			namespace: namespace || null,
-			archived: getEntryMeta(root, "sop", slug)?.archived || false,
-			...(Array.isArray(related) && related.length ? { related: related.map(String) } : {}),
-		});
+		existing = existsSync(path);
+		if (existing && snapshot) history = snapshotEntry(root, "sop", slug) || "";
+		atomicWriteFileSync(path, `# ${safeTopic}\n\n${wrapped}`);
+		action = existing ? "updated" : "created";
+		setEntryMeta(root, "sop", slug, metaPatch({ sourceSession, sourceSeqs, evidence: evidenceText, namespace, related, root, kind: "sop", key: slug }));
 	}
-	let index = syncIndex(root, maxIndexLines);
-	if (index.over_limit) {
-		// 写入即压缩：热度排序裁剪 L1 指针，记忆文件不动。
-		const compressed = compressIndexEntries(root, maxIndexLines, heat);
-		const linesAfter = readIndex(root).replace(/\r\n?/g, "\n").replace(/\n+$/, "").split("\n").length;
-		index = {
-			...index,
-			index_lines: linesAfter,
-			compressed: compressed.compressed,
-			facts_hidden: compressed.facts_hidden,
-			sops_hidden: compressed.sops_hidden,
-			// 压缩后仍超限（RULES 手动段过长等极端情况）才保留 over_limit=true
-			over_limit: linesAfter > maxIndexLines,
-		};
-	}
-	return { entry_type: entryType, topic: safeTopic, path, action, index };
+	const index = syncIndex(root, maxChars);
+	return {
+		entry_type: entryType,
+		topic: safeTopic,
+		path,
+		action,
+		history: history || undefined,
+		index,
+		advisories: buildAdvisories({ topic: safeTopic, content: body, existing, index }),
+	};
+}
+
+function metaPatch({ sourceSession, sourceSeqs, evidence, namespace, related, root, kind, key }) {
+	const prev = getEntryMeta(root, kind, key) || {};
+	return {
+		sourceSession: sourceSession || prev.sourceSession || null,
+		sourceSeqs: Array.isArray(sourceSeqs) && sourceSeqs.length
+			? sourceSeqs.map(Number).filter(Number.isFinite)
+			: (prev.sourceSeqs || []),
+		evidence,
+		namespace: namespace || null,
+		archived: prev.archived || false,
+		...(Array.isArray(related) && related.length ? { related: related.map(String) } : {}),
+	};
 }
 
 /**
  * 生成 pending 候选内容。
- * [v0.5 变更] 只为「有价值的信号」生成候选：同工具先失败后成功的重试序列
- * （附错误/结果尾部摘要），不再为普通成功调用生成垃圾候选。
+ * [v0.5] 只为「有价值的信号」生成候选：同工具先失败后成功的重试序列（附错误/结果尾部摘要）。
+ * [v0.6] autoPending 默认关闭：实测 6 天累积 108 条、消费≈0，且内容多为工具用法噪声。
  */
 export function pendingContent({ sourceSession, sourceSeqs, retries, reason }) {
 	const lines = [

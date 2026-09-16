@@ -46,6 +46,8 @@ export function nsRoot(memDir, ns) {
 export function detectNamespace() {
 	try {
 		const cwd = process.cwd();
+		// 家目录不是项目：此前实测在 ~/.dsh/memory 下生成了以用户名命名的垃圾命名空间。
+		if (join(cwd).replace(/[\\/]+$/, "") === join(homedir()).replace(/[\\/]+$/, "")) return "default";
 		const base = basename(cwd) || "default";
 		let branch = "";
 		try {
@@ -246,28 +248,82 @@ export function readSop(root, slug) {
 	return existsSync(p) ? readFileSync(p, "utf8") : null;
 }
 
-/** upsert facts.md 的 ## SECTION（基于行解析；CAS 防跨进程更新丢失）。 */
+/** facts.md 里所有同名 ## SECTION 的 [start,end) 行区间。 */
+function factSectionSpans(text, topic) {
+	const lines = String(text ?? "").split("\n");
+	const heads = [];
+	lines.forEach((line, i) => { if (line.startsWith("## ")) heads.push(i); });
+	const spans = [];
+	for (let k = 0; k < heads.length; k++) {
+		const start = heads[k];
+		const end = k + 1 < heads.length ? heads[k + 1] : lines.length;
+		if (lines[start].slice(3).trim() === topic) spans.push([start, end]);
+	}
+	return spans;
+}
+
+/**
+ * upsert facts.md 的 ## SECTION（基于行解析；CAS 防跨进程更新丢失）。
+ * [v0.6] 同名 section 只保留一个：历史上正文里的 "## " 行造成过重复 section，
+ * 旧实现只替换第一个 → 第二个永久隐身且互相覆盖 meta。多余的重复段先落 .history/
+ * 快照再合并掉（神圣不可删改：不丢内容）。
+ */
 export function upsertFact(root, topic, content) {
 	let action = "created";
-	casRewrite(join(root, "facts.md"), (text) => {
+	const factsPath = join(root, "facts.md");
+	const current = existsSync(factsPath) ? readFileSync(factsPath, "utf8") : null;
+	if (current !== null) {
+		const dupes = factSectionSpans(current, topic).slice(1);
+		for (const [s, e] of dupes) {
+			try {
+				const ts = Date.now();
+				const rel = join(HISTORY_DIR, `fact-${slugify(topic)}-dup-${ts}.md`);
+				atomicWriteFileSync(join(root, rel), current.split("\n").slice(s, e).join("\n").trim() + "\n");
+			} catch { /* 快照失败不阻断合并 */ }
+		}
+	}
+	casRewrite(factsPath, (text) => {
 		const base = text ?? FACTS_TEMPLATE;
 		const lines = base.split("\n");
-		let start = -1;
-		let end = lines.length;
-		for (let i = 0; i < lines.length; i++) {
-			if (lines[i].startsWith("## ")) {
-				if (start >= 0) { end = i; break; }
-				if (lines[i].slice(3).trim() === topic) start = i;
-			}
+		const spans = factSectionSpans(base, topic);
+		if (!spans.length) {
+			action = "created";
+			return base.replace(/\s*$/, "\n") + `## ${topic}\n${content}\n\n`;
 		}
-		if (start >= 0) {
-			action = "updated";
-			return [...lines.slice(0, start), `## ${topic}`, content, "", ...lines.slice(end)].join("\n");
-		}
-		action = "created";
-		return base.replace(/\s*$/, "\n") + `## ${topic}\n${content}\n\n`;
+		action = spans.length > 1 ? "merged" : "updated";
+		// 从后往前删掉多余的同名段（不影响首段行号），再把首段整体换成新内容。
+		const out = [...lines];
+		for (const [s, e] of spans.slice(1).reverse()) out.splice(s, e - s);
+		const [firstStart, firstEnd] = spans[0];
+		out.splice(firstStart, firstEnd - firstStart, `## ${topic}`, content, "");
+		return out.join("\n").replace(/\n{3,}/g, "\n\n");
 	});
 	return action;
+}
+
+/**
+ * 把一条已有记忆的当前内容快照到 .history/，返回相对路径（无内容时返回 ""）。
+ * [v0.6] 所有覆盖写（memory_write / memory_update / memory_accept）统一走这里，
+ * 修复此前"write 静默覆盖且不留历史"的数据丢失缺陷。
+ */
+export function snapshotEntry(root, kind, key) {
+	try {
+		const ts = Date.now();
+		if (kind === "fact") {
+			const old = readFact(root, key);
+			if (old === null) return "";
+			const rel = join(HISTORY_DIR, `fact-${slugify(key)}-${ts}.md`);
+			atomicWriteFileSync(join(root, rel), `# ${key}\n\n${old}\n`);
+			return rel;
+		}
+		const old = readSop(root, key);
+		if (old === null) return "";
+		const rel = join(HISTORY_DIR, `sop-${key}-${ts}.md`);
+		atomicWriteFileSync(join(root, rel), old);
+		return rel;
+	} catch {
+		return "";
+	}
 }
 
 export function loadAccess(root) {

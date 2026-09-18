@@ -182,10 +182,33 @@ export function pendingContent({ sourceSession, sourceSeqs, retries, reason }) {
 }
 
 /** 写入 pending 候选。 */
+/**
+ * [0.6.1 N12] 尾部摘要的密钥消毒：autoPending 开启时错误/结果尾部会原样进
+ * pending/*.md 落盘；若工具错误回显了凭证，此前要到 accept 侧才被 detectSecret 拦
+ * （已持久化）。与「宁可响亮拒写，也不让凭证明文进记忆库」同标准——落盘前过同一个
+ * detectSecret，命中即整段替换为 [redacted:<pattern>]（只留模式标识，不留内容）。
+ */
+function redactSecretTail(text) {
+	const s = String(text ?? "");
+	const hit = detectSecret(s);
+	return hit ? `[redacted:${hit}]` : s;
+}
+
+/** 写入 pending 候选（重试序列尾部先过密钥消毒）。 */
 export function writePending(root, payload) {
 	const fileName = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.md`;
 	const p = join(root, PENDING_DIR, fileName);
-	atomicWriteFileSync(p, pendingContent(payload));
+	const safe = Array.isArray(payload?.retries)
+		? {
+			...payload,
+			retries: payload.retries.map((r) => ({
+				...r,
+				errorTail: redactSecretTail(r?.errorTail),
+				successTail: redactSecretTail(r?.successTail),
+			})),
+		}
+		: payload;
+	atomicWriteFileSync(p, pendingContent(safe));
 	return fileName;
 }
 

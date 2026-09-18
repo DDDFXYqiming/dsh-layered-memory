@@ -206,6 +206,25 @@ test("M2 真实返回样例过宿主 validateJsonSchemaValue；缺必需字段�
 	expect(validateJsonSchemaValue(tool("memory_write").output.schema, bad, "out").length).toBeGreaterThan(0);
 });
 
+// ── N12：autoPending 尾部密钥在落盘前消毒 ──
+
+test("N12 autoPending 开启时，含密钥的 pending 尾部落盘前被替换为 [redacted:<pattern>]", async () => {
+	if (typeof disposer === "function") disposer();
+	if (memDir) rmSync(memDir, { recursive: true, force: true });
+	setup({ autoPending: true });
+	fire("tools/result", { name: "pwsh", agent: { id: "s-sec" }, arguments: {} },
+		{ isError: true, text: "curl: 401 Unauthorized header=sk-abcdefghijklmnopqrstuvwxyz012345" });
+	fire("tools/result", { name: "pwsh", agent: { id: "s-sec" }, arguments: {} },
+		{ isError: false, text: "retry succeeded" });
+	fire("session/event", { id: "s-sec" }, { type: "turn/end", seq: 3 });
+	const files = readdirSync(join(root(), "pending")).filter((f) => f.endsWith(".md"));
+	expect(files).toHaveLength(1);
+	const text = readFileSync(join(root(), "pending", files[0]), "utf8");
+	expect(text).not.toContain("sk-abcdefghijklmnopqrstuvwxyz012345");
+	expect(text).toContain("[redacted:");
+	expect(text).toContain("retry succeeded"); // 非敏感尾部原样保留
+});
+
 // ── M3：autoNamespace 的 git 分支探测进程内缓存 ──
 
 test("M3 detectNamespace：TTL 内第二次调用不再 spawn git；TTL=0 关闭缓存；过期重取", async () => {

@@ -46,6 +46,7 @@ export function wireEvents(ctx, cfg, io) {
 	const capturedSequences = new Map(); // agentId -> [{ tool, fails, errorTail, successTail }]
 	const reflectionState = new Map(); // sessionId -> { lastReflectionTurn }
 	const writeProvenance = new Map(); // agentId -> [{ kind, key }]，turn/end 时补 sourceSession/sourceSeqs
+	const turnEndWarned = new Set(); // [0.6.1 N7] 已提醒过的 turn/end 故障类别（同类只 console.warn 一次）
 	const disposers = [];
 
 	disposers.push(ctx.on("tools/result", (exec, result) => {
@@ -93,34 +94,57 @@ export function wireEvents(ctx, cfg, io) {
 		return undefined;
 	}));
 
+	// [0.6.1 N7] 此前整段 turn/end 由一个约 70 行的空 catch 兜底：任何代码级错误（0.6.0 的
+	// rmSync ReferenceError 即教训）都会无痕消失。现按关键段拆分防护：每段独立 try/catch +
+	// warnOnce（同类只 warn 一次的 console.warn，不再静默）；agent.inject 按 cookbook 单独
+	// 包 try/catch（防范已 dispose 的 agent），inject 失败不再连带跳过 reflectionState 更新。
+	const warnOnce = (key, step, err) => {
+		if (turnEndWarned.has(key)) return;
+		turnEndWarned.add(key);
+		const msg = `[dsh-layered-memory] turn/end \"${step}\" 失败（同类仅提醒一次）: ${err?.stack || err}`;
+		if (typeof ctx.logger?.warn === "function") {
+			try { ctx.logger.warn(msg); } catch { /* logger 故障降级 console */ }
+		}
+		try { console.warn(msg); } catch { /* console 不可用（非常规宿主）时放弃提醒 */ }
+	};
+	
 	disposers.push(ctx.on("session/event", (session, event) => {
 		if (!event || event.type !== "turn/end") return undefined;
 		const sessionId = String(session?.id ?? "");
+		let root;
+		let totalTurns = 0;
 		try {
-			const root = io.resolveRoot();
-			const totalTurns = bumpTurnCounter(root);
-
-			// ── 溯源回写：把本次会话 id 与该 turn 的 seq 补进刚写入条目的 meta ──
-			{
-				const writes = writeProvenance.get(sessionId);
-				if (Array.isArray(writes) && writes.length) {
-					const seqs = typeof event?.seq === "number" ? [event.seq] : [];
-					for (const w of writes) {
-						try {
-							const wRoot = w.namespace ? nsRoot(cfg.memoryDir, resolveNamespace(cfg, w.namespace)) : root;
-							const prev = getEntryMeta(wRoot, w.kind, w.key);
-							if (!prev) continue;
-							const patch = {};
-							if (!prev.sourceSession) patch.sourceSession = sessionId;
-							if (!Array.isArray(prev.sourceSeqs) || prev.sourceSeqs.length === 0) patch.sourceSeqs = seqs;
-							if (Object.keys(patch).length) setEntryMeta(wRoot, w.kind, w.key, patch);
-						} catch { /* 溯源补全失败不影响主流程 */ }
-					}
-					writeProvenance.delete(sessionId);
+			root = io.resolveRoot();
+			totalTurns = bumpTurnCounter(root);
+		} catch (err) {
+			warnOnce("resolve", "命名空间解析/turn 计数", err);
+			return undefined;
+		}
+	
+		// ── 溯源回写：把本次会话 id 与该 turn 的 seq 补进刚写入条目的 meta ──
+		try {
+			const writes = writeProvenance.get(sessionId);
+			if (Array.isArray(writes) && writes.length) {
+				const seqs = typeof event?.seq === "number" ? [event.seq] : [];
+				for (const w of writes) {
+					try {
+						const wRoot = w.namespace ? nsRoot(cfg.memoryDir, resolveNamespace(cfg, w.namespace)) : root;
+						const prev = getEntryMeta(wRoot, w.kind, w.key);
+						if (!prev) continue;
+						const patch = {};
+						if (!prev.sourceSession) patch.sourceSession = sessionId;
+						if (!Array.isArray(prev.sourceSeqs) || prev.sourceSeqs.length === 0) patch.sourceSeqs = seqs;
+						if (Object.keys(patch).length) setEntryMeta(wRoot, w.kind, w.key, patch);
+					} catch { /* 单条溯源补全失败跳过该条，其余照常（段级异常另有 warnOnce） */ }
 				}
+				writeProvenance.delete(sessionId);
 			}
-
-			// ── 自动蒸馏：只有重试序列才写候选 ──
+		} catch (err) {
+			warnOnce("provenance", "溯源回写", err);
+		}
+	
+		// ── 自动蒸馏：只有重试序列才写候选 ──
+		try {
 			if (cfg.autoPending && sessionId) {
 				const seqs = capturedSequences.get(sessionId);
 				if (Array.isArray(seqs) && seqs.length > 0) {
@@ -133,13 +157,21 @@ export function wireEvents(ctx, cfg, io) {
 					capturedSequences.delete(sessionId);
 				}
 			}
-
-			// ── 周期维护（持久全局计数）──
+		} catch (err) {
+			warnOnce("distill", "自动蒸馏落盘", err);
+		}
+	
+		// ── 周期维护（持久全局计数）──
+		try {
 			if (cfg.maintainEveryTurns > 0 && totalTurns > 0 && totalTurns % cfg.maintainEveryTurns === 0) {
 				runMaintain(root, cfg.l1MaxChars, cfg.maintainOpts);
 			}
-
-			// ── 阈值反思注入（带冷却，替代旧的每 10 轮固定提醒）──
+		} catch (err) {
+			warnOnce("maintain", "周期维护", err);
+		}
+	
+		// ── 阈值反思注入（带冷却，替代旧的每 10 轮固定提醒）──
+		try {
 			if (sessionId) {
 				const pendingCount = pendingNames(root).length;
 				const sopCount = sopNames(root).filter((s) => !isArchived(root, "sop", s)).length;
@@ -157,19 +189,28 @@ export function wireEvents(ctx, cfg, io) {
 						if (overPending) parts.push(`pending 候选已累积 ${pendingCount} 条（阈值 ${cfg.reflectPendingThreshold}），请 memory_pending 逐条审阅：有价值的用 memory_accept 落库，其余忽略`);
 						if (overSops) parts.push(`L3 SOP 已达 ${sopCount} 条（阈值 ${cfg.reflectSopsThreshold}），请考虑用 memory_maintain 查看合并候选并整合相近条目`);
 						if (overIndex) parts.push(`L1 索引 ${indexSize} 字符超预算 ${cfg.l1MaxChars}（存在性不裁剪）：请 memory_maintain 看合并候选/冷条目，并精简 [RULES]`);
-						agent.inject({
-							content: [{ type: "text", text: `[记忆整理请求] ${parts.join("；")}。（行动验证公理照旧：只沉淀有证据的内容）` }],
-							source: { kind: "plugin", plugin: "memory" },
-						});
+						// [0.6.1 N7] inject 单独 try：抛错（agent 已 dispose 等）不再连带跳过
+						// reflectionState 更新——失败重试交由冷却期，而非下一轮立即重复注入。
+						// [0.6.1 I5] source.plugin 用插件导出名 layered-memory（src/index.js），
+						// 与 skill 名 memory 区分：转写归因指向提供方插件。
+						try {
+							agent.inject({
+								content: [{ type: "text", text: `[记忆整理请求] ${parts.join("；")}。（行动验证公理照旧：只沉淀有证据的内容）` }],
+								source: { kind: "plugin", plugin: "layered-memory" },
+							});
+						} catch (err) {
+							warnOnce("inject", "反思注入（agent 可能已 dispose）", err);
+						}
 						reflectionState.set(sessionId, { lastReflectionTurn: totalTurns });
 					}
 				}
 			}
-		} catch { /* 事件处理失败不影响主流程 */ }
+		} catch (err) {
+			warnOnce("reflect", "阈值反思判定", err);
+		}
 		return undefined;
 	}));
-
-	disposers.push(ctx.on("agent/disposed", ({ agent }) => {
+		disposers.push(ctx.on("agent/disposed", ({ agent }) => {
 		if (!agent) return undefined;
 		const id = String(agent.id);
 		// [v0.6] 先落盘再清账：此前直接 delete 会丢掉已捕获但未等到 turn/end 的重试序列。

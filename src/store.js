@@ -1,7 +1,7 @@
 // 存储原语：命名空间、目录布局、facts/sops/pending 读写、meta 溯源、访问热度（带衰减）。
 // 本模块不依赖索引逻辑（l1index），保持单向依赖。
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, basename } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -173,7 +173,11 @@ export function casRewrite(path, compute, budgetMs = 3000) {
 				if (done === next) settled = true;
 			}
 		}
-		try { rmSync(tmp, { force: true }); } catch { /* 已 rename 时不存在，忽略 */ }
+		// [0.6.1 N1] rmSync 此前未导入，这里必抛 ReferenceError 并被 catch 静默吞掉，
+		// CAS 复核失败分支的 .tmp-* 永久泄漏。补导入后 force:true 已吸收 ENOENT
+		// （成功提交时 commitStaged 的 finally 已删掉 tmp）；仍能到这里只剩
+		// EPERM/EBUSY（杀软短暂持锁）——残留可接受，不阻断 CAS 重试。
+		try { rmSync(tmp, { force: true }); } catch { /* EPERM/EBUSY：tmp 残留但不影响正确性 */ }
 		if (settled) return;
 		if (Date.now() - t0 > budgetMs) {
 			throw new Error(`casRewrite: 并发冲突持续超 ${budgetMs}ms 预算，放弃写入（防更新丢失）: ${path}`);

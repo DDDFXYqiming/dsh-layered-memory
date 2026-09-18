@@ -69,6 +69,33 @@ afterEach(() => {
 	if (memDir) rmSync(memDir, { recursive: true, force: true });
 });
 
+// ── N1：casRewrite 竞争路径不得泄漏 .tmp-* ──
+
+test("N1 casRewrite：基座被并发改写的分支会清掉自己的 tmp，不留残留", async () => {
+	const { casRewrite } = await import("../src/store.js");
+	const dir = mkdtempSync(join(tmpdir(), "dsh-memory-n1-"));
+	try {
+		const p = join(dir, "x.txt");
+		writeFileSync(p, "v0", "utf8");
+		let round = 0;
+		// 第一轮：compute 之后、复核之前模拟并发者改写基座 → cur !== text，走不走
+		// commitStaged 的放弃分支（该分支没有 finally 兜底，清理只能靠 casRewrite 自己）。
+		casRewrite(p, (text) => {
+			round += 1;
+			if (round === 1) {
+				writeFileSync(p, "raced", "utf8");
+				return "v1";
+			}
+			return null; // 第二轮基于新基座重算：无需写入，退出
+		}, 1000);
+		expect(readFileSync(p, "utf8")).toBe("raced");
+		const leftovers = readdirSync(dir).filter((f) => f.includes(".tmp-"));
+		expect(leftovers).toEqual([]);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 // ── M1：memory_maintain 在 createdAt 缺失/损坏的老库上不再整包失败 ──
 
 test("M1 maintain：无 createdAt / 非法 createdAt / 极老条目的 mix 输出仍是无损 JSON", async () => {

@@ -5,6 +5,7 @@
 // - turn 计数持久化到命名空间（跨会话累计），headless 一次性会话也能触发周期维护。
 
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { bumpTurnCounter, pendingNames, sopNames, isArchived, nsRoot, resolveNamespace, setEntryMeta, getEntryMeta, slugify } from "./store.js";
 import { readIndex, indexChars } from "./l1index.js";
 import { runMaintain } from "./maintain.js";
@@ -48,6 +49,10 @@ export function wireEvents(ctx, cfg, io) {
 	const writeProvenance = new Map(); // agentId -> [{ kind, key }]，turn/end 时补 sourceSession/sourceSeqs
 	const turnEndWarned = new Set(); // [0.6.1 N7] 已提醒过的 turn/end 故障类别（同类只 console.warn 一次）
 	const disposers = [];
+	// [0.6.3] 维护节流与一次性诊断状态
+	const MAINTAIN_MIN_INTERVAL_MS = 10 * 60 * 1000;
+	let lastMaintainAt = 0;
+	let reflectDiagDone = false;
 
 	disposers.push(ctx.on("tools/result", (exec, result) => {
 		try {
@@ -111,11 +116,16 @@ export function wireEvents(ctx, cfg, io) {
 	disposers.push(ctx.on("session/event", (session, event) => {
 		if (!event || event.type !== "turn/end") return undefined;
 		const sessionId = String(session?.id ?? "");
+		// [0.6.3] 交互会话判据：Agent Teams 开启后同一进程会并发存在 N 个 teammate 会话，
+		// 它们各自发 turn/end。轮次计数与反思注入只认交互（无 parentSession）会话，否则
+		// maintainEveryTurns 被 teammate 轮次按 N 倍稀释，且「去改共享记忆」的提示会发给
+		// 只读型 teammate。headless 一次性会话无 parent，仍计入（原语义保留）。
+		const isInteractive = session?.header?.parentSession === undefined;
 		let root;
 		let totalTurns = 0;
 		try {
 			root = io.resolveRoot();
-			totalTurns = bumpTurnCounter(root);
+			totalTurns = isInteractive ? bumpTurnCounter(root) : 0;
 		} catch (err) {
 			warnOnce("resolve", "命名空间解析/turn 计数", err);
 			return undefined;
@@ -163,8 +173,20 @@ export function wireEvents(ctx, cfg, io) {
 	
 		// ── 周期维护（持久全局计数）──
 		try {
-			if (cfg.maintainEveryTurns > 0 && totalTurns > 0 && totalTurns % cfg.maintainEveryTurns === 0) {
-				runMaintain(root, cfg.l1MaxChars, cfg.maintainOpts);
+			if (isInteractive && cfg.maintainEveryTurns > 0 && totalTurns > 0 && totalTurns % cfg.maintainEveryTurns === 0) {
+				// [0.6.3] runMaintain 实测一次约 1.26s（去重 O(n²) + 重写 index.txt + 写报告）。
+				// 此前它在宿主 Session.append 的同步发布窗口内执行，会拖长该窗口并与其它观察器的
+				// 重入守卫相邻；移到 setImmediate 让本次发布先收口。再加最短间隔节流，避免多
+				// 会话密集 turn/end 时同一阈值被重复排队。
+				const nowMs = Date.now();
+				if (nowMs - lastMaintainAt >= MAINTAIN_MIN_INTERVAL_MS) {
+					lastMaintainAt = nowMs;
+					const mRoot = root;
+					setImmediate(() => {
+						try { runMaintain(mRoot, cfg.l1MaxChars, cfg.maintainOpts); }
+						catch (err) { warnOnce("maintain-async", "周期维护（延迟执行）", err); }
+					});
+				}
 			}
 		} catch (err) {
 			warnOnce("maintain", "周期维护", err);
@@ -172,7 +194,7 @@ export function wireEvents(ctx, cfg, io) {
 	
 		// ── 阈值反思注入（带冷却，替代旧的每 10 轮固定提醒）──
 		try {
-			if (sessionId) {
+			if (isInteractive && sessionId) {
 				const pendingCount = pendingNames(root).length;
 				const sopCount = sopNames(root).filter((s) => !isArchived(root, "sop", s)).length;
 				const indexSize = indexChars(readIndex(root));
@@ -184,6 +206,12 @@ export function wireEvents(ctx, cfg, io) {
 				if ((overPending || overSops || overIndex) && cooled) {
 					const agentsService = ctx.get("agents");
 					const agent = agentsService?.get?.(sessionId);
+					if (!agent || typeof agent.inject !== "function") {
+						if (!reflectDiagDone) {
+							reflectDiagDone = true;
+							warnOnce("reflect-skip", "阈值反思判定通过但无法注入", new Error('agent=' + (agent ? "found" : "missing") + ' injectFn=' + typeof agent?.inject + ' pending=' + pendingCount + '/' + cfg.reflectPendingThreshold + ' sops=' + sopCount + '/' + cfg.reflectSopsThreshold + ' index=' + indexSize + '/' + cfg.l1MaxChars + ' autoPending=' + cfg.autoPending + ' cooldown=' + cfg.reflectCooldownTurns));
+						}
+					}
 					if (agent && typeof agent.inject === "function") {
 						const parts = [];
 						if (overPending) parts.push(`pending 候选已累积 ${pendingCount} 条（阈值 ${cfg.reflectPendingThreshold}），请 memory_pending 逐条审阅：有价值的用 memory_accept 落库，其余忽略`);
@@ -196,7 +224,13 @@ export function wireEvents(ctx, cfg, io) {
 						// [0.6.2] turn/end 观察器由宿主 Session.append 发布窗口内同步回调，
 						// 直接 inject 会撞重入守卫（session append cannot reenter）；延迟到下一宏任务
 						// 让本次发布先收口，期间 agent 若被 dispose 由 warnOnce 接住。
+						// [0.6.3] 宿主 inject 只做 inbox.splice、完全不校验形状：此前缺 id/role 的字面量
+						// 不会抛错，而是把一条畸形 user 消息直接落进会话历史。不用 dsh-llm 的
+							// createUserMessage——它在本仓只是 devDependency，运行时 import 会引入未声明
+						// 依赖，故手搓等价形状。
 						const reflectionPayload = {
+							id: randomUUID(),
+							role: "user",
 							content: [{ type: "text", text: `[记忆整理请求] ${parts.join("；")}。（行动验证公理照旧：只沉淀有证据的内容）` }],
 							source: { kind: "plugin", plugin: "layered-memory" },
 						};

@@ -2,6 +2,17 @@
 
 All notable changes to `dsh-layered-memory` are documented here.
 
+## [0.6.3] - 2026-09-18
+
+修复（Agent Teams 多会话交互 + 反思注入 payload 形状）
+- 背景：开启官方 `dsh-experimental-agent-team-profile` / `-web-profile` 后，同一进程内会并发存在 N 个 teammate 会话（`session.header.parentSession` 非空），它们各自发 `turn/end`。增量审查实测确认下列后果。
+- **轮次计数被 teammate 灌水**：`bumpTurnCounter` 是无类别过滤的全局持久计数，`maintainEveryTurns=20` 的语义被稀释为「全进程 20 次 turn/end」，N 个 teammate 时提前约 N 倍触发，且触发者可能是 teammate。现只对交互（无 parentSession）会话 +1；headless 一次性会话与无 header 的旧调用形状仍计入（原语义保留）。
+- **反思注入不分会话类别**：`agents.get(sessionId)` 对 teammate 会话同样命中（宿主强制 `agent.id === session.id`），一旦注入可用，每个 teammate 首轮都会收到「请去改共享记忆」的提示，诱导只读型 teammate 写共享记忆库。现与计数同源，只对交互会话注入。
+- **注入 payload 不合宿主 `UserMessage` 形状**：宿主 `Agent.inject` 只做 `inbox.splice`、完全不校验形状，此前缺 `id`/`role` 的字面量不会抛错，而是把一条畸形 user 消息直接落进会话历史。现补 `id`（`randomUUID`）+ `role: "user"`。不用 `dsh-llm` 的 `createUserMessage`——它在本仓仅 devDependency，运行时 import 会引入未声明依赖。
+- **周期维护在 append 同步发布窗口内执行**：`runMaintain` 实测一次约 1.26s（去重 O(n²) + 重写 index.txt + 写报告），此前直接跑在观察器同步段，拖长该窗口并与其它观察器的重入守卫相邻。现移到 `setImmediate`，并加 10 分钟最短间隔节流，避免多会话密集 turn/end 时同一阈值被重复排队。
+- **静默失败补诊断**：反思判定通过但 `agent` 缺失 / `inject` 不可调用时此前无任何输出（这正是「修复已装但宿主未重启 → 功能看起来死了」难以自证的原因）。现补一次性 `warnOnce("reflect-skip", ...)`，打印 pending/sops/index/autoPending/cooldown 全部判据值。
+- 回归：`test/v063.test.mjs`（teammate 不计数不注入 + 交互会话计数并注入 + payload 带 id/role；无 header 旧形状仍算交互）。全量 58/58 绿。
+
 ## [0.6.2] - 2026-09-18
 
 修复（反思注入撞宿主重入守卫）

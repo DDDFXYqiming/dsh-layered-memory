@@ -2,6 +2,48 @@
 
 All notable changes to `dsh-layered-memory` are documented here.
 
+## [0.6.1] - 2026-09-18
+
+一句话：官方规范审查（report-20260918-layered-memory）4 MAJOR + 14 MINOR 全量闭环——输出契约恢复类型化投影、注入面校验缺口收口、热路径去同步 spawn、静默失败全部点名。
+
+### Fixed
+- **M1 `memory_maintain` 在老库上整包失败（已知 bug 清除）**：`createdAt` 缺失/非法时 `age_days` 为 Infinity（`Math.round` 后仍非有限），宿主判结果「not lossless JSON」整包拒收。根因消毒为 null（`heat` 同法），出口包装 `pruneUndefined` 升级为「undefined 键剥离 + 非有限数→null」，从类上根治。
+- **M4 `memory_rollback` fact 路径幽灵 section 注入**：此前唯一绕过 topic 控制字符校验的 `## ` 写入口——`"x\n## evil"` 经 slugify 可命中同前缀历史快照并注入 facts.md、随 syncIndex 进入每轮 L1 系统上下文。现复用写入侧单源 `assertSafeTopic`（rollback/archive/expand/promote/accept 全部收口），并对回滚快照正文的 `"## "` 行做纵深拒绝。
+- N1 `casRewrite` 竞争分支 `rmSync` 未导入：ReferenceError 被空 catch 吞掉且永久泄漏 `.facts.md.tmp-*`。补导入、catch 点名错误类型、新增竞争清理回归（阴性对照验证）。
+- N7 `turn/end` 约 70 行大空 catch 拆分为解析/溯源/蒸馏/维护/反思五段各自防护 + `warnOnce` 一次性 console.warn；`agent.inject` 单独 try/catch 防已 dispose 的 agent，失败不再连带跳过 reflectionState 更新。
+- N12 `writePending` 落盘前对重试序列错误/结果尾部过 `detectSecret`（与 accept 侧同一函数），命中整段替换为 `[redacted:<pattern>]`——凭证不再先进盘后被拦。
+- N13 `snapshotEntry` 失败不再静默返回 `""`：返回 `{ path, error }`，`writeMemory` 把「快照失败，旧版本未保留：<原因>」汇入 advisories 首条（覆盖写仍继续，拒写才会丢新数据；strict 抛错配置未引入，见下）。
+- N11 重试序列候选接受为 fact 的死路组合：accept 路径把候选正文 `"## "` 行自动降级 `"### "`（仅接受路径；正式写入侧硬约束不变）。
+- N4 `maintainEveryTurns`/`reflectPendingThreshold`/`reflectSopsThreshold`/`reflectCooldownTurns` 提为 `Schema.natural()`（非负整数），-1/2.5 等无效值在插件加载期响亮失败。
+- N10 CHANGELOG 陈旧 `[Unreleased]` 节整体并入 0.6.0（矛盾表述按现行行为修订），该节删除。
+
+### Added
+- **M2 输出契约（PTC 可编程性）**：14 个 `memory_*` 工具 output.schema 从裸开放对象恢复为「稳定字段声明（properties + required）+ `additionalProperties: true` 保持开放」——声明字段获得类型投影，新增字段不再因漂移拒收；`normalizeMeta`/expand 的 `sourceSeqs` 归一 number[] 兜底老库垃圾值。
+- M3 性能：`detectNamespace` 进程内 memoize（key=cwd，TTL 新配置 `namespaceCacheTtlMs` 默认 60s、0 关闭），autoNamespace 默认路径不再每轮 prompt 装配/每次工具执行同步 spawn git；命名空间布局 ensure 移出逐轮求值路径（每个 root 一次；工具写路径仍显式 ensure）。
+- N5 `coldReviewDays` 入 Config 并穿透 maintainOpts；`L1_MAX_CHARS_DEFAULT` 导出常量单源（N6，原 12288 字面量散落 4 处）。
+- N8 `memory_expand` 遵守 `exec.signal`（readSession 前后各查 aborted）。
+- I7 5 个同步 execute 统一 async；I9 read/list/search/stats/pending 声明 `isConcurrencySafe`。
+- I4 `memory_activate` 重复激活返回 `{activated:true, already:true, tools:[…14]}` 可判定规范值（此前与失败同形），schema 补 `already` 声明。
+- 回归测试 `test/v061.test.mjs` 16 例（M1-M4、M2 契约含宿主 validateJsonSchemaValue 实测、M3 缓存零 spawn、N4/N6/N11/N12/N13、I4）。39→55 全绿。
+
+### Changed
+- N14 按官方 framework/service 语义修 inject 矛盾：`sessionQuery` 移出 inject（可选依赖=使用点 ctx.get + 「服务不可用」规范值降级）；`agents`/`systemPrompt` 保留必需并删除永不可达的 `Boolean(agents)`/`if (sysPrompt)` 死分支；旧「未 inject 时 ctx.get 恒 undefined」注释基于旧版 cordis（4.0.2 源码注释明确 get 无 inject 要求），已更正。
+- N2 删除零 import 的 `@deepseek-ai/dsh-system-prompt` peer（运行期 ctx 服务不需要包级依赖，缩小私有 peer 解析面）；N3 files 补 `CHANGELOG.md`（README 链接不再成安装产物死链，pack 19→20 文件）。
+- I5 反思注入归因 `source.plugin` 由 skill 名 `memory` 改为插件名 `layered-memory`。
+- I6 `memory_maintain` 工具描述从生效配置动态拼接阈值，并修正 v0.6 已废除的「按热度压缩 L1」陈旧表述。
+- N9 README（中英）配置样例补全 6 个缺项字段并登记本轮新字段；I1/I2/I3 陈旧版本注释与 skill 存储布局重复行修正。
+
+### 审查发现处置豁免记录（判据不适用 / 策略取舍）
+- N5 展示常量：冷条目 limit=10、合并候选 slice(0,20)、search 钳位 1..50 非「不同部署可能不同值」的调优参数，按报告允许注明保留。
+- N8 豁免面：其余工具为毫秒级同步文件操作（同 tick 原子完成，取消无从更快）与 `runMaintain` 长同步循环（JS 不可抢占），维持不检查 signal。
+- N13 strict 配置（快照失败抛错拒写）未引入：拒写会同时丢新数据，响亮 advisory 是现取舍。
+- I8 tsc --noEmit 不适用（纯 JS 仓库，无 tsconfig；语法=node --check、行为=vitest 双门禁）；引入 checkJs 属工具链大改，超出修复轮范围。
+- I9 timeoutMs（maintain 大库协作预算）为非规范要求项，本轮未引入。
+- I10 报告基线漂移说明：本轮全部修复基于 main c789dfe（审查基线 4d0ffd0 的 CI 后代，src/lib/test/docs 零差异）。
+
+### Verification
+- `npm test`（pnpm build + vitest）55/55 绿；`node --check` 全部 src/*.js + lib/index.js 通过；`npm pack --dry-run` 20 文件含 CHANGELOG.md；M1/N1/M4 关键回归做过去除修复的阴性对照。
+
 ## [0.6.0] - 2026-09-16
 
 一句话：把「自动治理」重新喂回语义与守恒——L1 不再隐藏任何条目，覆盖写不再丢历史，公理由代码兜底。
@@ -35,28 +77,14 @@ All notable changes to `dsh-layered-memory` are documented here.
 ### Not borrowed from GA（明确取舍）
 - L4 原始会话归档（其 `compress_session.py` Phase4 连 too-small 原文件一起删，属不可逆丢数据；DSH 用 session log + `memory_expand` 更安全）；OS 级 12h 计划任务（本机红线）；无锁并发写与"只能 patch 禁 overwrite"的纯提示词纪律（已被 CAS/原子写/快照取代）；单命名空间大杂烩。
 
-## [Unreleased]
-
-### Fixed
-- 跨进程更新丢失防护（CAS 读改写，三段关窗）：`facts.md` 与 `memory-meta.json` 的读改写改为「tmp 暂存 → rename 前一刻复核基座（校验与 rename 间不再夹耗时操作，窗口压至微秒级）→ rename 后回读兜底」，EPERM 退避每轮 sleep 后同样复核基座；被并发覆盖则重读重算（新基座已含胜者内容，单调收敛），持续冲突超 3s 预算响亮抛错，无锁无死锁。实测：40 进程错峰写 3×40/40 全收敛；全员同毫秒的极限争抢下残余 1-3 条丢失为无锁方案数学下限（双宿主间隔写不受影响）。`index.txt`（可随时重建）与热度/turn 计数（可容忍漂移）维持直写。
-- 原子写 rename 瞬态重试：Windows 上 rename 覆盖瞬间被其他进程并发读/替换持有时抛 EPERM/EACCES/EBUSY（实测 40 进程争抢可复现），`atomicWriteFileSync` 对 rename 增加 ≤15 次递增退避+随机抖动（极端争抢约 0.6s 封顶），非瞬态错误码原样抛出。
-- `memory_update` 在新旧条目均无证据时不再以占位串 `memory_update（历史更新）` 伪造 evidence 落库；与 `memory_write`/`memory_accept` 一致硬性要求证据，缺失即抛错。
-- **新条目"写完即隐身"修复**：`memory_write` 写入后立即 bump 热度；`memory_maintain` 压缩排序加入 recency 保护（7 天内创建、无访问热度的条目获得加分），新写入的 fact/sop 不再被压缩立刻裁出 L1。
-- **非 SOP 文件混入 L3 修复**：`sopNames()` 过滤保留名（README/LICENSE/index，大小写不敏感），安装/文档文件不再计入 L3 统计、索引与合并候选。
-- 补齐 `memory-meta.json` 的 `createdAt`：首建记录、更新保留原创建时间（此前仅写 `updatedAt`，recency 无据可查）。
-- 新增回归测试：README/LICENSE 过滤、recency 保护（陈旧条目被裁时新鲜条目保留）。
-- 文档：README/SKILL 补充 recency 保护、写入即热、保留名过滤说明。
-- 修复 `memory_maintain` 因尾部空行、错误行数预算而过度裁剪 L1 索引的问题。
-- L1 指针改为逐条逻辑行；索引未超限时完整保留，超限时两层至少各保留一个指针并显示隐藏数量。
-- 增加 `memory_maintain` 的完整索引、空行、超限裁剪和底层记忆可读性回归测试。
-
-### Changed
-- `events.js` 注释钉死自动蒸馏的键假设（主会话 `agent.id === session.id`），记录宿主解耦两种 id 时的正确修法方向与子代理路径的未验证状态。
-- `maintain.js` 近重复检测的注释与内部变量命名精确化：实际为词元集合 Jaccard（忽略词频与顺序），非 shingle Jaccard；零逻辑变更。
-- **持久化全部改为原子写**（`atomic-write.js`：同目录临时文件 + rename 覆盖，21 处写点）：宿主崩溃/强杀不再留下写一半的 `memory-meta.json` / `index.txt` / `facts.md` / `file_access_stats.json` / `turn-state.json` / 归档与历史快照。
-- **L1 注入面防护**：system prompt 注入前对索引做 ≤8KB 熔断 + 控制字符剥离，并包在 `<memory_index source="user-writable">` sentinel 内；`memory_write` 拒绝含换行/控制字符的 topic（防 section 解析错位与提示词注入载体）。
-- 移除死代码 `ensureIndexRule`（零引用）；README/SKILL 的 `memory_stats.json` 更正为实际写出的 `maintenance-report.json`；合并重复的 `[Unreleased]` 节。
-- 新增回归测试 ×3：原子写无残留临时文件、topic 控制字符拒绝、L1 sentinel/熔断注入。
+### 并入自陈旧 [Unreleased]（N10：0.5.2→0.6.0 期间已交付，0.6.1 审查修复轮折叠；原节整体删除）
+- 跨进程更新丢失防护（CAS 读改写三段关窗：tmp 暂存 → rename 前一刻复核基座 → rename 后回读兜底；EPERM 退避每轮再复核；持续冲突超 3s 预算响亮抛错绝不静默丢。实测 40 进程错峰写 3×40/40 收敛）。`index.txt` 与热度/turn 计数维持直写（可随时重建 / 可容忍漂移）。
+- 持久化全部改为原子写（`atomic-write.js` 同目录 tmp + rename，21 处写点）；Windows rename 瞬态 EPERM/EACCES/EBUSY ≤15 次递增退避 + 抖动重试。
+- `memory_update` 不再以占位串 `memory_update（历史更新）` 伪造 evidence 落库（与 write/accept 一致硬性要求证据）。
+- `sopNames()` 保留名过滤（README/LICENSE/index 不计入 L3 统计、索引与合并候选）；`memory-meta.json` 首建补 `createdAt`、更新保留原创建时间。
+- L1 注入面防护：注入前控制字符剥离 + 长度熔断（与 `l1MaxChars` 同源，默认 12288——旧节「≤8KB」表述按现行修订）+ `<memory_index source="user-writable">` sentinel；含换行/控制字符的 topic 拒写。
+- 移除死代码 `ensureIndexRule`；README/SKILL 的 `memory_stats.json` 更正为实际写出的 `maintenance-report.json`；`events.js` 键混用假设注释钉死。
+- 该节中与 v0.6 现行行为矛盾的「写入后立即 bump 热度」「超限时两层至少各保留一个指针并显示隐藏数量」等条目（旧压缩机制）不予保留——热度只服务冷条目复核、L1 全量列出不裁剪。
 
 ## [0.5.2] - 2026-08-21
 

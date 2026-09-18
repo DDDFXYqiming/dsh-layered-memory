@@ -125,3 +125,54 @@ test("M1 maintain：无 createdAt / 非法 createdAt / 极老条目的 mix 输�
 	const disk = JSON.parse(readFileSync(join(root(), "maintenance-report.json"), "utf8"));
 	expect(JSON.stringify(disk)).not.toMatch(/Infinity|NaN/);
 });
+
+// ── M3：autoNamespace 的 git 分支探测进程内缓存 ──
+
+test("M3 detectNamespace：TTL 内第二次调用不再 spawn git；TTL=0 关闭缓存；过期重取", async () => {
+	const { homedir } = await import("node:os");
+	const { detectNamespace, clearNamespaceCache, namespaceProbe } = await import("../src/store.js");
+	if (join(process.cwd()) === join(homedir())) return; // 家目录短路不 spawn，断言无意义
+	clearNamespaceCache();
+	const a = detectNamespace(60_000);
+	expect(namespaceProbe.gitSpawns).toBe(1);
+	const b = detectNamespace(60_000);
+	expect(b).toBe(a);
+	expect(namespaceProbe.gitSpawns).toBe(1); // 命中缓存：零 spawn
+	const c = detectNamespace(60_000, Date.now() + 61_000); // 模拟 TTL 过期
+	expect(c).toBe(a);
+	expect(namespaceProbe.gitSpawns).toBe(2);
+	detectNamespace(0); // ttl=0：不缓存、每次直取
+	expect(namespaceProbe.gitSpawns).toBe(3);
+	clearNamespaceCache();
+});
+
+test("M3 resolveNamespace 消费 namespaceCacheTtlMs 配置（两次解析只 spawn 一次）", async () => {
+	const { homedir } = await import("node:os");
+	const { resolveNamespace, clearNamespaceCache, namespaceProbe } = await import("../src/store.js");
+	if (join(process.cwd()) === join(homedir())) return;
+	clearNamespaceCache();
+	resolveNamespace({ autoNamespace: true, namespaceCacheTtlMs: 60_000 });
+	resolveNamespace({ autoNamespace: true, namespaceCacheTtlMs: 60_000 });
+	expect(namespaceProbe.gitSpawns).toBe(1);
+	clearNamespaceCache();
+});
+
+// ── N5：冷条目复核窗口入 Config ──
+
+test("N5 coldReviewDays 配置穿透 runMaintain（默认 90，放宽到 500 后老条目出局）", async () => {
+	await write({ topic: "aged", entry_type: "fact", content: "老条目" });
+	const metaPath = join(root(), "memory-meta.json");
+	const meta = JSON.parse(readFileSync(metaPath, "utf8"));
+	const ts = new Date(Date.now() - 400 * 86400000).toISOString();
+	meta.facts.aged.createdAt = ts;
+	meta.facts.aged.updatedAt = ts;
+	writeFileSync(metaPath, JSON.stringify(meta, null, 2), "utf8");
+	const { runMaintain } = await import("../src/maintain.js");
+	const def = runMaintain(root(), 12288, {});
+	expect(def.cold.threshold_days).toBe(90);
+	expect(def.cold.entries.map((e) => e.name)).toContain("aged");
+	const wide = runMaintain(root(), 12288, { coldReviewDays: 500 });
+	expect(wide.cold.threshold_days).toBe(500);
+	expect(wide.cold.entries.map((e) => e.name)).not.toContain("aged");
+});
+

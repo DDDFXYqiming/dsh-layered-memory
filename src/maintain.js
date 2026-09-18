@@ -173,7 +173,10 @@ export const COLD_REVIEW_DAYS = 90;
  * 冷条目复核清单：让访问热度有真实消费者（此前热度只服务于 L1 裁剪，
  * 而裁剪本身已被证明是"能力永久隐身"的来源）。这里只做报告，不动数据。
  */
-export function findColdEntries(root, { heat = {}, days = COLD_REVIEW_DAYS, limit = 10 } = {}) {
+export function findColdEntries(root, { heat = {}, days, limit = 10 } = {}) {
+	// [0.6.1 N5] 窗口天数入 Config（maintainOpts.coldReviewDays 经 runMaintain 传进 days）；
+	// limit 是报告展示条数上限，保留模块常量语义。
+	const windowDays = days ?? COLD_REVIEW_DAYS;
 	const access = loadAccess(root);
 	const meta = readMeta(root);
 	const { facts, sops } = activeEntries(root);
@@ -187,7 +190,7 @@ export function findColdEntries(root, { heat = {}, days = COLD_REVIEW_DAYS, limi
 			// 根因处消毒：不可得的时间差一律落 null；heat 同法（访问统计损坏时 score 可为 NaN）。
 			const parsed = createdAt ? Date.parse(createdAt) : NaN;
 			const ageDays = Number.isFinite(parsed) ? (now - parsed) / 86400000 : Infinity;
-			if (ageDays < days) continue;
+			if (ageDays < windowDays) continue;
 			const score = entryHeat(access, meta, kind, key, heat);
 			if (score >= 0.5) continue;
 			rows.push({
@@ -199,7 +202,7 @@ export function findColdEntries(root, { heat = {}, days = COLD_REVIEW_DAYS, limi
 		}
 	}
 	rows.sort((a, b) => a.heat - b.heat || a.name.localeCompare(b.name));
-	return { threshold_days: days, count: rows.length, entries: rows.slice(0, limit) };
+	return { threshold_days: windowDays, count: rows.length, entries: rows.slice(0, limit) };
 }
 
 /** 执行一次完整维护：去重 + 索引核对（存在性全量，不裁剪）+ 统计 + 合并候选 + 冷条目复核。 */
@@ -208,7 +211,7 @@ export function runMaintain(root, maxChars = 12288, opts = {}) {
 	const index = syncIndex(root, maxChars);
 	const stats = computeNamespaceStats(root);
 	const mergeCandidates = findMergeCandidates(root, opts);
-	const cold = findColdEntries(root, opts);
+	const cold = findColdEntries(root, { ...opts, days: opts.coldReviewDays });
 	const report = {
 		runAt: new Date().toISOString(),
 		dedupe,

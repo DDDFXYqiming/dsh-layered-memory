@@ -42,23 +42,50 @@ export function nsRoot(memDir, ns) {
 	return s === "default" ? memDir : join(memDir, s);
 }
 
-/** 自动命名空间：workspace 目录名 + git 分支名（若可用）。 */
-export function detectNamespace() {
+/** 命名空间缓存默认 TTL：60s——分支切换按分钟级感知；热路径每轮求值不再 spawn git。 */
+export const NAMESPACE_CACHE_TTL_MS_DEFAULT = 60_000;
+
+const nsCache = new Map(); // cwd -> { ns, expires }
+/** 测试探针：累计 git 子进程 spawn 次数（验证缓存命中用）。 */
+export const namespaceProbe = { gitSpawns: 0 };
+/** 清空命名空间缓存与探针计数（测试隔离用）。 */
+export function clearNamespaceCache() {
+	nsCache.clear();
+	namespaceProbe.gitSpawns = 0;
+}
+
+/** 查当前 git 分支（无分支/非仓库/git 缺失统一归一为空串）。 */
+function queryCurrentBranch(cwd) {
+	namespaceProbe.gitSpawns += 1;
+	try {
+		return execFileSync("git", ["branch", "--show-current"], {
+			cwd,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+			timeout: 2000,
+		}).trim();
+	} catch { /* 非 git 目录 / git 不可用 / 超时：视为无分支 */ return ""; }
+}
+
+/**
+ * 自动命名空间：workspace 目录名 + git 分支名（若可用）。
+ * [0.6.1 M3] 进程内 memoize（key=cwd）：autoNamespace 开启时本函数位于每轮
+ * prompt 装配（systemPrompt.context 的 text 回调）与每次 memory_* 工具执行的
+ * 同步路径上，此前无缓存导致每轮 spawn git（正常几十 ms、文件系统挂起时最长
+ * 2s timeout），全程阻塞宿主事件循环。TTL 由配置 namespaceCacheTtlMs 控制，0 关闭缓存。
+ */
+export function detectNamespace(ttlMs = NAMESPACE_CACHE_TTL_MS_DEFAULT, now = Date.now()) {
 	try {
 		const cwd = process.cwd();
 		// 家目录不是项目：此前实测在 ~/.dsh/memory 下生成了以用户名命名的垃圾命名空间。
 		if (join(cwd).replace(/[\\/]+$/, "") === join(homedir()).replace(/[\\/]+$/, "")) return "default";
+		const hit = nsCache.get(cwd);
+		if (ttlMs > 0 && hit && hit.expires > now) return hit.ns;
 		const base = basename(cwd) || "default";
-		let branch = "";
-		try {
-			branch = execFileSync("git", ["branch", "--show-current"], {
-				cwd,
-				encoding: "utf8",
-				stdio: ["ignore", "pipe", "ignore"],
-				timeout: 2000,
-			}).trim();
-		} catch { /* 非 git 目录 */ }
-		return safeNs(branch ? `${base}__${branch}` : base);
+		const branch = queryCurrentBranch(cwd);
+		const ns = safeNs(branch ? `${base}__${branch}` : base);
+		if (ttlMs > 0) nsCache.set(cwd, { ns, expires: now + ttlMs });
+		return ns;
 	} catch {
 		return "default";
 	}
@@ -67,7 +94,7 @@ export function detectNamespace() {
 export function resolveNamespace(cfg, explicit) {
 	if (explicit) return safeNs(explicit);
 	if (cfg.defaultNamespace) return safeNs(cfg.defaultNamespace);
-	if (cfg.autoNamespace) return detectNamespace();
+	if (cfg.autoNamespace) return detectNamespace(cfg.namespaceCacheTtlMs ?? NAMESPACE_CACHE_TTL_MS_DEFAULT);
 	return "default";
 }
 

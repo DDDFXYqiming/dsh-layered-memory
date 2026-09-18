@@ -4,8 +4,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import Schema from "@deepseek-ai/schemastery";
-import { ensureNamespaceLayout, nsRoot, resolveNamespace, defaultMemDir, HEAT_HALF_LIFE_DAYS, RECENCY_WINDOW_MS } from "./store.js";
-import { NEAR_DUPE_THRESHOLD, MERGE_CANDIDATE_THRESHOLD, MIN_TOKENS_FOR_FUZZY } from "./maintain.js";
+import { ensureNamespaceLayout, nsRoot, resolveNamespace, defaultMemDir, HEAT_HALF_LIFE_DAYS, RECENCY_WINDOW_MS, NAMESPACE_CACHE_TTL_MS_DEFAULT } from "./store.js";
+import { NEAR_DUPE_THRESHOLD, MERGE_CANDIDATE_THRESHOLD, MIN_TOKENS_FOR_FUZZY, COLD_REVIEW_DAYS } from "./maintain.js";
 import { readIndex } from "./l1index.js";
 import { buildTools } from "./tools.js";
 import { wireEvents } from "./events.js";
@@ -43,6 +43,11 @@ export const Config = Schema.object({
 	minTokensForFuzzy: Schema.number().min(1).default(MIN_TOKENS_FOR_FUZZY),
 	heatHalfLifeDays: Schema.number().min(1).default(HEAT_HALF_LIFE_DAYS),
 	recencyWindowDays: Schema.number().min(1).default(RECENCY_WINDOW_MS / (24 * 60 * 60 * 1000)),
+	// [0.6.1 M3] autoNamespace 的 git 分支探测进程内缓存 TTL（0 = 关闭缓存）。默认路径在
+	// 每轮 prompt 装配与每次工具执行上，无缓存时逐轮同步 spawn git 阻塞事件循环。
+	namespaceCacheTtlMs: Schema.natural().default(NAMESPACE_CACHE_TTL_MS_DEFAULT),
+	// [0.6.1 N5] 冷条目复核窗口（天）入 Config；limit/候选条数/检索钳位为展示常量保留。
+	coldReviewDays: Schema.number().min(1).default(COLD_REVIEW_DAYS),
 });
 
 function apply(ctx, config = {}) {
@@ -62,20 +67,33 @@ function apply(ctx, config = {}) {
 		mergeCandidateThreshold: cfg.mergeCandidateThreshold,
 		minTokensForFuzzy: cfg.minTokensForFuzzy,
 		heat: cfg.heat,
+		coldReviewDays: cfg.coldReviewDays,
 	};
 
 	const disposers = [];
 	const agentStates = new Map();
+	// [0.6.1 M3] 每个 root 只做一次布局 ensure：L1 注入的 text() 热路径与 turn/end
+	// 不再每轮重复 5×mkdirSync + 种子 existsSync；各工具 execute 仍显式 ensure，
+	// 懒创建新命名空间不受影响。
+	const ensuredRoots = new Set();
 
 	const resolveRoot = () => {
 		const ns = resolveNamespace(cfg);
 		const root = nsRoot(cfg.memoryDir, ns);
-		ensureNamespaceLayout(root);
+		if (!ensuredRoots.has(root)) {
+			try {
+				ensureNamespaceLayout(root);
+				ensuredRoots.add(root);
+			} catch { /* ensure 失败（只读目录等）不缓存，下次求值重试；注入面另有 text() 兜底 */ }
+		}
 		return root;
 	};
 
 	// 只初始化当前实际命名空间；不要把未使用的 memoryDir 根目录伪装成第二个 namespace。
-	ensureNamespaceLayout(nsRoot(cfg.memoryDir, resolveNamespace(cfg)));
+	// 加载期 ensure 失败仍响亮抛出（配置错误 fail loud）。
+	const initialRoot = nsRoot(cfg.memoryDir, resolveNamespace(cfg));
+	ensureNamespaceLayout(initialRoot);
+	ensuredRoots.add(initialRoot);
 
 	// ── 记忆注入（L1 存在性索引每轮可见）──
 	// [v0.5.3] 注入面防护：index.txt 由 memory_write 的 topic/content 拼接而成，

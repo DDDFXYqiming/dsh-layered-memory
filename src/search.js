@@ -5,6 +5,7 @@ import { readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { BM25Index } from "./similarity.js";
 import { collectDocs } from "./maintain.js";
+import { stripArchiveBanner } from "./store.js";
 
 /** 列出全部命名空间根目录（default = memoryDir 本身，其余为子目录）。 */
 export function listNamespaces(memDir) {
@@ -33,8 +34,12 @@ export function searchNamespaces(memDir, namespaces, query, { limit = 8, include
 		if (!existsSync(root)) continue;
 		for (const doc of collectDocs(root, { includeArchived })) {
 			const id = `${ns}::${doc.kind}::${doc.name}`;
-			index.addDoc(id, `${doc.name}\n${doc.text}`);
-			metaByDocId.set(id, { namespace: ns, kind: doc.kind, name: doc.name, archived: Boolean(doc.archived), text: doc.text });
+			// [0.6.5] 归档横幅只服务于"用文件或 read 看正文的人"，对检索是噪声：
+			// 它占了 160 字符摘录预算的约 60 字符，还往 BM25 索引里塞"已归档/历史快照"这类
+			// 与内容无关的 token。归档状态由 archived 字段表达，这里统一剥掉。
+			const text = stripArchiveBanner(doc.text || "");
+			index.addDoc(id, `${doc.name}\n${text}`);
+			metaByDocId.set(id, { namespace: ns, kind: doc.kind, name: doc.name, archived: Boolean(doc.archived), text });
 		}
 	}
 	const hits = index.search(query, Math.max(1, limit) * 2);

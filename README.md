@@ -54,6 +54,14 @@ dsh plugin --profile web add <本目录>
     maintainEveryTurns: 20     # 每 N 轮自动维护（计数持久化，跨会话累计）
     reflectPendingThreshold: 5 # 仅 autoPending 开启时生效：pending 达到该值时注入整理请求
     reflectSopsThreshold: 40   # L3 SOP 达到该值时注入整合请求
+    reflectCooldownTurns: 10   # 两次反思注入的最小轮数间隔（冷却）
+    nearDupeThreshold: 0.85    # 近重复去重的词元集合 Jaccard 阈值（0..1）
+    mergeCandidateThreshold: 0.45 # 合并候选报告阈值（0..1）
+    minTokensForFuzzy: 12      # 低于该词元数的内容只走精确 hash 去重（防误判）
+    heatHalfLifeDays: 14       # 访问热度半衰期（天）
+    recencyWindowDays: 7       # 新条目无访问时的 recency 保护窗口（天）
+    coldReviewDays: 90         # 冷条目复核窗口：创建超过 N 天且热度趋零才入报告
+    namespaceCacheTtlMs: 60000 # autoNamespace 的 git 分支探测进程内缓存 TTL（毫秒，0 关闭）
 ```
 
 **L1 存在性优先（v0.6 起不再裁剪）。** AUTO 段每层一行、以 `" | "` 全量列出活跃条目名；预算单位是字符数（`l1MaxChars`）而不是行数——旧的行数预算会让"行数合规而 token 失控"，而一行一条目会让 30 行只装得下 16 条、把其余条目挤成永久隐身（模型不会去搜它不知道存在的东西）。超预算时只在返回值与维护报告里告警，请合并/归档条目或精简 `[RULES]`。索引内容未变化时不重写文件，避免打碎 system prompt 前缀缓存。访问热度（14 天半衰）现在只服务于 `memory_maintain` 的**冷条目复核**报告。
@@ -91,7 +99,7 @@ dsh plugin --profile web add <本目录>
 
 ```bash
 pnpm install
-pnpm build        # node --check lib/index.js
+pnpm build        # 对全部 src/*.js 与 lib/index.js 做 node --check（语法门禁，源码即交付物）
 pnpm test         # vitest（pnpm 11 可直接运行，见下）
 pnpm test:smoke   # dsh --profile headless --dump-config
 ```

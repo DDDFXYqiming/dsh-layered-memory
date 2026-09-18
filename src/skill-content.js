@@ -1,4 +1,4 @@
-// runtime skill「memory」的内容（v0.5）。
+// runtime skill「memory」的内容（版本以 package.json 为准）。
 // 注：dsh 插件不是 skill，本文件只是 ctx.skills.register 的运行时内容源，
 // 不使用 Agent Skills 标准的 SKILL.md 文件。
 
@@ -38,12 +38,12 @@ export const SKILL_CONTENT = `# 记忆管理（DSH 版）
 - 沉淀经验的主路径因此是主动 \`memory_write\`（带证据）；\`memory_pending\`/\`memory_accept\` 仍可用于人工登记的候选。
 
 ### 维护与检索
-- \`memory_maintain\`：内容级近重复去重（词元集合 Jaccard ≥0.85）、L1 索引核对（**全量列出，不裁剪**）、统计、合并候选（≥0.45）、冷条目复核（>90 天零访问）
+- \`memory_maintain\`：内容级近重复去重（词元集合 Jaccard 阈值可配，默认 0.85）、L1 索引核对（**全量列出，不裁剪**）、统计、合并候选（默认 0.45）、冷条目复核（默认 >90 天零访问）——阈值均可在 Config 调整
 - 也可配置 \`maintainEveryTurns\` 自动触发（计数持久化，跨会话累计）
 - \`memory_search\`：BM25 全文检索（含归档）；\`all_namespaces=true\` 跨库检索
 - \`memory_promote\`：把项目局部经验提升为全局（default）记忆
 - \`memory_stats\` 查看统计
-- 热度：访问计数按 14 天半衰衰减，现在只服务于「冷条目复核」报告；不再决定谁出现在 L1（被裁出 L1 = 永久隐身，该机制已废除）
+- 热度：访问计数按半衰衰减（heatHalfLifeDays 可配，默认 14 天），现在只服务于「冷条目复核」报告；不再决定谁出现在 L1（被裁出 L1 = 永久隐身，该机制已废除）
 
 ## 存储布局
 
@@ -55,8 +55,9 @@ export const SKILL_CONTENT = `# 记忆管理（DSH 版）
 │   ├── facts.md                   L2 环境事实
 │   ├── sops/*.md                  L3 任务经验
 │   ├── pending/ / archive/ / .history/
-│   ├── memory-meta.json / maintenance-report.json
-│   ├── maintenance-report.json / turn-state.json
+│   ├── memory-meta.json
+│   ├── maintenance-report.json
+│   ├── turn-state.json
 │   └── file_access_stats.json
 └── （namespace=default 时兼容旧根目录布局）
 \`\`\`

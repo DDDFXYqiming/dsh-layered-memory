@@ -54,6 +54,14 @@ dsh plugin --profile web add <repo dir>
     maintainEveryTurns: 20     # auto-maintain every N turns (counter persisted, accumulates across sessions)
     reflectPendingThreshold: 5 # only when autoPending is on: inject consolidation request at this pending count
     reflectSopsThreshold: 40   # inject consolidation request when L3 SOP count >= threshold
+    reflectCooldownTurns: 10   # min turns between two reflection injections (cooldown)
+    nearDupeThreshold: 0.85    # token-set Jaccard threshold for near-duplicate dedupe (0..1)
+    mergeCandidateThreshold: 0.45 # merge-candidate report threshold (0..1)
+    minTokensForFuzzy: 12      # docs shorter than this token count use exact-hash dedupe only
+    heatHalfLifeDays: 14       # access-heat decay half-life in days
+    recencyWindowDays: 7       # recency protection window for fresh entries without access
+    coldReviewDays: 90         # cold-entry review window: listed when older than N days with near-zero heat
+    namespaceCacheTtlMs: 60000 # TTL (ms) of the in-process cache for autoNamespace git probing; 0 disables
 ```
 
 **L1 existence first (no trimming since v0.6).** The AUTO section lists every active entry name, one line per layer joined by `" | "`. The budget unit is characters (`l1MaxChars`), not lines: the old line budget allowed "compliant lines, runaway tokens", and one-entry-per-line meant 30 lines could only hold 16 entries, silently hiding the rest — which is permanent invisibility, since the model never searches for what it does not know exists. Over budget only warns (tool return + maintenance report); merge/archive entries or trim `[RULES]`. The index file is not rewritten when its content is unchanged, keeping the system-prompt prefix cache stable. Decayed heat (14-day half-life) now feeds the **cold-entry review** list in `memory_maintain` instead of hiding entries.
@@ -91,7 +99,7 @@ No automatic contradiction detection. Consistency rests on three process layers.
 
 ```bash
 pnpm install
-pnpm build        # node --check lib/index.js
+pnpm build        # node --check over all src/*.js and lib/index.js (syntax gate; sources are the deliverable)
 pnpm test         # vitest
 pnpm test:smoke   # dsh --profile headless --dump-config
 ```

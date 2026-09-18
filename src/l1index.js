@@ -1,4 +1,8 @@
 // L1 索引：读取 / 重建。
+// [0.6.1 N6] L1 字符预算唯一默认值（原以 12288 字面量散落 4 处：apply Config /
+// runMaintain / syncIndex / writeMemory 形参）。改默认只动这一处。
+export const L1_MAX_CHARS_DEFAULT = 12288;
+
 // [v0.6] 存在性优先：AUTO 段全量列出 L2/L3 名字（每层一行、" | " 打包），
 // 不再按热度裁剪隐藏条目——被裁掉的条目等于永久隐身（模型不会想到去搜不存在的东西）。
 // 预算单位从"行数"改为"字符数"，与注入熔断 l1MaxChars 同源，杜绝"行数合规而 token 失控"。
@@ -76,7 +80,7 @@ function composeIndex(head, autoLines, tail) {
  * @param maxChars L1 字符预算（cfg.l1MaxChars）
  * @returns {{index_chars:number, max_chars:number, over_limit:boolean, facts_listed:number, sops_listed:number, rewritten:boolean}}
  */
-export function syncIndex(root, maxChars = 12288) {
+export function syncIndex(root, maxChars = L1_MAX_CHARS_DEFAULT) {
 	const { head, tail } = readIndexSections(root);
 	const { facts, sops } = activeEntries(root);
 	const rebuilt = composeIndex(head, buildAutoLines(facts, sops), tail);

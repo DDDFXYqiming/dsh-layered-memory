@@ -21,7 +21,7 @@ import {
 	loadAccess,
 	entryHeat,
 } from "./store.js";
-import { syncIndex, readIndex, indexChars } from "./l1index.js";
+import { syncIndex, readIndex, indexChars, L1_MAX_CHARS_DEFAULT } from "./l1index.js";
 import { normalizeText, tokenize, jaccard } from "./similarity.js";
 
 /** 近重复判定阈值：分词集合 Jaccard 达到该值视为同一记忆的微编辑版本。 */
@@ -206,7 +206,7 @@ export function findColdEntries(root, { heat = {}, days, limit = 10 } = {}) {
 }
 
 /** 执行一次完整维护：去重 + 索引核对（存在性全量，不裁剪）+ 统计 + 合并候选 + 冷条目复核。 */
-export function runMaintain(root, maxChars = 12288, opts = {}) {
+export function runMaintain(root, maxChars = L1_MAX_CHARS_DEFAULT, opts = {}) {
 	const dedupe = dedupeEntries(root, opts);
 	const index = syncIndex(root, maxChars);
 	const stats = computeNamespaceStats(root);

@@ -333,27 +333,30 @@ export function upsertFact(root, topic, content) {
 }
 
 /**
- * 把一条已有记忆的当前内容快照到 .history/，返回相对路径（无内容时返回 ""）。
+ * 把一条已有记忆的当前内容快照到 .history/，返回 { path, error? }。
+ * path === "" 表示条目本无内容（不算失败）。
  * [v0.6] 所有覆盖写（memory_write / memory_update / memory_accept）统一走这里，
  * 修复此前"write 静默覆盖且不留历史"的数据丢失缺陷。
+ * [0.6.1 N13] 此前失败也静默返回 ""，与「无内容」不可区分——磁盘满/EPERM 会让
+ * 上述保护被无声绕过。现失败原因显式返回，由 writeMemory 汇入 advisories 响亮上报。
  */
 export function snapshotEntry(root, kind, key) {
 	try {
 		const ts = Date.now();
 		if (kind === "fact") {
 			const old = readFact(root, key);
-			if (old === null) return "";
+			if (old === null) return { path: "" };
 			const rel = join(HISTORY_DIR, `fact-${slugify(key)}-${ts}.md`);
 			atomicWriteFileSync(join(root, rel), `# ${key}\n\n${old}\n`);
-			return rel;
+			return { path: rel };
 		}
 		const old = readSop(root, key);
-		if (old === null) return "";
+		if (old === null) return { path: "" };
 		const rel = join(HISTORY_DIR, `sop-${key}-${ts}.md`);
 		atomicWriteFileSync(join(root, rel), old);
-		return rel;
-	} catch {
-		return "";
+		return { path: rel };
+	} catch (error) {
+		return { path: "", error: String(error?.message || error) };
 	}
 }
 

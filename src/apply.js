@@ -6,7 +6,7 @@ import { defineTool } from "@deepseek-ai/dsh-tools";
 import Schema from "@deepseek-ai/schemastery";
 import { ensureNamespaceLayout, nsRoot, resolveNamespace, defaultMemDir, HEAT_HALF_LIFE_DAYS, RECENCY_WINDOW_MS, NAMESPACE_CACHE_TTL_MS_DEFAULT } from "./store.js";
 import { NEAR_DUPE_THRESHOLD, MERGE_CANDIDATE_THRESHOLD, MIN_TOKENS_FOR_FUZZY, COLD_REVIEW_DAYS } from "./maintain.js";
-import { readIndex } from "./l1index.js";
+import { readIndex, L1_MAX_CHARS_DEFAULT } from "./l1index.js";
 import { buildTools } from "./tools.js";
 import { wireEvents } from "./events.js";
 import { SKILL_NAME, SKILL_DESCRIPTION, SKILL_WHEN_TO_USE, SKILL_CONTENT } from "./skill-content.js";
@@ -34,16 +34,19 @@ export const Config = Schema.object({
 	// 未知工具名等），对未来任务零复用价值。需要时显式开启，或直接用 memory_write 主动沉淀。
 	autoPending: Schema.boolean().default(false),
 	// v0.4 自动维护（v0.5 起计数持久化，跨会话累计触发）
-	maintainEveryTurns: Schema.number().default(20),
+	// [0.6.1 N4] 轮数/条数阈值属整数语义：natural()（>=0 整数）让 -1/2.5 这类
+	// 无效配置在插件加载期响亮失败（config.zh.md「配置错误要响亮」），与 l1MaxChars 等
+	// 已有约束字段标准一致。maintainEveryTurns=0 保留「关闭」语义。
+	maintainEveryTurns: Schema.natural().default(20),
 	// v0.5 反思注入阈值：pending 候选数达到该值时提示宿主整理
-	reflectPendingThreshold: Schema.number().default(5),
+	reflectPendingThreshold: Schema.natural().default(5),
 	// v0.5 反思注入阈值：L3 SOP 条数达到该值时提示宿主整合
-	reflectSopsThreshold: Schema.number().default(40),
+	reflectSopsThreshold: Schema.natural().default(40),
 	// [spec-fix 2026-09] 原散落的启发式/容量阈值提为配置
 	// [v0.6] L1 唯一预算：字符数（旧 maxIndexLines 行数预算废弃——行数合规而 token 失控，
 	// 且一行一条目导致 30 行只能装 16 条、把 88 条事实挤成"永久隐身"）。
-	l1MaxChars: Schema.number().min(1024).default(12288),
-	reflectCooldownTurns: Schema.number().min(0).default(10),
+	l1MaxChars: Schema.number().min(1024).default(L1_MAX_CHARS_DEFAULT),
+	reflectCooldownTurns: Schema.natural().default(10),
 	nearDupeThreshold: Schema.number().min(0).max(1).default(NEAR_DUPE_THRESHOLD),
 	mergeCandidateThreshold: Schema.number().min(0).max(1).default(MERGE_CANDIDATE_THRESHOLD),
 	minTokensForFuzzy: Schema.number().min(1).default(MIN_TOKENS_FOR_FUZZY),

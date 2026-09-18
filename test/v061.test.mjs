@@ -260,6 +260,48 @@ test("I4 memory_activate：首次激活 activated=true/already=false；重复激
 	expect(second.tools).toHaveLength(14);
 });
 
+// ── N13/N4/N6：快照失败响亮上报、整数配置响亮校验、L1 预算单源 ──
+
+test("N13 快照失败显式上报：snapshotEntry 给出错误原因，writeMemory 汇入 advisories", async () => {
+	await write({ topic: "snapfail", entry_type: "fact", content: "第一版" });
+	// .history 目录换成文件：快照写必失败（ENOTDIR/EEXIST 类）
+	rmSync(join(root(), ".history"), { recursive: true, force: true });
+	writeFileSync(join(root(), ".history"), "占位", "utf8");
+	const { snapshotEntry } = await import("../src/store.js");
+	const s = snapshotEntry(root(), "fact", "snapfail");
+	expect(s.path).toBe("");
+	expect(s.error).toMatch(/ENOTDIR|EEXIST|EPERM|EINVAL|ENOENT/);
+	// 无内容时仍是 { path: "" }（不是失败）
+	expect(snapshotEntry(root(), "fact", "no-such-topic")).toEqual({ path: "" });
+	// writeMemory 接线：advisories 首条点名快照失败，覆盖本身照常完成
+	const { writeMemory } = await import("../src/memory-ops.js");
+	const r = writeMemory(root(), { topic: "snapfail", entryType: "fact", content: "第二版", evidence: "e" });
+	expect(r.advisories[0]).toContain("快照失败");
+	expect(r.history).toBeUndefined();
+	expect(readFileSync(join(root(), "facts.md"), "utf8")).toContain("第二版");
+});
+
+test("N4 整数语义配置字段对 -1/小数在加载期响亮失败", () => {
+	const bad = [
+		{ maintainEveryTurns: -1 },
+		{ maintainEveryTurns: 2.5 },
+		{ reflectPendingThreshold: -3 },
+		{ reflectSopsThreshold: 0.5 },
+		{ reflectCooldownTurns: -2 },
+		{ namespaceCacheTtlMs: -1 },
+	];
+	for (const override of bad) {
+		expect(() => setup(override), JSON.stringify(override)).toThrow();
+	}
+});
+
+test("N6 L1 预算默认值单源：memory_list.max_chars 即 l1index 导出常量", async () => {
+	const { L1_MAX_CHARS_DEFAULT } = await import("../src/l1index.js");
+	expect(L1_MAX_CHARS_DEFAULT).toBe(12288);
+	const l = await tool("memory_list").execute({ namespace: "test" });
+	expect(l.max_chars).toBe(L1_MAX_CHARS_DEFAULT);
+});
+
 // ── M3：autoNamespace 的 git 分支探测进程内缓存 ──
 
 test("M3 detectNamespace：TTL 内第二次调用不再 spawn git；TTL=0 关闭缓存；过期重取", async () => {

@@ -17,7 +17,7 @@ import {
 	snapshotEntry,
 	readFact,
 } from "./store.js";
-import { syncIndex } from "./l1index.js";
+import { syncIndex, L1_MAX_CHARS_DEFAULT } from "./l1index.js";
 
 /** 疑似密钥形态（宁可响亮拒写，也不让凭证明文进记忆库再被检索回灌进上下文）。 */
 const SECRET_PATTERNS = [
@@ -88,7 +88,7 @@ export function buildAdvisories({ topic, content, existing, index, maxTopicChars
  */
 export function writeMemory(root, {
 	topic, entryType, content, evidence, sourceSession, sourceSeqs, namespace, related,
-	maxChars = 12288, snapshot = true,
+	maxChars = L1_MAX_CHARS_DEFAULT, snapshot = true,
 }) {
 	// [0.6.1 M4] 校验逻辑提取为 assertSafeTopic 单源，供全部 topic 入参工具复用。
 	const safeTopic = assertSafeTopic(topic, "memory_write");
@@ -110,22 +110,37 @@ export function writeMemory(root, {
 	let action;
 	let history = "";
 	let existing = false;
+	// [0.6.1 N13] 快照失败不再静默：记录原因，出口统一进 advisories 响亮上报。
+	let snapshotFailure = "";
 	if (entryType === "fact") {
 		path = join(root, "facts.md");
 		existing = readFact(root, safeTopic) !== null;
-		if (existing && snapshot) history = snapshotEntry(root, "fact", safeTopic) || "";
+		if (existing && snapshot) {
+			const snap = snapshotEntry(root, "fact", safeTopic);
+			history = snap.path;
+			if (snap.error) snapshotFailure = snap.error;
+		}
 		action = upsertFact(root, safeTopic, wrapped.trim());
 		setEntryMeta(root, "fact", safeTopic, metaPatch({ sourceSession, sourceSeqs, evidence: evidenceText, namespace, related, root, kind: "fact", key: safeTopic }));
 	} else {
 		const slug = slugify(safeTopic);
 		path = join(root, "sops", `${slug}.md`);
 		existing = existsSync(path);
-		if (existing && snapshot) history = snapshotEntry(root, "sop", slug) || "";
+		if (existing && snapshot) {
+			const snap = snapshotEntry(root, "sop", slug);
+			history = snap.path;
+			if (snap.error) snapshotFailure = snap.error;
+		}
 		atomicWriteFileSync(path, `# ${safeTopic}\n\n${wrapped}`);
 		action = existing ? "updated" : "created";
 		setEntryMeta(root, "sop", slug, metaPatch({ sourceSession, sourceSeqs, evidence: evidenceText, namespace, related, root, kind: "sop", key: slug }));
 	}
 	const index = syncIndex(root, maxChars);
+	const advisories = buildAdvisories({ topic: safeTopic, content: body, existing, index });
+	// [0.6.1 N13] 「所有覆盖写统一先快照」是 v0.6 数据丢失级修复；磁盘满/EPERM 等
+	// 持续故障下旧实现会静默绕过它。现在快照失败必须出现在返回体判据里，
+	// 让调用方（模型/用户）知道旧版本没保住。（写本身仍继续——拒写会丢新数据。）
+	if (snapshotFailure) advisories.unshift(`快照失败，旧版本未保留: ${snapshotFailure}`);
 	return {
 		entry_type: entryType,
 		topic: safeTopic,
@@ -133,7 +148,7 @@ export function writeMemory(root, {
 		action,
 		history: history || undefined,
 		index,
-		advisories: buildAdvisories({ topic: safeTopic, content: body, existing, index }),
+		advisories,
 	};
 }
 

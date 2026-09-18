@@ -1,3 +1,20 @@
 allowBuilds:
   esbuild: true
+# pnpm 11 不再读取 .npmrc 的 auto-install-peers；显式关闭 peer 自动安装，
+# 否则 lockfile 会锁入 peer 范围 "*" 无法满足的预发布版本（0.1.6-alpha.x），--frozen-lockfile 直接失败。
+# 测试真正需要的宿主包改为在 devDependencies 里显式声明。
+autoInstallPeers: false
+# pnpm 11 默认 minimumReleaseAge=24h 的供应链策略：@deepseek-ai 的 0.1.6-alpha.2 系列刚发布不久，
+# 冷启动的 runner 上会被判为"太新"而拒绝安装（ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION）。
+# 这些正是本插件对接的宿主包，逐条显式豁免；包变旧后该列表自然失效，保留无害。
+minimumReleaseAgeExclude:
+  - '@deepseek-ai/dsh-brand@0.1.6-alpha.2'
+  - '@deepseek-ai/dsh-llm@0.1.6-alpha.2'
+  - '@deepseek-ai/dsh-sandbox@0.1.6-alpha.2'
+  - '@deepseek-ai/dsh-scope@0.1.6-alpha.2'
+  - '@deepseek-ai/dsh-timeout@0.1.6-alpha.2'
+  - '@deepseek-ai/dsh-tools@0.1.6-alpha.2'
+  - '@deepseek-ai/dsh-typert-protocol@0.1.6-alpha.2'
+  - '@deepseek-ai/dsh-util-crypto@0.1.6-alpha.2'
+  - '@deepseek-ai/dsh-util-values@0.1.6-alpha.2'
 verifyDepsBeforeRun: false

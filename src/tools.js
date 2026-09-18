@@ -37,10 +37,12 @@ import { listNamespaces, searchNamespaces } from "./search.js";
 const EMPTY_META = { sourceSession: "", sourceSeqs: [], evidence: "", archived: false, createdAt: "", updatedAt: "" };
 
 /**
- * 递归剥离 undefined 值的键。宿主对工具结果有两条硬校验：可无损 JSON 往返
- * （显式 undefined 键会被 JSON.stringify 丢弃 → 整个结果判死）与 output schema
- * 声明一致性。纯文本记忆系统的可用性优先：在出口统一消毒，任何工具返回值
- * 都不再可能因单个字段翻车被整包拒收。
+ * 递归剥离 undefined 值的键，并把非有限数消毒为 null。宿主对工具结果有两条
+ * 硬校验：可无损 JSON 往返（显式 undefined 键会被 JSON.stringify 丢弃、
+ * Infinity/NaN 会被静默转成 null，二者都使往返值不相等 → 整个结果判死）与
+ * output schema 声明一致性。纯文本记忆系统的可用性优先：在出口统一消毒，
+ * 任何工具返回值都不再可能因单个字段翻车被整包拒收。
+ * [0.6.1 M1] 新增非有限数消毒——Infinity age_days 曾在老库上让 memory_maintain 整包失败。
  */
 function pruneUndefined(value) {
 	if (Array.isArray(value)) return value.map(pruneUndefined);
@@ -49,6 +51,7 @@ function pruneUndefined(value) {
 		for (const [k, v] of Object.entries(value)) if (v !== undefined) out[k] = pruneUndefined(v);
 		return out;
 	}
+	if (typeof value === "number" && !Number.isFinite(value)) return null;
 	return value;
 }
 

@@ -182,11 +182,20 @@ export function findColdEntries(root, { heat = {}, days = COLD_REVIEW_DAYS, limi
 	for (const [kind, list] of [["fact", facts], ["sop", sops]]) {
 		for (const key of list) {
 			const createdAt = (kind === "fact" ? meta.facts : meta.sops)[key]?.createdAt;
-			const ageDays = createdAt ? (now - Date.parse(createdAt || "")) / 86400000 : Infinity;
+			// [0.6.1 M1] createdAt 缺失/非法时 ageDays 为 Infinity/NaN，Math.round 后仍是非有限数，
+			// 整个返回体会被宿主判「not lossless JSON」而整包报废（老库必炸，2026-09-17 已知 bug）。
+			// 根因处消毒：不可得的时间差一律落 null；heat 同法（访问统计损坏时 score 可为 NaN）。
+			const parsed = createdAt ? Date.parse(createdAt) : NaN;
+			const ageDays = Number.isFinite(parsed) ? (now - parsed) / 86400000 : Infinity;
 			if (ageDays < days) continue;
 			const score = entryHeat(access, meta, kind, key, heat);
 			if (score >= 0.5) continue;
-			rows.push({ kind, name: key, heat: Number(score.toFixed(3)), age_days: Math.round(ageDays) });
+			rows.push({
+				kind,
+				name: key,
+				heat: Number.isFinite(score) ? Number(score.toFixed(3)) : null,
+				age_days: Number.isFinite(ageDays) ? Math.round(ageDays) : null,
+			});
 		}
 	}
 	rows.sort((a, b) => a.heat - b.heat || a.name.localeCompare(b.name));

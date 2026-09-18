@@ -452,3 +452,84 @@ export function bumpTurnCounter(root) {
 		return 0;
 	}
 }
+
+// ── [0.6.4] 归档横幅 ─────────────────────────────────────────────────────────
+// 动因（2026-09-18 记忆库体检）：memory_archive 只把条目从 L1 隐藏，正文照旧留在
+// facts.md / sops/*.md 里。人工读文件或 memory_search 命中的读者会把历史快照当成
+// 现行事实（Jev 判「会误导」0.74）。现在归档时给正文首部写一行自解释横幅；任何
+// 再次写入（write / update / accept / rollback）都会先剥掉它，避免取消归档后残留。
+export const ARCHIVE_BANNER_PREFIX = "> [已归档";
+
+export function archiveBannerLine(at = new Date()) {
+	const day = new Date(at).toISOString().slice(0, 10);
+	return `${ARCHIVE_BANNER_PREFIX} ${day}] 历史快照：已不在 L1 索引中，现行结论请以同主题活跃条目为准；本条仍可被 memory_search 检索到。`;
+}
+
+export function hasArchiveBanner(text) {
+	return String(text ?? "").split("\n").some((line) => line.trim().startsWith(ARCHIVE_BANNER_PREFIX));
+}
+
+/** 剥掉正文首部的归档横幅（含其后的空行），其余内容原样保留。 */
+export function stripArchiveBanner(text) {
+	const lines = String(text ?? "").split("\n");
+	let i = 0;
+	while (i < lines.length && (lines[i].trim() === "" || lines[i].trim().startsWith(ARCHIVE_BANNER_PREFIX))) i++;
+	return lines.slice(i).join("\n");
+}
+
+export function withArchiveBanner(text, at = new Date()) {
+	return `${archiveBannerLine(at)}\n\n${stripArchiveBanner(text)}`;
+}
+
+/** 归档时把横幅写进正文：fact 走 upsertFact（保留 section 结构），sop 保留 # 标题行位置。返回是否发生改动。 */
+export function archiveEntryBody(root, kind, key, at = new Date()) {
+	if (kind === "fact") {
+		const body = readFact(root, key);
+		if (body === null || hasArchiveBanner(body)) return false;
+		upsertFact(root, key, withArchiveBanner(body, at));
+		return true;
+	}
+	const text = readSop(root, key);
+	if (text === null || hasArchiveBanner(text)) return false;
+	const lines = text.split("\n");
+	const head = lines.length && lines[0].startsWith("# ") ? lines.shift() : null;
+	const rest = lines.join("\n").replace(/^\n+/, "");
+	atomicWriteFileSync(join(root, "sops", `${key}.md`), `${head ? head + "\n\n" : ""}${archiveBannerLine(at)}\n\n${rest}`);
+	return true;
+}
+
+/**
+ * [0.6.4] 元数据补登记：facts.md 的 ## section 与 sops/*.md 中可能存在
+ * memory-meta.json 没有记录的条目（旧版本迁移、examples 种子、跨机导入的记忆）。
+ * 缺记录 = 没有 updatedAt/证据追踪，冷条目复核对它们只能报 age_days=null。
+ * 只补「存在性 + 文件 mtime」，**不把正文里的证据行抄进 evidence**——那会把别处的
+ * 验证洗成本机验证（行动验证公理）。补登记条目带 backfilled 标记，便于事后分辨。
+ * 幂等：无缺失时返回空数组且不写文件。
+ */
+export function backfillMeta(root, { namespace = "default", now = new Date() } = {}) {
+	const added = [];
+	casRewrite(join(root, META_FILE), (text) => {
+		let meta = null;
+		try { meta = text === null ? null : JSON.parse(text); } catch { meta = null; }
+		if (!meta || !meta.facts || !meta.sops) meta = { facts: {}, sops: {} };
+		const ensure = (kind, key, file) => {
+			const bucket = kind === "fact" ? meta.facts : meta.sops;
+			if (bucket[key]) return;
+			let iso = now.toISOString();
+			try {
+				const st = statSync(file);
+				iso = new Date(Math.min(st.mtimeMs, now.getTime())).toISOString();
+			} catch { /* 取不到 mtime 就用 now */ }
+			bucket[key] = {
+				sourceSession: null, sourceSeqs: [], evidence: "", namespace,
+				archived: false, createdAt: iso, updatedAt: iso,
+				backfilled: true, backfilledAt: now.toISOString(),
+			};
+			added.push(`${kind}:${key}`);
+		};
+		for (const name of factSections(root)) ensure("fact", name, join(root, "facts.md"));
+		for (const name of sopNames(root)) ensure("sop", name, join(root, "sops", `${name}.md`));
+		return added.length ? JSON.stringify(meta, null, 2) : null;
+	});
+	return added;
+}

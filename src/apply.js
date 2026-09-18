@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import Schema from "@deepseek-ai/schemastery";
-import { ensureNamespaceLayout, nsRoot, resolveNamespace, defaultMemDir, HEAT_HALF_LIFE_DAYS, RECENCY_WINDOW_MS, NAMESPACE_CACHE_TTL_MS_DEFAULT } from "./store.js";
+import { ensureNamespaceLayout, nsRoot, resolveNamespace, defaultMemDir, backfillMeta, HEAT_HALF_LIFE_DAYS, RECENCY_WINDOW_MS, NAMESPACE_CACHE_TTL_MS_DEFAULT } from "./store.js";
 import { NEAR_DUPE_THRESHOLD, MERGE_CANDIDATE_THRESHOLD, MIN_TOKENS_FOR_FUZZY, COLD_REVIEW_DAYS } from "./maintain.js";
 import { readIndex, L1_MAX_CHARS_DEFAULT } from "./l1index.js";
 import { buildTools } from "./tools.js";
@@ -103,6 +103,16 @@ function apply(ctx, config = {}) {
 	const initialRoot = nsRoot(cfg.memoryDir, resolveNamespace(cfg));
 	ensureNamespaceLayout(initialRoot);
 	ensuredRoots.add(initialRoot);
+
+	// [0.6.4] 元数据补登记：facts.md / sops 里存在但 memory-meta.json 无记录的条目
+	// （旧版本迁移、examples 种子、跨机导入）补一条快照型 meta，恢复 updatedAt 追踪；
+	// 不抄正文证据（那是别处的验证），只标 backfilled。
+	try {
+		const backfilled = backfillMeta(initialRoot, { namespace: resolveNamespace(cfg) });
+		if (backfilled.length) ctx.logger?.info?.(`[dsh-layered-memory] meta 补登记 ${backfilled.length} 条（快照型，标记 backfilled）`);
+	} catch (error) {
+		ctx.logger?.warn?.(`[dsh-layered-memory] meta 补登记失败: ${String(error?.message || error)}`);
+	}
 
 	// ── 记忆注入（L1 存在性索引每轮可见）──
 	// [v0.5.3] 注入面防护：index.txt 由 memory_write 的 topic/content 拼接而成，

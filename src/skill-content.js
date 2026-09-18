@@ -71,11 +71,11 @@ export const SKILL_CONTENT = `# 记忆管理（DSH 版）
 | \`memory_search\` | BM25 全文检索（含归档；可跨命名空间） |
 | \`memory_activate\` | 渐进式暴露兜底：skill 加载后工具未自动出现时调用一次 |
 | \`memory_write\` | 写入记忆（fact/sop，**evidence 必填**；覆盖同名自动快照 .history/；疑似密钥明文与 fact 正文的 "## " 行直接拒绝；返回体附 L0 判据） |
-| \`memory_index\` | 重建 L1 索引自动段 |
+| \`memory_index\` | 重建 L1 索引自动段（顺带补登记缺失的 memory-meta 记录） |
 | \`memory_pending\` | 查看重试序列蒸馏候选 |
 | \`memory_accept\` | 接受 pending 候选入正式记忆 |
 | \`memory_update\` | 更新记忆（supersede 保留历史） |
-| \`memory_archive\` | 归档记忆（L1 隐藏，文件保留） |
+| \`memory_archive\` | 归档记忆（L1 隐藏、正文保留并在首部写归档横幅，取消归档时自动剥离） |
 | \`memory_rollback\` | 回滚到最近历史快照 |
 | \`memory_expand\` | 展开 sourceSession/sourceSeqs 原始事件 |
 | \`memory_stats\` | 查看统计 |

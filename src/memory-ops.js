@@ -16,6 +16,7 @@ import {
 	upsertFact,
 	snapshotEntry,
 	readFact,
+	stripArchiveBanner,
 } from "./store.js";
 import { syncIndex, L1_MAX_CHARS_DEFAULT } from "./l1index.js";
 
@@ -92,7 +93,8 @@ export function writeMemory(root, {
 }) {
 	// [0.6.1 M4] 校验逻辑提取为 assertSafeTopic 单源，供全部 topic 入参工具复用。
 	const safeTopic = assertSafeTopic(topic, "memory_write");
-	const body = String(content ?? "").trim();
+	// [0.6.4] 取消归档/重写的入口：剥掉可能残留的归档横幅，避免旧标记跟着新内容走。
+	const body = stripArchiveBanner(String(content ?? "").trim());
 	const secretHit = detectSecret(body);
 	if (secretHit) {
 		throw new Error(`memory_write: 内容疑似含密钥（命中 ${secretHit}）。行动验证公理之外还有 L0 红线「密钥仅引用」：请改存引用名/路径（如 keychain:<name> 或配置文件路径），不要写明文凭证。`);

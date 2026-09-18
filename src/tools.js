@@ -26,6 +26,8 @@ import {
 	readFact,
 	readSop,
 	upsertFact,
+	archiveEntryBody,
+	backfillMeta,
 	bumpAccess,
 	computeNamespaceStats,
 } from "./store.js";
@@ -445,19 +447,21 @@ export function buildTools(ctx, cfg) {
 				rewritten: { type: "boolean", required: true },
 				facts: { ...STR_ARR, required: true },
 				sops: { ...STR_ARR, required: true },
+				backfilled: { ...STR_ARR, required: true },
 			},
 		},
 			render: (_args, value) => [{
 				type: "text",
-				text: `索引已重建[${value.namespace}]（${value.index_chars} 字符 / 预算 ${value.max_chars}${value.over_limit ? "，⚠️ 超预算：条目不会被隐藏，请合并或归档" : ""}${value.rewritten ? "" : "，内容无变化未重写"}）：\nL2: ${value.facts.join("、") || "（空）"}\nL3: ${value.sops.join("、") || "（空）"}`
+				text: `索引已重建[${value.namespace}]（${value.index_chars} 字符 / 预算 ${value.max_chars}${value.over_limit ? "，⚠️ 超预算：条目不会被隐藏，请合并或归档" : ""}${value.rewritten ? "" : "，内容无变化未重写"}${value.backfilled?.length ? `；meta 补登记 ${value.backfilled.length} 条` : ""}）：\nL2: ${value.facts.join("、") || "（空）"}\nL3: ${value.sops.join("、") || "（空）"}`
 			}]
 		},
 		async execute(args) {
 			const ns = resolveNamespace(cfg, args.namespace);
 			const root = nsRoot(cfg.memoryDir, ns);
 			ensureNamespaceLayout(root);
+			const backfilled = backfillMeta(root, { namespace: ns });
 			const r = syncIndex(root, cfg.l1MaxChars);
-			return { namespace: ns, index_chars: r.index_chars, max_chars: r.max_chars, over_limit: r.over_limit, rewritten: r.rewritten, facts: factSections(root).filter((f) => !isArchived(root, "fact", f)), sops: sopNames(root).filter((s) => !isArchived(root, "sop", s)) };
+			return { namespace: ns, backfilled, index_chars: r.index_chars, max_chars: r.max_chars, over_limit: r.over_limit, rewritten: r.rewritten, facts: factSections(root).filter((f) => !isArchived(root, "fact", f)), sops: sopNames(root).filter((s) => !isArchived(root, "sop", s)) };
 		},
 		presentCall() {
 			return { card: "generic", title: "重建记忆索引", kind: "execute" };
@@ -882,6 +886,9 @@ export function buildTools(ctx, cfg) {
 			const exists = type === "fact" ? readFact(root, key) !== null : readSop(root, key) !== null;
 			if (!exists) return { topic, entry_type: type, namespace: ns, archived: false };
 			setEntryMeta(root, type, key, { archived: true, archivedAt: new Date().toISOString() });
+			// [0.6.4] 横幅写进正文：归档只隐藏 L1，正文仍留在文件里（体检实测 25 条这样的正文
+			// 会被读文件的人当成现行事实）。取消归档时由写入路径自动剥离。
+			archiveEntryBody(root, type, key);
 			syncIndex(root, cfg.l1MaxChars);
 			return { topic, entry_type: type, namespace: ns, archived: true };
 		},

@@ -2,6 +2,13 @@
 
 All notable changes to `dsh-layered-memory` are documented here.
 
+## [0.6.4] - 2026-09-18
+
+修复（归档可见性 + 元数据补登记，来自第二轮记忆库语义体检）
+
+- **归档正文会误导读者**：`memory_archive` 只把条目从 L1 索引隐藏，正文照旧留在 `facts.md` / `sops/*.md`。实测生产库 25 个已归档小节、2 个已归档 SOP 的正文原样留在文件里，人工读文件或 `memory_search` 命中的读者会把历史快照当成现行事实（Jev 判「会误导」0.74）。现在归档时在正文首部写一行自解释横幅（`> [已归档 YYYY-MM-DD] 历史快照：已不在 L1 索引中…`）；fact 走 `upsertFact` 保留 section 结构，SOP 横幅插在 `#` 标题行之后。任何再次写入（write / update / accept / rollback）都会先 `stripArchiveBanner`，取消归档不会残留过期标记。
+- **条目缺 meta 记录**：`facts.md` 的 `##` section 与 `sops/*.md` 中可能存在 `memory-meta.json` 完全没有记录的条目（旧版本迁移、examples 种子、跨机导入）——实测生产库 12 条活跃条目如此，它们没有 updatedAt/证据追踪，冷条目复核只能报 `age_days=null`。新增 `backfillMeta()`：只补「存在性 + 文件 mtime」并标 `backfilled: true`，**不把正文里的证据行抄进 `evidence`**（那会把别处的验证洗成本机验证，违反行动验证公理）。插件加载期自动补登记并 log 条数；`memory_index` 也会顺带补并在返回值里报告 `backfilled` 列表。幂等，无缺失时不写文件。
+
 ## [0.6.3] - 2026-09-18
 
 修复（Agent Teams 多会话交互 + 反思注入 payload 形状）

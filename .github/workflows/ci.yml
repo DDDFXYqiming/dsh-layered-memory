@@ -1,0 +1,58 @@
+# CI —— push / PR 的离线门禁。
+#
+# 规范对齐 DDDFXYqiming/loreweaver-red 的 .github/workflows/ci.yml：
+# name / on / concurrency / permissions 保持同一形状。
+#
+# 为什么只跑这些：
+#   * test/*.test.mjs（39 个用例）只用 node 内置模块 + 系统临时目录，
+#     不读宿主 ~/.dsh、不发网络请求、不需要任何 API key、不调真实模型 —— 可在 runner 上完全离线跑。
+#   * 需要密钥 / 真实模型 / 外网数据源的评测不进 push CI（另行承载，见 PR 说明）。
+#   * `pnpm test` = `pnpm build`（对 src/*.js 与 lib/index.js 做 node --check）+ `vitest run`。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Node ${{ matrix.node-version }} — 语法检查 + vitest（离线）
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 与 package.json 的 engines.node（>=22.19）对齐：既跑声明下限，也跑当前 LTS。
+        node-version: ["22.19", "24"]
+    steps:
+      - uses: actions/checkout@v7
+
+      # pnpm 固定在 11.23.0：pnpm-lock.yaml 由该版本生成（settings.autoInstallPeers: true），
+      # 换版本会因 lockfile 配置不匹配让 --frozen-lockfile 直接失败。
+      # 另：pnpm 11.23.0 自身要求 node >= 22.13，矩阵下限 22.19 满足。
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.23.0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+
+      # --frozen-lockfile：CI 不解析新版本，只用 lockfile 锁定的依赖（安装阶段访问 npm registry 属常规步骤）。
+      # devDependencies 里的 @deepseek-ai/dsh-tools / @deepseek-ai/schemastery 是测试的硬依赖：
+      # 测试 import lib/index.js → src/apply.js 会直接 import 这两个包，
+      # 缺失时 vitest 连一个测试文件都加载不了（Cannot find package），所以必须随 lockfile 一起装出来。
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      # 测试阶段完全离线：无 API key、无真实模型、无外网数据源。
+      - name: Syntax check + tests (offline — no keys, no real models)
+        run: pnpm test

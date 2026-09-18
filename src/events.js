@@ -193,14 +193,20 @@ export function wireEvents(ctx, cfg, io) {
 						// reflectionState 更新——失败重试交由冷却期，而非下一轮立即重复注入。
 						// [0.6.1 I5] source.plugin 用插件导出名 layered-memory（src/index.js），
 						// 与 skill 名 memory 区分：转写归因指向提供方插件。
-						try {
-							agent.inject({
-								content: [{ type: "text", text: `[记忆整理请求] ${parts.join("；")}。（行动验证公理照旧：只沉淀有证据的内容）` }],
-								source: { kind: "plugin", plugin: "layered-memory" },
-							});
-						} catch (err) {
-							warnOnce("inject", "反思注入（agent 可能已 dispose）", err);
-						}
+						// [0.6.2] turn/end 观察器由宿主 Session.append 发布窗口内同步回调，
+						// 直接 inject 会撞重入守卫（session append cannot reenter）；延迟到下一宏任务
+						// 让本次发布先收口，期间 agent 若被 dispose 由 warnOnce 接住。
+						const reflectionPayload = {
+							content: [{ type: "text", text: `[记忆整理请求] ${parts.join("；")}。（行动验证公理照旧：只沉淀有证据的内容）` }],
+							source: { kind: "plugin", plugin: "layered-memory" },
+						};
+						setTimeout(() => {
+							try {
+								agent.inject(reflectionPayload);
+							} catch (err) {
+								warnOnce("inject", "反思注入（agent 可能已 dispose）", err);
+							}
+						}, 0);
 						reflectionState.set(sessionId, { lastReflectionTurn: totalTurns });
 					}
 				}

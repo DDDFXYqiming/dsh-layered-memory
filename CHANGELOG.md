@@ -2,6 +2,12 @@
 
 All notable changes to `dsh-layered-memory` are documented here.
 
+## [0.6.2] - 2026-09-18
+
+修复（反思注入撞宿主重入守卫）
+- turn/end 观察器在宿主 `Session.append` 发布窗口内同步调用 `agent.inject`，必抛 `session append cannot reenter while another append is being published`。该失败自 0.1.6 宿主起就存在（0.6.0 被整段空 catch 静默吞掉，反思提醒实际从未送达；0.6.1 按审查项 N7 拆防护后转为响亮 warnOnce，即用户可见的告警堆栈）。
+- 修法：inject 延迟到下一宏任务（`setTimeout 0`）让本次发布先收口；期间 agent 若被 dispose 仍由 warnOnce 接住；`reflectionState` 冷却标记保持同步更新，不重复调度。回归 `test/v062.test.mjs`（同步阶段零调用 + 下一宏任务送达 + 冷却不重发，56/56 全绿）。
+
 ## [0.6.1] - 2026-09-18
 
 一句话：官方规范审查（report-20260918-layered-memory）4 MAJOR + 14 MINOR 全量闭环——输出契约恢复类型化投影、注入面校验缺口收口、热路径去同步 spawn、静默失败全部点名。

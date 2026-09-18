@@ -15,6 +15,7 @@
     "src",
     "README.md",
     "README.en.md",
+    "CHANGELOG.md",
     "cordis.patch.yml",
     "LICENSE"
   ],
@@ -50,7 +51,6 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.0-rc <5",
-    "@deepseek-ai/dsh-system-prompt": "*",
     "@deepseek-ai/dsh-tools": "*",
     "@deepseek-ai/schemastery": "*"
   },

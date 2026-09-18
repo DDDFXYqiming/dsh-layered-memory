@@ -212,6 +212,7 @@ export function buildTools(ctx, cfg) {
 					: `记忆「${value.name}」（来源: ${value.source}, namespace: ${value.namespace}${value.meta?.archived ? ", 已归档" : ""}）：\n\n${value.content}${formatRelated(value.meta?.related_states)}`
 			}]
 		},
+		isConcurrencySafe: () => true, // [0.6.1 I9] 读为主；bumpAccess 是容忍漂移的旁路计数
 		async execute(args) {
 			const key = String(args.name).trim();
 			const ns = resolveNamespace(cfg, args.namespace);
@@ -309,7 +310,8 @@ export function buildTools(ctx, cfg) {
 				text: `记忆库[${value.namespace}]（L1 索引 ${value.index_chars} 字符 / 预算 ${value.max_chars}）\nL2 事实: ${value.facts.join("、") || "（空）"}\nL3 SOP: ${value.sops.join("、") || "（空）"}\nPending: ${value.pending.join("、") || "（空）"}`
 			}]
 		},
-		execute(args) {
+		isConcurrencySafe: () => true, // [0.6.1 I9] 纯读，参与并行组
+		async execute(args) {
 			const ns = resolveNamespace(cfg, args.namespace);
 			const root = nsRoot(cfg.memoryDir, ns);
 			ensureNamespaceLayout(root);
@@ -450,7 +452,7 @@ export function buildTools(ctx, cfg) {
 				text: `索引已重建[${value.namespace}]（${value.index_chars} 字符 / 预算 ${value.max_chars}${value.over_limit ? "，⚠️ 超预算：条目不会被隐藏，请合并或归档" : ""}${value.rewritten ? "" : "，内容无变化未重写"}）：\nL2: ${value.facts.join("、") || "（空）"}\nL3: ${value.sops.join("、") || "（空）"}`
 			}]
 		},
-		execute(args) {
+		async execute(args) {
 			const ns = resolveNamespace(cfg, args.namespace);
 			const root = nsRoot(cfg.memoryDir, ns);
 			ensureNamespaceLayout(root);
@@ -485,7 +487,8 @@ export function buildTools(ctx, cfg) {
 				text: `统计[${value.namespace}]：L2=${value.stats.facts} L3=${value.stats.sops} pending=${value.stats.pending} archived=${value.stats.archived} size=${value.stats.size_bytes}B`
 			}]
 		},
-		execute(args) {
+		isConcurrencySafe: () => true, // [0.6.1 I9] 纯读，参与并行组
+		async execute(args) {
 			const ns = resolveNamespace(cfg, args.namespace);
 			const root = nsRoot(cfg.memoryDir, ns);
 			ensureNamespaceLayout(root);
@@ -585,7 +588,7 @@ export function buildTools(ctx, cfg) {
 				].filter(Boolean).join("\n")
 			}]
 		},
-		execute(args) {
+		async execute(args) {
 			const ns = resolveNamespace(cfg, args.namespace);
 			const root = nsRoot(cfg.memoryDir, ns);
 			ensureNamespaceLayout(root);
@@ -631,7 +634,8 @@ export function buildTools(ctx, cfg) {
 				text: `Pending[${value.namespace}]：\n` + (value.pending.map((p) => `- ${p.name}: ${pendingSummary(p.content)}`).join("\n") || "（空）")
 			}]
 		},
-		execute(args) {
+		isConcurrencySafe: () => true, // [0.6.1 I9] 纯读，参与并行组
+		async execute(args) {
 			const ns = resolveNamespace(cfg, args.namespace);
 			const root = nsRoot(cfg.memoryDir, ns);
 			ensureNamespaceLayout(root);
@@ -711,10 +715,14 @@ export function buildTools(ctx, cfg) {
 			if (!evidence) throw new Error("memory_accept: 需要 evidence（行动验证公理：无行动，不记忆）");
 			const content = text.replace(/^# Pending Memory Candidate\r?\n[\s\S]*?\r?\n\r?\n/, "").trim();
 			if (!content) throw new Error("memory_accept: pending 内容为空，无法接受");
+			// [0.6.1 N11] autoPending 候选正文恒含「## 重试序列」行，接受为 fact 必被 ghost-section
+			// 硬校验拒绝（组合死路）。accept 路径统一把 "## " 降级为 "### "（标题信息保留），
+			// 正式写入路径的硬校验本身不动。entry_type=sop 无此约束，保持原样。
+			const body = entryType === "fact" ? content.replace(/^## /gm, "### ") : content;
 			writeMemory(root, {
 				topic,
 				entryType,
-				content,
+				content: body,
 				evidence,
 				sourceSession: parsed.sourceSession || null,
 				sourceSeqs: parsed.sourceSeqs || [],
@@ -1013,7 +1021,7 @@ export function buildTools(ctx, cfg) {
 					: `溯源不可用：${value.message || "无 sourceSession/sourceSeqs"}`
 			}]
 		},
-		async execute(args) {
+		async execute(args, exec) {
 			const ns = resolveNamespace(cfg, args.namespace);
 			const root = nsRoot(cfg.memoryDir, ns);
 			ensureNamespaceLayout(root);
@@ -1029,8 +1037,13 @@ export function buildTools(ctx, cfg) {
 			if (!sq || typeof sq.readSession !== "function") {
 				return { topic, entry_type: type, available: false, message: "sessionQuery 服务不可用", sourceSession: meta.sourceSession || "", sourceSeqs: numSeqs(meta.sourceSeqs) };
 			}
+			// [0.6.1 N8] exec.signal 协作：readSession 是本文件唯一可能长耗时的 await（大会话日志），
+			// 前后各查一次 aborted 提前退出。其余工具为毫秒级同步文件操作（同 tick 原子完成，
+			// 取消无法更快）或 runMaintain 长同步循环（JS 不可抢占），豁免理由记录于 CHANGELOG。
+			if (exec?.signal?.aborted) throw new Error("memory_expand: 调用方已取消（signal aborted）");
 			try {
 				const snap = await sq.readSession(meta.sourceSession);
+				if (exec?.signal?.aborted) throw new Error("memory_expand: 调用方已取消（signal aborted）");
 				const seqSet = new Set(meta.sourceSeqs.map(Number));
 				const events = snap.events
 					.filter((e) => seqSet.has(Number(e.seq)))
@@ -1109,7 +1122,8 @@ export function buildTools(ctx, cfg) {
 						`${i + 1}. [${r.namespace}] ${r.kind}:${r.name}${r.archived ? "（已归档）" : ""} score=${r.score}\n   ${r.snippet}`).join("\n")
 			}]
 		},
-		execute(args) {
+		isConcurrencySafe: () => true, // [0.6.1 I9] 纯读，参与并行组
+		async execute(args) {
 			const query = String(args.query ?? "").trim();
 			if (!query) throw new Error("memory_search: query 必填");
 			const includeArchived = args.include_archived !== false;

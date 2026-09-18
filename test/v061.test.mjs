@@ -225,6 +225,23 @@ test("N12 autoPending 开启时，含密钥的 pending 尾部落盘前被替换�
 	expect(text).toContain("retry succeeded"); // 非敏感尾部原样保留
 });
 
+// ── N11：accept 重试序列候选不再因 "## " 硬校验走死路 ──
+
+test("N11 autoPending 形态候选以 entry_type=fact 接受成功，正文 ## 降级为 ###", async () => {
+	const { writePending } = await import("../src/memory-ops.js");
+	const fname = writePending(root(), {
+		sourceSession: "s1",
+		sourceSeqs: [1],
+		retries: [{ tool: "pwsh", fails: 2, errorTail: "port busy", successTail: "listening" }],
+	});
+	const r = await tool("memory_accept").execute({ name: fname, topic: "retry-note", entry_type: "fact", evidence: "manual review", namespace: "test" });
+	expect(r.accepted).toBe(true);
+	const facts = readFileSync(join(root(), "facts.md"), "utf8");
+	expect(facts).toContain("### 重试序列");
+	expect(facts).not.toMatch(/^## 重试序列/m);
+	// 修复前：fact 正文含 "## " 行必抛拒绝，重试序列候选永远无法作为 fact 接受
+});
+
 // ── M3：autoNamespace 的 git 分支探测进程内缓存 ──
 
 test("M3 detectNamespace：TTL 内第二次调用不再 spawn git；TTL=0 关闭缓存；过期重取", async () => {

@@ -1,7 +1,7 @@
 // 0.6.1 审查修复回归：覆盖官方规范审查报告（report-20260918-layered-memory.md）
 // 各条发现的最小复现与修复断言。编号与报告一致（M1-M4 / N1-N14）。
 import { test, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync, readdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync, readdirSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply } from "../lib/index.js";
@@ -124,6 +124,40 @@ test("M1 maintain：无 createdAt / 非法 createdAt / 极老条目的 mix 输�
 	// 落盘报告与返回值同口径
 	const disk = JSON.parse(readFileSync(join(root(), "maintenance-report.json"), "utf8"));
 	expect(JSON.stringify(disk)).not.toMatch(/Infinity|NaN/);
+});
+
+// ── M4：memory_rollback 的 topic 必须过写入侧同一控制字符判据 ──
+
+test("M4 rollback fact 路径：含 \\n / \\r / \\u0000 的 topic 被拒，且不注入幽灵 section", async () => {
+	await write({ topic: "x evil", entry_type: "fact", content: "原始版内容" });
+	await write({ topic: "x evil", entry_type: "fact", content: "第二版内容" }); // 产生 .history/fact-x-evil-*.md 快照
+	const factsBefore = readFileSync(join(root(), "facts.md"), "utf8");
+	expect(readdirSync(join(root(), ".history")).some((f) => f.startsWith("fact-x-evil-"))).toBe(true);
+	for (const bad of ["x\n## evil", "x\r## evil", "x\u0000evil"]) {
+		await expect(tool("memory_rollback").execute({ topic: bad, entry_type: "fact", namespace: "test" }))
+			.rejects.toThrow(/控制字符/);
+	}
+	// 修复前：slugify("x\n## evil") 与 "x evil" 同为 x-evil，会命中快照把 "evil" 段注入 facts.md
+	expect(readFileSync(join(root(), "facts.md"), "utf8")).toBe(factsBefore);
+});
+
+test("M4 rollback：历史快照正文含 ## 标题行时拒绝恢复（纵深防御）", async () => {
+	await write({ topic: "guard", entry_type: "fact", content: "当前内容" });
+	writeFileSync(join(root(), ".history", "fact-guard-9999999999999.md"), "# guard\n\n正常行\n## ghost\n坏内容\n", "utf8");
+	await expect(tool("memory_rollback").execute({ topic: "guard", entry_type: "fact", namespace: "test" }))
+		.rejects.toThrow(/拒绝恢复/);
+	expect(readFileSync(join(root(), "facts.md"), "utf8")).toContain("当前内容");
+});
+
+test("M4 accept/archive/expand/promote 的 topic 同判据收口", async () => {
+	await expect(tool("memory_archive").execute({ topic: "evil\nx", entry_type: "fact", namespace: "test" }))
+		.rejects.toThrow(/控制字符/);
+	await expect(tool("memory_expand").execute({ topic: "evil\rx", entry_type: "fact", namespace: "test" }))
+		.rejects.toThrow(/控制字符/);
+	await expect(tool("memory_promote").execute({ topic: "evil\u0000x", entry_type: "fact", from_namespace: "test", to_namespace: "default" }))
+		.rejects.toThrow(/控制字符/);
+	await expect(tool("memory_accept").execute({ name: "whatever.md", topic: "evil\nx", entry_type: "fact", evidence: "e" }))
+		.rejects.toThrow(/控制字符|不存在/);
 });
 
 // ── M3：autoNamespace 的 git 分支探测进程内缓存 ──

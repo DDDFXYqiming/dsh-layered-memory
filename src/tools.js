@@ -30,7 +30,7 @@ import {
 	computeNamespaceStats,
 } from "./store.js";
 import { readIndex, syncIndex, indexChars } from "./l1index.js";
-import { writeMemory, readPending, parsePending } from "./memory-ops.js";
+import { writeMemory, readPending, parsePending, assertSafeTopic } from "./memory-ops.js";
 import { runMaintain } from "./maintain.js";
 import { listNamespaces, searchNamespaces } from "./search.js";
 
@@ -489,6 +489,9 @@ export function buildTools(ctx, cfg) {
 			if (!text) throw new Error(`memory_accept: pending 不存在: ${name}`);
 			const parsed = parsePending(text);
 			const topic = String(args.topic || "").trim() || "";
+			// [0.6.1 M4] topic 即将进 writeMemory（事实层 section 名）：与控制字符判据同点在写入前失败，
+			// 不让 pending 读取与归档副作用先发生。
+			if (topic) assertSafeTopic(topic, "memory_accept");
 			const entryType = args.entry_type === "fact" ? "fact" : args.entry_type === "sop" ? "sop" : "";
 			const evidence = String(args.evidence || "").trim() || "";
 			if (!topic) throw new Error("memory_accept: 需要 topic（pending 未包含可推断主题）");
@@ -631,6 +634,7 @@ export function buildTools(ctx, cfg) {
 			const root = nsRoot(cfg.memoryDir, ns);
 			ensureNamespaceLayout(root);
 			const topic = String(args.topic).trim();
+			assertSafeTopic(topic, "memory_archive"); // [0.6.1 M4] 判据单源，与写入侧一致
 			const type = args.entry_type === "fact" ? "fact" : "sop";
 			const key = type === "fact" ? topic : slugify(topic);
 			const exists = type === "fact" ? readFact(root, key) !== null : readSop(root, key) !== null;
@@ -676,6 +680,10 @@ export function buildTools(ctx, cfg) {
 			const root = nsRoot(cfg.memoryDir, ns);
 			ensureNamespaceLayout(root);
 			const topic = String(args.topic).trim();
+			// [0.6.1 M4] 此前 rollback 是全链路唯一没做 topic 控制字符校验的写入口：
+			// "x\n## evil" 经 slugify 仍可命中 "x evil" 的历史快照前缀，回滚即向
+			// facts.md 注入幽灵 section 并被 syncIndex 带进 L1（每轮系统上下文）。
+			assertSafeTopic(topic, "memory_rollback");
 			const type = args.entry_type === "fact" ? "fact" : "sop";
 			const key = type === "fact" ? topic : slugify(topic);
 			const prefix = type === "fact" ? `fact-${slugify(topic)}-` : `sop-${slugify(topic)}-`;
@@ -691,6 +699,11 @@ export function buildTools(ctx, cfg) {
 			const content = readFileSync(src, "utf8");
 			if (type === "fact") {
 				const clean = content.replace(/^# .+\n\n/, "").trim();
+				// [0.6.1 M4] 纵深防御：与 writeMemory 的 fact 正文判据一致——历史快照理论上
+				// 不可能含 "## " 行（v0.6 前遗留除外），命中即拒绝恢复并指路人查。
+				if (/^##\s+/m.test(clean)) {
+					throw new Error(`memory_rollback: 快照 ${latest} 正文含 "## " 标题行，拒绝恢复（会造出幽灵 section；请人工核对 .history/ 后处理）`);
+				}
 				upsertFact(root, topic, clean);
 				setEntryMeta(root, "fact", topic, { archived: false, restoredFrom: latest });
 			} else {
@@ -739,6 +752,7 @@ export function buildTools(ctx, cfg) {
 			const root = nsRoot(cfg.memoryDir, ns);
 			ensureNamespaceLayout(root);
 			const topic = String(args.topic).trim();
+			assertSafeTopic(topic, "memory_expand"); // [0.6.1 M4] 判据单源（读侧同样收口，非法名快速失败）
 			const type = args.entry_type === "fact" ? "fact" : "sop";
 			const key = type === "fact" ? topic : slugify(topic);
 			const meta = getEntryMeta(root, type, key);
@@ -868,6 +882,7 @@ export function buildTools(ctx, cfg) {
 		},
 		async execute(args) {
 			const topic = String(args.topic).trim();
+			assertSafeTopic(topic, "memory_promote"); // [0.6.1 M4] 判据单源（writeMemory 前失败，不产生跨空间副作用）
 			const type = args.entry_type === "fact" ? "fact" : "sop";
 			const fromNs = resolveNamespace(cfg, args.from_namespace);
 			const toNs = safeNs(args.to_namespace || "default");

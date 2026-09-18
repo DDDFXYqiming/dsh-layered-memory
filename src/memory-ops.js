@@ -44,6 +44,23 @@ export function detectSecret(text) {
 }
 
 /**
+ * topic 控制字符判据（单一来源）。[0.6.1 M4] 提取自 writeMemory：topic 会进
+ * facts.md 的 ## section 与 L1 索引（再注入 system prompt），含换行/控制字符会
+ * 让 section 解析错位并成为提示词注入载体。所有以 topic 为条目名的工具
+ * （write/update 经 writeMemory；accept/promote/archive/expand/rollback）必须复用
+ * 本校验——rollback 曾绕过它，把 "x\n## evil" 拼进 facts.md 造出幽灵 section。
+ */
+export const TOPIC_CONTROL_CHARS = /[\n\r\u0000-\u001f\u007f]/;
+
+export function assertSafeTopic(topic, caller = "memory_write") {
+	const s = String(topic ?? "").trim();
+	if (TOPIC_CONTROL_CHARS.test(s)) {
+		throw new Error(`${caller}: topic 含换行或控制字符，拒绝写入: ${JSON.stringify(s.slice(0, 40))}`);
+	}
+	return s;
+}
+
+/**
  * 写入侧 L0 判据回显：把方法论放到决策点（借鉴 GA 的 "'This is L0:' + 写入动作同屏"）。
  * 只提示不阻断——阻断只用于上面三条硬约束。
  */
@@ -73,12 +90,8 @@ export function writeMemory(root, {
 	topic, entryType, content, evidence, sourceSession, sourceSeqs, namespace, related,
 	maxChars = 12288, snapshot = true,
 }) {
-	const safeTopic = String(topic).trim();
-	// topic 会进入 facts.md 的 ## section 与 L1 索引（再注入 system prompt）：
-	// 含换行/控制字符会让 section 解析错位，也会成为提示词注入载体，直接拒绝。
-	if (/[\n\r\u0000-\u001f\u007f]/.test(safeTopic)) {
-		throw new Error(`memory_write: topic 含换行或控制字符，拒绝写入: ${JSON.stringify(safeTopic.slice(0, 40))}`);
-	}
+	// [0.6.1 M4] 校验逻辑提取为 assertSafeTopic 单源，供全部 topic 入参工具复用。
+	const safeTopic = assertSafeTopic(topic, "memory_write");
 	const body = String(content ?? "").trim();
 	const secretHit = detectSecret(body);
 	if (secretHit) {

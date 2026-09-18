@@ -123,7 +123,7 @@ function apply(ctx, config = {}) {
 	}
 
 	// ── 运行时 skill（内容内联于 src/skill-content.js；插件非 skill，不用 SKILL.md 文件）──
-	let activate = () => ({ activated: false, tools: [] });
+	let activate = () => ({ activated: false, already: false, tools: [] });
 	const skillDisposer = ctx.skills.register({
 		name: SKILL_NAME,
 		description: SKILL_DESCRIPTION,
@@ -142,7 +142,9 @@ function apply(ctx, config = {}) {
 		}
 	};
 	activate = (agent) => {
-		if (agentStates.has(agent)) return { activated: false, tools: [] };
+		// [0.6.1 I4] 重复激活给出可判定的规范值：此前 {activated:false, tools:[]} 与
+		// 「未激活」同形，PTC 消费方无法区分「早已激活」；现用 already 标记幂等命中。
+		if (agentStates.has(agent)) return { activated: true, already: true, tools: allTools.map((d) => d.name) };
 		const ds = [];
 		try {
 			for (const def of allTools) ds.push(agent.ctx.tools.register(def));
@@ -151,7 +153,7 @@ function apply(ctx, config = {}) {
 				if (hide) ds.push(hide);
 			} catch { /* restrict 不可用时保留激活工具 */ }
 			agentStates.set(agent, ds);
-			return { activated: true, tools: allTools.map((d) => d.name) };
+			return { activated: true, already: false, tools: allTools.map((d) => d.name) };
 		} catch (error) {
 			disposeAll(ds);
 			throw error;
@@ -201,10 +203,11 @@ function apply(ctx, config = {}) {
 					additionalProperties: false,
 					properties: {
 						activated: { type: "boolean", required: true },
+						already: { type: "boolean", required: true },
 						tools: { type: "array", items: { type: "string" }, required: true }
 					}
 				},
-				render: (_args, value) => [{ type: "text", text: `记忆工具已激活: ${value.tools.join(", ")}` }]
+				render: (_args, value) => [{ type: "text", text: value.already ? `记忆工具早已激活（无需重复调用）: ${value.tools.join(", ")}` : `记忆工具已激活: ${value.tools.join(", ")}` }]
 			},
 			execute: (_args, exec) => {
 				if (!exec.agent) throw new Error("memory_activate: 需要 Agent 会话");

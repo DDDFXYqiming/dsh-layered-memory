@@ -160,6 +160,52 @@ test("M4 accept/archive/expand/promote 的 topic 同判据收口", async () => {
 		.rejects.toThrow(/控制字符|不存在/);
 });
 
+// ── M2：output.schema 声明稳定字段且保持开放 ──
+// 注：defineTool 在注册期已把作者 DSL 编译为 raw JSON Schema（properties 上的
+// required:true 折叠为对象节点 required 数组），d.output.schema 即宿主校验用的原始形态。
+
+test("M2 14 个工具的 output.schema 均有字段声明且属宿主支持子集", async () => {
+	const { assertSupportedJsonSchema } = await import("@deepseek-ai/dsh-tools");
+	const names = ["memory_read", "memory_list", "memory_write", "memory_index", "memory_stats",
+		"memory_maintain", "memory_pending", "memory_accept", "memory_update", "memory_archive",
+		"memory_rollback", "memory_expand", "memory_search", "memory_promote"];
+	expect(names).toHaveLength(14);
+	for (const n of names) {
+		const schema = tool(n).output.schema;
+		expect(schema.type, n).toBe("object");
+		expect(schema.additionalProperties, n + " 必须保持开放防漂移拒收").toBe(true);
+		expect(Object.keys(schema.properties || {}).length, n + " 必须声明稳定字段").toBeGreaterThan(0);
+		expect(() => assertSupportedJsonSchema(schema), n).not.toThrow();
+	}
+});
+
+test("M2 真实返回样例过宿主 validateJsonSchemaValue；缺必需字段会被判违规", async () => {
+	const { validateJsonSchemaValue } = await import("@deepseek-ai/dsh-tools");
+	const ok = (name, value) => {
+		const v = validateJsonSchemaValue(tool(name).output.schema, JSON.parse(JSON.stringify(value)), "out");
+		expect(v, name + " 违规: " + JSON.stringify(v)).toEqual([]);
+	};
+	await write({ topic: "schema-probe", entry_type: "fact", content: "输出契约探针", related: ["nope"] });
+	ok("memory_write", await write({ topic: "schema-probe2", entry_type: "sop", content: "sop 探针" }));
+	ok("memory_read", await tool("memory_read").execute({ name: "schema-probe", namespace: "test" }));
+	ok("memory_read", await tool("memory_read").execute({ name: "does-not-exist", namespace: "test" }));
+	ok("memory_list", await tool("memory_list").execute({ namespace: "test" }));
+	ok("memory_search", await tool("memory_search").execute({ query: "探针", namespace: "test" }));
+	ok("memory_maintain", await tool("memory_maintain").execute({ namespace: "test" }));
+	ok("memory_index", await tool("memory_index").execute({ namespace: "test" }));
+	ok("memory_stats", await tool("memory_stats").execute({ namespace: "test" }));
+	ok("memory_pending", await tool("memory_pending").execute({ namespace: "test" }));
+	ok("memory_update", await tool("memory_update").execute({ topic: "schema-probe", entry_type: "fact", content: "v2", evidence: "e" }));
+	ok("memory_archive", await tool("memory_archive").execute({ topic: "schema-probe", entry_type: "fact", namespace: "test" }));
+	ok("memory_archive", await tool("memory_archive").execute({ topic: "ghost-absent", entry_type: "fact", namespace: "test" }));
+	ok("memory_rollback", await tool("memory_rollback").execute({ topic: "schema-probe", entry_type: "fact", namespace: "test" }));
+	ok("memory_expand", await tool("memory_expand").execute({ topic: "schema-probe", entry_type: "fact", namespace: "test" }));
+	ok("memory_promote", await tool("memory_promote").execute({ topic: "schema-probe", entry_type: "fact", from_namespace: "test", to_namespace: "default" }));
+	// 校验必须真实生效：缺 topic / index 的 memory_write 样例要报违规
+	const bad = { entry_type: "fact", path: "p", namespace: "ns", action: "created", advisories: [], index: {} };
+	expect(validateJsonSchemaValue(tool("memory_write").output.schema, bad, "out").length).toBeGreaterThan(0);
+});
+
 // ── M3：autoNamespace 的 git 分支探测进程内缓存 ──
 
 test("M3 detectNamespace：TTL 内第二次调用不再 spawn git；TTL=0 关闭缓存；过期重取", async () => {

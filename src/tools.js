@@ -55,6 +55,67 @@ function pruneUndefined(value) {
 	return value;
 }
 
+// ── [0.6.1 M2] 输出契约公共片段 ──
+// v0.5.1 矫枉过正：output.schema 全塌缩为裸开放对象，宿主 PTC 的 ToolOutputMap
+// 由此派生 → 程序化消费方拿不到任何类型化字段。现按「声明稳定字段 +
+// additionalProperties:true 保持开放」补齐：已知字段有类型投影，未来新增字段
+// 仍不会因漂移被拒收。
+const ENTRY_TYPE = { type: "string", enum: ["fact", "sop"] };
+const STR_ARR = { type: "array", items: { type: "string" } };
+const NUM_ARR = { type: "array", items: { type: "number" } };
+const NULLABLE_NUM = { oneOf: [{ type: "number" }, { type: "null" }] };
+const NULLABLE_INT = { oneOf: [{ type: "integer" }, { type: "null" }] };
+/** syncIndex 的规范返回（memory_write/index/maintain 复用）。 */
+const INDEX_RESULT = {
+	type: "object",
+	additionalProperties: true,
+	properties: {
+		index_chars: { type: "integer", required: true },
+		max_chars: { type: "number", required: true },
+		over_limit: { type: "boolean", required: true },
+		facts_listed: { type: "integer", required: true },
+		sops_listed: { type: "integer", required: true },
+		rewritten: { type: "boolean", required: true },
+	},
+};
+/** computeNamespaceStats 的规范返回。 */
+const STATS_RESULT = {
+	type: "object",
+	additionalProperties: true,
+	properties: {
+		facts: { type: "integer", required: true },
+		sops: { type: "integer", required: true },
+		pending: { type: "integer", required: true },
+		archived: { type: "integer", required: true },
+		size_bytes: { type: "integer", required: true },
+		updatedAt: { type: "string", required: true },
+	},
+};
+/** memory_read 的溯源 meta（normalizeMeta 保证字段恒在）。 */
+const READ_META = {
+	type: "object",
+	additionalProperties: true,
+	properties: {
+		sourceSession: { type: "string", required: true },
+		sourceSeqs: { ...NUM_ARR, required: true },
+		evidence: { type: "string", required: true },
+		archived: { type: "boolean", required: true },
+		createdAt: { type: "string", required: true },
+		updatedAt: { type: "string", required: true },
+		related: STR_ARR,
+		related_states: {
+			type: "array",
+			items: {
+				type: "object",
+				additionalProperties: true,
+				properties: { name: { type: "string", required: true }, state: { type: "string", required: true } },
+			},
+		},
+	},
+};
+/** meta.sourceSeqs 归一为数字数组（老库可能存垃圾值；输出契约要求 number[]）。 */
+const numSeqs = (v) => (Array.isArray(v) ? v.map(Number).filter(Number.isFinite) : []);
+
 /** 出口消毒版 defineTool：execute 结果先过 pruneUndefined 再交还宿主。 */
 const defineTool = (def) => defineToolRaw({
 	...def,
@@ -66,7 +127,7 @@ const defineTool = (def) => defineToolRaw({
 function normalizeMeta(m) {
 	return {
 		sourceSession: m?.sourceSession || "",
-		sourceSeqs: m?.sourceSeqs || [],
+		sourceSeqs: numSeqs(m?.sourceSeqs),
 		evidence: m?.evidence || "",
 		archived: Boolean(m?.archived),
 		createdAt: m?.createdAt || "",
@@ -132,7 +193,18 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: { type: "object", additionalProperties: true },
+			schema: {
+			type: "object",
+			additionalProperties: true,
+			properties: {
+				name: { type: "string", required: true },
+				source: { type: "string", required: true },
+				content: { type: "string", required: true },
+				namespace: { type: "string", required: true },
+				meta: { ...READ_META, required: true },
+				not_found: { type: "boolean" },
+			},
+		},
 			render: (_args, value) => [{
 				type: "text",
 				text: value.not_found
@@ -220,7 +292,18 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: { type: "object", additionalProperties: true },
+			schema: {
+			type: "object",
+			additionalProperties: true,
+			properties: {
+				namespace: { type: "string", required: true },
+				index_chars: { type: "integer", required: true },
+				max_chars: { type: "number", required: true },
+				facts: { ...STR_ARR, required: true },
+				sops: { ...STR_ARR, required: true },
+				pending: { ...STR_ARR, required: true },
+			},
+		},
 			render: (_args, value) => [{
 				type: "text",
 				text: `记忆库[${value.namespace}]（L1 索引 ${value.index_chars} 字符 / 预算 ${value.max_chars}）\nL2 事实: ${value.facts.join("、") || "（空）"}\nL3 SOP: ${value.sops.join("、") || "（空）"}\nPending: ${value.pending.join("、") || "（空）"}`
@@ -285,7 +368,20 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: { type: "object", additionalProperties: true },
+			schema: {
+			type: "object",
+			additionalProperties: true,
+			properties: {
+				entry_type: { ...ENTRY_TYPE, required: true },
+				topic: { type: "string", required: true },
+				path: { type: "string", required: true },
+				namespace: { type: "string", required: true },
+				action: { type: "string", enum: ["created", "updated", "merged"], required: true },
+				history: { type: "string" },
+				index: { ...INDEX_RESULT, required: true },
+				advisories: { ...STR_ARR, required: true },
+			},
+		},
 			render: (_args, value) => [{
 				type: "text",
 				text: [`✅ 已${value.action}记忆「${value.topic}」（${value.entry_type === "fact" ? "L2 事实" : "L3 SOP"}）→ ${value.path} [${value.namespace}]`,
@@ -336,7 +432,19 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: { type: "object", additionalProperties: true },
+			schema: {
+			type: "object",
+			additionalProperties: true,
+			properties: {
+				namespace: { type: "string", required: true },
+				index_chars: { type: "integer", required: true },
+				max_chars: { type: "number", required: true },
+				over_limit: { type: "boolean", required: true },
+				rewritten: { type: "boolean", required: true },
+				facts: { ...STR_ARR, required: true },
+				sops: { ...STR_ARR, required: true },
+			},
+		},
 			render: (_args, value) => [{
 				type: "text",
 				text: `索引已重建[${value.namespace}]（${value.index_chars} 字符 / 预算 ${value.max_chars}${value.over_limit ? "，⚠️ 超预算：条目不会被隐藏，请合并或归档" : ""}${value.rewritten ? "" : "，内容无变化未重写"}）：\nL2: ${value.facts.join("、") || "（空）"}\nL3: ${value.sops.join("、") || "（空）"}`
@@ -364,7 +472,14 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: { type: "object", additionalProperties: true },
+			schema: {
+			type: "object",
+			additionalProperties: true,
+			properties: {
+				namespace: { type: "string", required: true },
+				stats: { ...STATS_RESULT, required: true },
+			},
+		},
 			render: (_args, value) => [{
 				type: "text",
 				text: `统计[${value.namespace}]：L2=${value.stats.facts} L3=${value.stats.sops} pending=${value.stats.pending} archived=${value.stats.archived} size=${value.stats.size_bytes}B`
@@ -391,7 +506,77 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: { type: "object", additionalProperties: true },
+			schema: {
+			type: "object",
+			additionalProperties: true,
+			properties: {
+				namespace: { type: "string", required: true },
+				report: {
+					type: "object",
+					additionalProperties: true,
+					required: true,
+					properties: {
+						runAt: { type: "string", required: true },
+						dedupe: {
+							type: "object",
+							additionalProperties: true,
+							required: true,
+							properties: {
+								removed: { ...STR_ARR, required: true },
+								merged: { ...STR_ARR, required: true },
+							},
+						},
+						index: {
+							type: "object",
+							additionalProperties: true,
+							required: true,
+							properties: {
+								...INDEX_RESULT.properties,
+								index_chars_actual: { type: "integer", required: true },
+							},
+						},
+						stats: { ...STATS_RESULT, required: true },
+						mergeCandidates: {
+							type: "array",
+							required: true,
+							items: {
+								type: "object",
+								additionalProperties: true,
+								properties: {
+									a: { type: "string", required: true },
+									b: { type: "string", required: true },
+									similarity: { type: "number", required: true },
+									nameOverlap: { type: "number", required: true },
+								},
+							},
+						},
+						cold: {
+							type: "object",
+							additionalProperties: true,
+							required: true,
+							properties: {
+								threshold_days: { type: "number", required: true },
+								count: { type: "integer", required: true },
+								entries: {
+									type: "array",
+									required: true,
+									items: {
+										type: "object",
+										additionalProperties: true,
+										properties: {
+											kind: { type: "string", required: true },
+											name: { type: "string", required: true },
+											heat: { ...NULLABLE_NUM, required: true },
+											age_days: { ...NULLABLE_INT, required: true },
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 			render: (_args, value) => [{
 				type: "text",
 				text: [`维护完成[${value.namespace}]：去重归档 ${value.report.dedupe?.removed?.length || 0} 条；L1 索引 ${value.report.index?.index_chars || 0} 字符 / 预算 ${value.report.index?.max_chars || 0}（L2=${value.report.index?.facts_listed || 0}、L3=${value.report.index?.sops_listed || 0} 全量列出，不裁剪）`,
@@ -422,7 +607,25 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: { type: "object", additionalProperties: true },
+			schema: {
+			type: "object",
+			additionalProperties: true,
+			properties: {
+				namespace: { type: "string", required: true },
+				pending: {
+					type: "array",
+					required: true,
+					items: {
+						type: "object",
+						additionalProperties: true,
+						properties: {
+							name: { type: "string", required: true },
+							content: { type: "string", required: true },
+						},
+					},
+				},
+			},
+		},
 			render: (_args, value) => [{
 				type: "text",
 				text: `Pending[${value.namespace}]：\n` + (value.pending.map((p) => `- ${p.name}: ${pendingSummary(p.content)}`).join("\n") || "（空）")
@@ -473,7 +676,16 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: { type: "object", additionalProperties: true },
+			schema: {
+			type: "object",
+			additionalProperties: true,
+			properties: {
+				accepted: { type: "boolean", required: true },
+				topic: { type: "string", required: true },
+				entry_type: { ...ENTRY_TYPE, required: true },
+				namespace: { type: "string", required: true },
+			},
+		},
 			render: (_args, value) => [{
 				type: "text",
 				text: value.accepted ? `✅ 已接受 pending → 记忆「${value.topic}」（${value.entry_type}）[${value.namespace}]` : `未接受：${value.reason || "未知原因"}`
@@ -565,7 +777,18 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: { type: "object", additionalProperties: true },
+			schema: {
+			type: "object",
+			additionalProperties: true,
+			properties: {
+				topic: { type: "string", required: true },
+				entry_type: { ...ENTRY_TYPE, required: true },
+				action: { type: "string", enum: ["superseded", "updated"], required: true },
+				namespace: { type: "string", required: true },
+				history: { type: "string" },
+				advisories: { ...STR_ARR, required: true },
+			},
+		},
 			render: (_args, value) => [{
 				type: "text",
 				text: `✅ 已${value.action}「${value.topic}」[${value.namespace}]${value.history ? `，旧版本保留在 ${value.history}` : ""}`
@@ -623,7 +846,16 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: { type: "object", additionalProperties: true },
+			schema: {
+			type: "object",
+			additionalProperties: true,
+			properties: {
+				topic: { type: "string", required: true },
+				entry_type: { ...ENTRY_TYPE, required: true },
+				namespace: { type: "string", required: true },
+				archived: { type: "boolean", required: true },
+			},
+		},
 			render: (_args, value) => [{
 				type: "text",
 				text: value.archived ? `📦 已归档「${value.topic}」[${value.namespace}]（可用 memory_rollback 恢复，或 memory_search 检索到）` : `未找到「${value.topic}」`
@@ -669,7 +901,17 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: { type: "object", additionalProperties: true },
+			schema: {
+			type: "object",
+			additionalProperties: true,
+			properties: {
+				topic: { type: "string", required: true },
+				entry_type: { ...ENTRY_TYPE, required: true },
+				namespace: { type: "string", required: true },
+				restored: { type: "boolean", required: true },
+				source: { type: "string" },
+			},
+		},
 			render: (_args, value) => [{
 				type: "text",
 				text: value.restored ? `♻️ 已回滚「${value.topic}」[${value.namespace}] ← ${value.source}` : `未找到可回滚的历史「${value.topic}」`
@@ -739,7 +981,31 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: { type: "object", additionalProperties: true },
+			schema: {
+			type: "object",
+			additionalProperties: true,
+			properties: {
+				topic: { type: "string", required: true },
+				entry_type: { ...ENTRY_TYPE, required: true },
+				available: { type: "boolean", required: true },
+				sourceSession: { type: "string", required: true },
+				sourceSeqs: { ...NUM_ARR, required: true },
+				message: { type: "string" },
+				events: {
+					type: "array",
+					items: {
+						type: "object",
+						additionalProperties: true,
+						properties: {
+							seq: { type: "number", required: true },
+							type: { type: "string", required: true },
+							time: { type: "number", required: true },
+							text: { type: "string", required: true },
+						},
+					},
+				},
+			},
+		},
 			render: (_args, value) => [{
 				type: "text",
 				text: value.available
@@ -757,11 +1023,11 @@ export function buildTools(ctx, cfg) {
 			const key = type === "fact" ? topic : slugify(topic);
 			const meta = getEntryMeta(root, type, key);
 			if (!meta?.sourceSession || !meta.sourceSeqs?.length) {
-				return { topic, entry_type: type, available: false, message: "该记忆没有 sourceSession/sourceSeqs 溯源信息", sourceSession: meta?.sourceSession || "", sourceSeqs: meta?.sourceSeqs || [] };
+				return { topic, entry_type: type, available: false, message: "该记忆没有 sourceSession/sourceSeqs 溯源信息", sourceSession: meta?.sourceSession || "", sourceSeqs: numSeqs(meta?.sourceSeqs) };
 			}
 			const sq = ctx.get("sessionQuery");
 			if (!sq || typeof sq.readSession !== "function") {
-				return { topic, entry_type: type, available: false, message: "sessionQuery 服务不可用", sourceSession: meta.sourceSession || "", sourceSeqs: meta.sourceSeqs };
+				return { topic, entry_type: type, available: false, message: "sessionQuery 服务不可用", sourceSession: meta.sourceSession || "", sourceSeqs: numSeqs(meta.sourceSeqs) };
 			}
 			try {
 				const snap = await sq.readSession(meta.sourceSession);
@@ -774,9 +1040,9 @@ export function buildTools(ctx, cfg) {
 						time: Number(e.time || 0),
 						text: typeof e.text === "string" ? e.text : JSON.stringify(e).slice(0, 2000),
 					}));
-				return { topic, entry_type: type, available: true, sourceSession: meta.sourceSession || "", sourceSeqs: meta.sourceSeqs, events };
+				return { topic, entry_type: type, available: true, sourceSession: meta.sourceSession || "", sourceSeqs: numSeqs(meta.sourceSeqs), events };
 			} catch (error) {
-				return { topic, entry_type: type, available: false, message: `展开失败: ${error?.message || error}`, sourceSession: meta.sourceSession || "", sourceSeqs: meta.sourceSeqs };
+				return { topic, entry_type: type, available: false, message: `展开失败: ${error?.message || error}`, sourceSession: meta.sourceSession || "", sourceSeqs: numSeqs(meta.sourceSeqs) };
 			}
 		},
 		presentCall(args) {
@@ -811,7 +1077,30 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: { type: "object", additionalProperties: true },
+			schema: {
+			type: "object",
+			additionalProperties: true,
+			properties: {
+				query: { type: "string", required: true },
+				namespaces_searched: { ...STR_ARR, required: true },
+				results: {
+					type: "array",
+					required: true,
+					items: {
+						type: "object",
+						additionalProperties: true,
+						properties: {
+							namespace: { type: "string", required: true },
+							kind: { type: "string", required: true },
+							name: { type: "string", required: true },
+							archived: { type: "boolean", required: true },
+							score: { type: "number", required: true },
+							snippet: { type: "string", required: true },
+						},
+					},
+				},
+			},
+		},
 			render: (_args, value) => [{
 				type: "text",
 				text: value.results.length === 0
@@ -872,7 +1161,18 @@ export function buildTools(ctx, cfg) {
 			}
 		},
 		output: {
-			schema: { type: "object", additionalProperties: true },
+			schema: {
+			type: "object",
+			additionalProperties: true,
+			properties: {
+				promoted: { type: "boolean", required: true },
+				topic: { type: "string", required: true },
+				entry_type: { ...ENTRY_TYPE, required: true },
+				from: { type: "string", required: true },
+				to: { type: "string", required: true },
+				source_archived: { type: "boolean" },
+			},
+		},
 			render: (_args, value) => [{
 				type: "text",
 				text: value.promoted
@@ -905,7 +1205,7 @@ export function buildTools(ctx, cfg) {
 				content,
 				evidence: evidenceText,
 				sourceSession: meta.sourceSession || null,
-				sourceSeqs: meta.sourceSeqs || [],
+				sourceSeqs: numSeqs(meta.sourceSeqs),
 				namespace: toNs,
 				related: Array.isArray(meta.related) ? meta.related : [],
 				maxChars: cfg.l1MaxChars,

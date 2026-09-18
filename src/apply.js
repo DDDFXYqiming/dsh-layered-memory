@@ -11,9 +11,15 @@ import { buildTools } from "./tools.js";
 import { wireEvents } from "./events.js";
 import { SKILL_NAME, SKILL_DESCRIPTION, SKILL_WHEN_TO_USE, SKILL_CONTENT } from "./skill-content.js";
 
-// [spec-audit 2026-08-14 修订] systemPrompt/agents 必须声明 inject：
-// 实测 cordis ctx.get() 只查插件隔离层已登记的服务，未 inject 时 ctx.get 恒返回 undefined。
-const inject = ["skills", "tools", "agents", "systemPrompt", "sessionQuery"];
+// [0.6.1 N14] inject 只表达「必需服务」。官方语义（user/develop/framework/service.zh.md）：
+// 必需依赖缺席时插件根本不加载（等待就绪）；可选依赖应省略 inject、在使用点用 ctx.get()
+// 查询。cordis 4.0.2 的 ctx.get 源码注释明确 "Read a service from the store without the
+// inject requirement"——旧注释（spec-audit 2026-08-14，基于旧版实测「未 inject 恒 undefined」）
+// 已过时。取舍：skills/tools/agents/systemPrompt 是工具注册、渐进暴露、反思注入与 L1 注入的
+// 核心能力，保留为必需；sessionQuery 仅 memory_expand 使用且已有「服务不可用」规范值降级路径
+// （tools.js），按可选处理移出 inject——裁剪该服务的 profile 上插件整体可用，expand 优雅降级，
+// 而不是全插件 PENDING。
+const inject = ["skills", "tools", "agents", "systemPrompt"];
 
 /** Schemastery 配置 schema（官方 config 约定：加载期校验 + 默认值填充）。可调常量的默认值取自各自归属模块的导出常量，保持单一来源。 */
 export const Config = Schema.object({
@@ -107,8 +113,10 @@ function apply(ctx, config = {}) {
 		if (!trimmed) return "";
 		return `<memory_index source="user-writable">\n${trimmed}\n</memory_index>`;
 	}
-	const sysPrompt = ctx.get("systemPrompt");
-	if (sysPrompt) {
+	// [0.6.1 N14] systemPrompt 经 inject 声明为必需：apply 执行时服务必已就绪，原
+	// if (sysPrompt) 降级分支永不可达，删除（fail loud 优于静默失去 L1 注入能力）。
+	{
+		const sysPrompt = ctx.get("systemPrompt");
 		disposers.push(sysPrompt.context({
 			name: "memory:index",
 			order: 10,
@@ -181,8 +189,9 @@ function apply(ctx, config = {}) {
 		},
 	}));
 
-	const agents = ctx.get("agents");
-	const progressive = cfg.progressive && Boolean(agents);
+	// [0.6.1 N14] agents 经 inject 声明为必需，缺席则插件不加载；`Boolean(agents)`
+	// 降级分支永不可达（死代码），删除。progressive 回归纯配置语义。
+	const progressive = cfg.progressive;
 	if (progressive) {
 		ctx.tools.register(defineActivateTool());
 		disposers.push(ctx.on("agent/disposed", ({ agent }) => detach(agent)));

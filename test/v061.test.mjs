@@ -242,6 +242,24 @@ test("N11 autoPending 形态候选以 entry_type=fact 接受成功，正文 ## �
 	// 修复前：fact 正文含 "## " 行必抛拒绝，重试序列候选永远无法作为 fact 接受
 });
 
+// ── I4/N14：memory_activate 幂等语义 + progressive 不再依赖防御降级 ──
+
+test("I4 memory_activate：首次激活 activated=true/already=false；重复激活幂等 already=true 且仍给全量工具清单", async () => {
+	if (typeof disposer === "function") disposer();
+	if (memDir) rmSync(memDir, { recursive: true, force: true });
+	setup({ progressive: true });
+	const agent = { ctx: { tools: { register: () => () => {}, restrict: () => () => {} } } };
+	const act = tool("memory_activate");
+	const first = await act.execute({}, { agent });
+	expect(first.activated).toBe(true);
+	expect(first.already).toBe(false);
+	expect(first.tools).toHaveLength(14);
+	const second = await act.execute({}, { agent });
+	expect(second.activated).toBe(true);
+	expect(second.already).toBe(true);
+	expect(second.tools).toHaveLength(14);
+});
+
 // ── M3：autoNamespace 的 git 分支探测进程内缓存 ──
 
 test("M3 detectNamespace：TTL 内第二次调用不再 spawn git；TTL=0 关闭缓存；过期重取", async () => {

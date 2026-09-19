@@ -20,9 +20,9 @@ It works the other way too. If you forget the flags a service needs, ask the age
 
 ## Install
 
-`%powershell
+```powershell
 dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
-`%
+```
 
 The plugin creates its directories and template files under `<home>/.dsh/memory`.
 
@@ -49,7 +49,7 @@ The agent decides when to read and write memory. The plugin registers one `memor
 
 ## Configuration
 
-`%yaml
+```yaml
 # a bare entry in the profile cordis.patch.yml, overriding the bundle row; do not duplicate the insert
 - id: dsh-layered-memory
   config:
@@ -71,13 +71,13 @@ The agent decides when to read and write memory. The plugin registers one `memor
     recencyWindowDays: 7       # recency protection window for fresh entries
     coldReviewDays: 90         # cold-entry review window in days
     namespaceCacheTtlMs: 60000 # TTL for the autoNamespace git probe cache, in ms
-`%
+```
 
 ## Storage
 
 Memory is a pile of markdown files, with no database behind it. The default location is `<home>/.dsh/memory`.
 
-`%
+```
 <home>/.dsh/memory/
 ├── <namespace>/                non-default namespace
 │   ├── memory_management_sop.md
@@ -92,7 +92,7 @@ Memory is a pile of markdown files, with no database behind it. The default loca
 │   ├── file_access_stats.json
 │   └── reflection-state.json
 └── with namespace default, the same files live at this root
-`%
+```
 
 You can back it up, commit it, or edit it by hand. The write path refuses text that looks like a plaintext secret.
 

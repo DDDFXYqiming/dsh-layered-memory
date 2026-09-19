@@ -20,9 +20,9 @@ DSH 的会话一结束，上下文就清空了。下次回到同一个项目，�
 
 ## 安装
 
-`%powershell
+```powershell
 dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
-`%
+```
 
 装好之后 `<home>/.dsh/memory` 下会自动建好目录和模板文件。
 
@@ -49,7 +49,7 @@ dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
 
 ## 配置
 
-`%yaml
+```yaml
 # profile cordis.patch.yml 里的裸条目，覆盖 bundle 行，不要重复 insert
 - id: dsh-layered-memory
   config:
@@ -71,13 +71,13 @@ dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
     recencyWindowDays: 7       # 新条目无访问时的 recency 保护窗口（天）
     coldReviewDays: 90         # 冷条目复核窗口，默认 90 天
     namespaceCacheTtlMs: 60000 # autoNamespace 的 git 分支探测缓存 TTL（毫秒）
-`%
+```
 
 ## 存储
 
 记忆就是一堆 markdown 文件，没有数据库。默认放在 `<home>/.dsh/memory`。
 
-`%
+```
 <home>/.dsh/memory/
 ├── <namespace>/                非 default 命名空间
 │   ├── memory_management_sop.md
@@ -92,7 +92,7 @@ dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
 │   ├── file_access_stats.json
 │   └── reflection-state.json
 └── namespace 为 default 时，以上内容兼容地放在此根目录
-`%
+```
 
 可以直接备份、进版本库或手改。写入侧会拒绝疑似密钥的明文。
 

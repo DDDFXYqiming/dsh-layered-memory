@@ -4,13 +4,11 @@
 
 Cross-session long-term memory for DeepSeek Harness (DSH).
 
-Context disappears when a session ends. This plugin writes what is worth keeping to files on disk and pulls it back when a later session needs it. Memory has three layers. L1 is the index, carried into every turn, and it only lists which entries exist. L2 holds environment facts such as paths, configuration and measured parameters. L3 holds task experience such as preconditions, pitfalls and the stable steps of a workflow.
+Context disappears when a session ends. This plugin writes what is worth keeping to files on disk and pulls it back when a later session needs it. Memory has three layers. L1 is the index, and it tells the model which entries exist. L2 holds environment facts such as paths, configuration and measured parameters. L3 holds task experience such as preconditions, pitfalls and the stable steps of a workflow.
 
-## Capabilities
+## Tools
 
-**Index always in context.** The L1 index is injected into every turn, so a write takes effect immediately without restarting the host.
-
-**Tools mounted on demand.** In progressive mode the 14 tools stay hidden until the agent calls `memory_activate` once.
+14 tools. In progressive mode they stay hidden until the agent calls `memory_activate` once.
 
 | Tool | Purpose |
 |---|---|

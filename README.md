@@ -50,7 +50,7 @@ dsh plugin --profile web add <本目录>
     progressive: true
     defaultNamespace: ''       # 固定默认命名空间；留空则 autoNamespace 生效
     autoNamespace: true        # 默认取 workspace 目录名 + git 分支名（家目录归 default）
-    autoPending: false         # [v0.6] 默认关闭：实测候选几乎全是工具用法噪声，且 6 天 108 条无人消费
+    autoPending: false         # [v0.6] 默认关闭：候选绝大多数是工具用法噪声，长期无人消费
     maintainEveryTurns: 20     # 每 N 轮自动维护（计数持久化，跨会话累计）
     reflectionEnabled: true    # [0.6.6] 反思提醒总开关；false 只停主动投递，不影响 L1/检索/读写/手动维护
     reflectPendingThreshold: 5 # 仅 autoPending 开启时生效：pending 达到该值时注入整理请求；0 = 关闭该判据
@@ -67,7 +67,7 @@ dsh plugin --profile web add <本目录>
 
 **L1 存在性优先（v0.6 起不再裁剪）。** AUTO 段每层一行、以 `" | "` 全量列出活跃条目名；预算单位是字符数（`l1MaxChars`）而不是行数——旧的行数预算会让"行数合规而 token 失控"，而一行一条目会让 30 行只装得下 16 条、把其余条目挤成永久隐身（模型不会去搜它不知道存在的东西）。超预算时只在返回值与维护报告里告警，请合并/归档条目或精简 `[RULES]`。索引内容未变化时不重写文件，避免打碎 system prompt 前缀缓存。访问热度（14 天半衰）现在只服务于 `memory_maintain` 的**冷条目复核**报告。
 
-**[0.6.6] 同一内容版本只提醒一次。** 维护跑完（自动周期维护或手动 `memory_maintain` 都一样）会把「这批内容已经检查过、结论是什么」写进命名空间根目录的 `reflection-state.json`：健康存量拿到 `no_action` 终态后，同一内容不再被反复催——新会话、并行会话、热重载都不会重启喊话；只有内容真的变了（新增或改写条目、索引超预算、出现合并候选）才重新评估。判断依据从「库里有多少条记忆」换成「这份内容检查过没有」，因为一个健康的库完全可以有几十条互不重复的 SOP。指纹只跟内容走，轮次计数与访问热度不计入。
+**[0.6.6] 同一内容版本只提醒一次。** 维护跑完（自动周期维护或手动 `memory_maintain` 都一样）会把「这批内容已经检查过、结论是什么」写进命名空间根目录的 `reflection-state.json`。健康存量拿到 `no_action` 终态后，同一内容不再被反复催——新会话、并行会话、热重载都不会重启喊话；只有内容真的变了（新增或改写条目、索引超预算、出现合并候选）才重新评估。判断依据从「库里有多少条记忆」换成「这份内容检查过没有」，因为一个健康的库完全可以有几十条互不重复的 SOP。指纹只跟内容走，轮次计数与访问热度不计入。
 
 ## 存储布局
 
@@ -103,13 +103,13 @@ dsh plugin --profile web add <本目录>
 ```bash
 pnpm install
 pnpm build        # 对全部 src/*.js 与 lib/index.js 做 node --check（语法门禁，源码即交付物）
-pnpm test         # vitest（pnpm 11 可直接运行，见下）
+pnpm test         # vitest 全量回归
 pnpm test:smoke   # dsh --profile headless --dump-config
 ```
 
-> 单元测试会 import `@deepseek-ai/dsh-tools` / `@deepseek-ai/schemastery`（DSH 内置包）。本机若有已安装的 DSH 环境，可将 `node_modules/@deepseek-ai` 等以 junction/链接方式指过去；`.npmrc` 已写 `auto-install-peers=false`，防止 pnpm 解析私有 peer。
->
-> **预检环境坑（实测踩过）。** pnpm 11 的 `run` 前置依赖检查会尝试解析 peer 链中的 DSH 私有包（如 `@deepseek-ai/dsh-type-meta`，不在 npm registry），`pnpm test` 因此报 `ERR_PNPM_FETCH_404`。修复办法是在 `pnpm-workspace.yaml` 顶层声明 `verifyDepsBeforeRun: false`，pnpm 11 认这个位置，`.npmrc` 的 kebab 写法对 pnpm 11 无效。仓库已配好，`pnpm test` 可以直接跑。若仍被拦截，兜底走 `./node_modules/.bin/vitest run`。
+单元测试需要 `@deepseek-ai/dsh-tools` 与 `@deepseek-ai/schemastery` 这两个宿主内置包。开发时把本地 DSH 环境里的 `node_modules/@deepseek-ai` 用 junction 或软链接接进本仓库即可，`.npmrc` 里的 `auto-install-peers=false` 会拦住 pnpm，不让它去 registry 解析这批私有 peer。
+
+pnpm 11 在执行 `run` 之前会先做依赖预检，解析 peer 链时会去找 `@deepseek-ai/dsh-type-meta` 这类并未公开发布的宿主私有包，`pnpm test` 因此报 `ERR_PNPM_FETCH_404`。仓库已在 `pnpm-workspace.yaml` 顶层声明 `verifyDepsBeforeRun: false` 跳过这一步，pnpm 11 只认这个位置，写在 `.npmrc` 里的 kebab 版本无效。克隆后 `pnpm test` 可直接运行。若某台机器仍被预检拦住，改用 `./node_modules/.bin/vitest run`。
 
 ## 相关
 

@@ -50,7 +50,7 @@ dsh plugin --profile web add <repo dir>
     progressive: true
     defaultNamespace: ''       # fixed default namespace; empty = autoNamespace wins
     autoNamespace: true        # default = workspace dir name + git branch (home dir falls back to default)
-    autoPending: false         # [v0.6] off by default: candidates were mostly tool-usage noise and went unconsumed (108 in 6 days)
+    autoPending: false         # [v0.6] off by default: candidates were mostly tool-usage noise and went unconsumed
     maintainEveryTurns: 20     # auto-maintain every N turns (counter persisted, accumulates across sessions)
     reflectionEnabled: true    # [0.6.6] master switch for reflection notices; false stops proactive delivery only (L1/read/write/manual maintain unaffected)
     reflectPendingThreshold: 5 # only when autoPending is on: inject consolidation request at this pending count; 0 disables the rule
@@ -107,7 +107,9 @@ pnpm test         # vitest
 pnpm test:smoke   # dsh --profile headless --dump-config
 ```
 
-> Unit tests import `@deepseek-ai/dsh-tools` / `@deepseek-ai/schemastery` (DSH-internal packages). If you have a DSH environment installed locally, you can junction / symlink `node_modules/@deepseek-ai` from there; `.npmrc` sets `auto-install-peers=false` to keep pnpm from chasing private peers.
+Unit tests need `@deepseek-ai/dsh-tools` and `@deepseek-ai/schemastery`, both host-internal packages. During development, junction or symlink `node_modules/@deepseek-ai` from a local DSH install into this repository; `auto-install-peers=false` in `.npmrc` stops pnpm from resolving those private peers against the registry.
+
+Before running any script, pnpm 11 performs a dependency pre-check that walks the peer chain and looks for host-private packages such as `@deepseek-ai/dsh-type-meta`. Those are not published, so `pnpm test` fails with `ERR_PNPM_FETCH_404`. The repository declares `verifyDepsBeforeRun: false` at the top level of `pnpm-workspace.yaml` to skip that pre-check; pnpm 11 only reads it from there, and the kebab-case key in `.npmrc` has no effect. A fresh clone can run `pnpm test` directly. If a machine still gets intercepted by the pre-check, fall back to `./node_modules/.bin/vitest run`.
 
 ## Related
 

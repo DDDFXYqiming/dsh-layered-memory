@@ -6,11 +6,11 @@ All notable changes to `dsh-layered-memory` are documented here.
 
 修复（反思提醒：从「存量阈值」改为「内容版本 + 维护终态」，2026-09-19 专项审查闭环）
 
-背景：0.6.2/0.6.3 修通了此前被宿主重入守卫挡住的提醒投递，却没有同时修「什么时候不该再提醒」。判定只看 `pending` / 活跃 SOP / 索引字符的存量阈值，既不消费维护结果，也没有「这批内容已经检查过」的状态。于是健康记忆库（46 条互不重复的 SOP）一旦越过 `reflectSopsThreshold`，就在每个新会话、每次重载、每个并行会话里反复把维护请求塞进当前任务——现场实测 24 个会话、111 条注入记录。本次按专项审查（基线 `3729dfe`）的 12 项探针落地修复。
+背景：0.6.2/0.6.3 修通了此前被宿主重入守卫挡住的提醒投递，却没有同时修「什么时候不该再提醒」。判定只看 `pending` / 活跃 SOP / 索引字符的存量阈值，既不消费维护结果，也没有「这批内容已经检查过」的状态。于是健康记忆库（数十条互不重复的 SOP）一旦越过 `reflectSopsThreshold`，就会在新会话、重载与并行会话里反复把维护请求塞进当前任务。本次按专项审查（基线 `3729dfe`）的 12 项探针落地修复。
 
 - **新增命名空间级反思状态 `src/reflection.js`**（落盘 `reflection-state.json`）：`revision`（内容指纹）+ `outcome`（`no_action` / `needs_review` / `done` / `failed`）+ `notifiedRevision`。指纹只取 `facts.md`、`index.txt`、`memory-meta.json`、`sops/*.md`、`pending/*.md` 的体积与 mtime，**排除** `turn-state.json`、访问热度、报告时间戳这类自写字段（否则每检查一次就把自己标脏，重新自激）。`no_action` 是有效终态：同一 revision 已有终态结论时静默，已通知过同一 revision 也静默。
 - **维护结果回写**：`runMaintain()` 收尾调用 `recordMaintainOutcome()`，自动周期维护与手动 `memory_maintain` 共用同一份消警依据；失败单独记 `failed`（允许冷却后重试），不会被误判成「已检查过」。
-- **冷却前置 + 廉价短路**：先判开关与冷却，再读状态、再做内容扫描。此前每轮 `turn/end` 都要遍历 SOP 并逐条 `isArchived`（每条重读整份 `memory-meta.json`，46 条 SOP 的一轮判定 = 46 次全量解析），冷却期内也一样。
+- **冷却前置 + 廉价短路**：先判开关与冷却，再读状态、再做内容扫描。此前每轮 `turn/end` 都要遍历 SOP 并逐条 `isArchived`（每条重读整份 `memory-meta.json`，几十条 SOP 的一轮判定就是几十次全量解析），冷却期内也一样。
 - **投递前二次复核**：排队中的提醒在真正投递前重读状态——插件已 dispose、该版本已被维护终结、或已通知过同一版本时直接丢弃，修掉「维护先跑完、旧提醒后送达」。
 - **定时任务纳入生命周期**：`setTimeout` / `setImmediate` 句柄统一登记，插件清理时取消。此前卸载后已排队的提醒与周期维护仍会执行。
 - **新增 `reflectionEnabled` 总开关**（默认 `true`）：关闭后只停「主动向会话投递整理请求」，不影响 L1 注入、检索、读取、主动写入与手动维护。此前没有真开关——`maintainEveryTurns=0` 只关周期维护，`autoPending=false` 只关自动候选分支，`reflectSopsThreshold=0` 反而是恒真。
@@ -18,6 +18,7 @@ All notable changes to `dsh-layered-memory` are documented here.
 - **提醒文本显式标注来源**：加「（插件自动提醒，非用户消息；与当前任务无关时可忽略）」，并对「没有重叠项就无需处理」给出终态说明。标注是辅助，确定性抑制由状态机负责——不改 `role`，宿主 `Agent.inject` 的契约就是 `UserMessage`。
 - **`readMeta` 读取缓存**：键为 `size:mtime:ino`，写入方显式失效。`memory-meta.json` 达数百 KB 时，热路径不再逐条全量 `JSON.parse`。
 - 回归：`test/v066.test.mjs`（11 例）覆盖审查 R1/R3/R4/R6/R7/R8/R9/R10/R12 场景与新增开关、缓存、指纹稳定性。全量 73/73 绿。
+
 ## [0.6.5] - 2026-09-18
 
 修复（0.6.4 归档横幅的检索副作用）
@@ -28,8 +29,8 @@ All notable changes to `dsh-layered-memory` are documented here.
 
 修复（归档可见性 + 元数据补登记，来自第二轮记忆库语义体检）
 
-- **归档正文会误导读者**：`memory_archive` 只把条目从 L1 索引隐藏，正文照旧留在 `facts.md` / `sops/*.md`。实测生产库 25 个已归档小节、2 个已归档 SOP 的正文原样留在文件里，人工读文件或 `memory_search` 命中的读者会把历史快照当成现行事实（Jev 判「会误导」0.74）。现在归档时在正文首部写一行自解释横幅（`> [已归档 YYYY-MM-DD] 历史快照：已不在 L1 索引中…`）；fact 走 `upsertFact` 保留 section 结构，SOP 横幅插在 `#` 标题行之后。任何再次写入（write / update / accept / rollback）都会先 `stripArchiveBanner`，取消归档不会残留过期标记。
-- **条目缺 meta 记录**：`facts.md` 的 `##` section 与 `sops/*.md` 中可能存在 `memory-meta.json` 完全没有记录的条目（旧版本迁移、examples 种子、跨机导入）——实测生产库 12 条活跃条目如此，它们没有 updatedAt/证据追踪，冷条目复核只能报 `age_days=null`。新增 `backfillMeta()`：只补「存在性 + 文件 mtime」并标 `backfilled: true`，**不把正文里的证据行抄进 `evidence`**（那会把别处的验证洗成本机验证，违反行动验证公理）。插件加载期自动补登记并 log 条数；`memory_index` 也会顺带补并在返回值里报告 `backfilled` 列表。幂等，无缺失时不写文件。
+- **归档正文会误导读者**：`memory_archive` 只把条目从 L1 索引隐藏，正文照旧留在 `facts.md` / `sops/*.md`。归档只改标志位，正文原样留在文件里，人工读文件或 `memory_search` 命中的读者会把历史快照当成现行事实。现在归档时在正文首部写一行自解释横幅（`> [已归档 YYYY-MM-DD] 历史快照：已不在 L1 索引中…`）；fact 走 `upsertFact` 保留 section 结构，SOP 横幅插在 `#` 标题行之后。任何再次写入（write / update / accept / rollback）都会先 `stripArchiveBanner`，取消归档不会残留过期标记。
+- **条目缺 meta 记录**：`facts.md` 的 `##` section 与 `sops/*.md` 中可能存在 `memory-meta.json` 完全没有记录的条目（旧版本迁移、examples 种子、跨机导入）——这部分条目没有 updatedAt 与证据追踪，冷条目复核只能报 `age_days=null`。新增 `backfillMeta()`：只补「存在性 + 文件 mtime」并标 `backfilled: true`，**不把正文里的证据行抄进 `evidence`**（那会把别处的验证冒充成本次验证，违反行动验证公理）。插件加载期自动补登记并 log 条数；`memory_index` 也会顺带补并在返回值里报告 `backfilled` 列表。幂等，无缺失时不写文件。
 
 ## [0.6.3] - 2026-09-18
 
@@ -121,7 +122,7 @@ All notable changes to `dsh-layered-memory` are documented here.
 - 配置项 `maxIndexLines` 删除；`memory_maintain` 报告的 `compress` 段改为 `index` + `cold`。L1 语义变化：不再存在"被裁剪的条目"，因此 `memory_search` 的"找回隐藏条目"用途自然消失（检索本身不变）。
 
 ### Not borrowed from GA（明确取舍）
-- L4 原始会话归档（其 `compress_session.py` Phase4 连 too-small 原文件一起删，属不可逆丢数据；DSH 用 session log + `memory_expand` 更安全）；OS 级 12h 计划任务（本机红线）；无锁并发写与"只能 patch 禁 overwrite"的纯提示词纪律（已被 CAS/原子写/快照取代）；单命名空间大杂烩。
+- L4 原始会话归档（其 `compress_session.py` Phase4 连 too-small 原文件一起删，属不可逆丢数据；DSH 用 session log + `memory_expand` 更安全）；OS 级 12h 计划任务（未采纳）；无锁并发写与"只能 patch 禁 overwrite"的纯提示词纪律（已被 CAS/原子写/快照取代）；单命名空间大杂烩。
 
 ### 并入自陈旧 [Unreleased]（N10：0.5.2→0.6.0 期间已交付，0.6.1 审查修复轮折叠；原节整体删除）
 - 跨进程更新丢失防护（CAS 读改写三段关窗：tmp 暂存 → rename 前一刻复核基座 → rename 后回读兜底；EPERM 退避每轮再复核；持续冲突超 3s 预算响亮抛错绝不静默丢。实测 40 进程错峰写 3×40/40 收敛）。`index.txt` 与热度/turn 计数维持直写（可随时重建 / 可容忍漂移）。

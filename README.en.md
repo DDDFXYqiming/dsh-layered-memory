@@ -2,74 +2,74 @@
 
 # dsh-layered-memory
 
-**Cross-session long-term memory plugin for DeepSeek Harness (DSH).** A session's context is gone once the session ends, so this plugin writes what is worth keeping to files on disk and hands it back on demand in later sessions. Features cover namespace isolation, L1 index injection, L2 environment facts, L3 task experience, BM25 full-text search, content-level near-duplicate dedupe, cross-namespace promotion, retry-sequence distillation, provenance / archive / rollback, auto-maintenance, and progressive tool exposure.
+Cross-session long-term memory for DeepSeek Harness (DSH).
+
+Context disappears when a session ends. This plugin writes what is worth keeping to files on disk and pulls it back when a later session needs it. Memory has three layers. L1 is the index, carried into every turn, and it only lists which entries exist. L2 holds environment facts such as paths, configuration and measured parameters. L3 holds task experience such as preconditions, pitfalls and the stable steps of a workflow.
 
 ## Capabilities
 
-`memory:index` injection. `ctx.systemPrompt.context` injects the L1 index into every model turn in real time, and changes are live.
+**Index always in context.** The L1 index is injected into every turn, so a write takes effect immediately without restarting the host.
 
-Runtime skill `memory`. This skill spells out the timing rules for reading memory, writing memory, and syncing the index. Content is inlined in `src/skill-content.js` (runtime skill, no separate SKILL.md file).
-
-There are 14 tools in total. In progressive mode they are mounted via `memory_activate`, meaning an Agent calls `memory_activate` once on demand and the tools then join its tool list.
+**Tools mounted on demand.** In progressive mode the 14 tools stay hidden until the agent calls `memory_activate` once.
 
 | Tool | Purpose |
 |---|---|
 | `memory_list` | List all memory (L2 facts + L3 sops + pending + L1 chars/budget) |
-| `memory_read` | Read a memory entry (index / fact topic / sop filename); returns provenance meta and `related` links |
-| `memory_search` | **BM25 full-text search** (includes archived; `all_namespaces` cross-search) |
-| `memory_write` | Write a memory (fact/sop, **evidence required** = action-verified axiom; overwriting a name auto-snapshots the old version; refuses secret-looking text and `## ` lines inside facts; returns L0 advisories) |
-| `memory_index` | Rebuild the L1 index auto-segment (preserves the `[RULES]` manual segment) |
-| `memory_pending` | List auto-distilled candidates (fail-then-retry sequences) |
-| `memory_accept` | Promote a pending candidate into a real memory entry |
-| `memory_update` | Update a memory (supersede keeps a history snapshot; supports `related`) |
-| `memory_archive` | Archive a memory (a meta flag: hidden from L1 and `memory_read`, **file stays in place**, still hit by `memory_search`, restorable via `memory_rollback`) |
+| `memory_read` | Read one entry (index / fact topic / sop filename) with provenance meta and `related` links |
+| `memory_search` | BM25 full-text search over facts, sops and archived entries |
+| `memory_write` | Write a memory (fact/sop, evidence required, name collision snapshots the old version) |
+| `memory_index` | Rebuild the L1 index auto-segment, keeping the `[RULES]` manual segment |
+| `memory_pending` | List distilled candidates (fail-then-retry sequences) |
+| `memory_accept` | Promote a pending candidate into a real entry |
+| `memory_update` | Update an entry, keeping a history snapshot |
+| `memory_archive` | Archive an entry (hidden from L1 and `memory_read`, file stays in place, still searchable) |
 | `memory_rollback` | Roll back to the most recent `.history/` snapshot |
-| `memory_expand` | Use `sessionQuery` to expand the sourceSession / sourceSeqs original events |
-| `memory_stats` | Stats for L2 / L3 / pending / archived / total size |
-| `memory_maintain` | Content-level dedupe, L1 index audit (full list, no trimming), stats, merge candidates, cold-entry review (>90 days with no access) |
-| `memory_promote` | Cross-namespace promotion (project-local experience → global `default`) |
+| `memory_expand` | Expand the original events behind sourceSession / sourceSeqs |
+| `memory_stats` | Counts for L2 / L3 / pending / archived and total size |
+| `memory_maintain` | Dedupe, index audit, stats, merge candidates, cold-entry review |
+| `memory_promote` | Promote project-local experience to the global namespace |
 
 ## Install
 
-```powershell
-# GitHub install (recommended; bundles cordis.patch.yml, contribution id: dsh-layered-memory)
+~~~powershell
+# GitHub install, bundles cordis.patch.yml with contribution id: dsh-layered-memory
 dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
 
-# Local dev — install from the repo dir directly
+# Local development, point straight at the repo directory
 dsh plugin --profile web add <repo dir>
-```
+~~~
 
 ## Configuration
 
-```yaml
-# profile cordis.patch.yml — override bundle entries directly (don't duplicate insert!)
+~~~yaml
+# a bare entry in the profile cordis.patch.yml, overriding the bundle row; do not duplicate the insert
 - id: dsh-layered-memory
   config:
-    memoryDir: ''              # default <home>/.dsh/memory
-    l1MaxChars: 12288          # the single L1 budget (chars, also the injection fuse); over budget only warns, never hides
+    memoryDir: ''              # defaults to <home>/.dsh/memory
+    l1MaxChars: 12288         # character budget for the L1 index; over budget only warns
     progressive: true
-    defaultNamespace: ''       # fixed default namespace; empty = autoNamespace wins
-    autoNamespace: true        # default = workspace dir name + git branch (home dir falls back to default)
-    autoPending: false         # [v0.6] off by default: candidates were mostly tool-usage noise and went unconsumed
-    maintainEveryTurns: 20     # auto-maintain every N turns (counter persisted, accumulates across sessions)
-    reflectionEnabled: true    # [0.6.6] master switch for reflection notices; false stops proactive delivery only (L1/read/write/manual maintain unaffected)
-    reflectPendingThreshold: 5 # only when autoPending is on: inject consolidation request at this pending count; 0 disables the rule
-    reflectSopsThreshold: 40   # inject consolidation request when active L3 SOP count >= threshold; 0 disables the rule
-    reflectCooldownTurns: 10   # min turns between two reflection injections (cooldown)
-    nearDupeThreshold: 0.85    # token-set Jaccard threshold for near-duplicate dedupe (0..1)
-    mergeCandidateThreshold: 0.45 # merge-candidate report threshold (0..1)
-    minTokensForFuzzy: 12      # docs shorter than this token count use exact-hash dedupe only
-    heatHalfLifeDays: 14       # access-heat decay half-life in days
-    recencyWindowDays: 7       # recency protection window for fresh entries without access
-    coldReviewDays: 90         # cold-entry review window: listed when older than N days with near-zero heat
-    namespaceCacheTtlMs: 60000 # TTL (ms) of the in-process cache for autoNamespace git probing; 0 disables
-```
+    defaultNamespace: ''       # fixed namespace; empty lets autoNamespace decide
+    autoNamespace: true        # workspace dir name plus git branch; home falls back to default
+    autoPending: false         # off by default, candidates are mostly tool-usage noise
+    maintainEveryTurns: 20     # run auto-maintenance every N turns, counted across sessions
+    reflectionEnabled: true    # master switch for reflection notices
+    reflectPendingThreshold: 5 # only with autoPending on; 0 disables this rule
+    reflectSopsThreshold: 40   # notice when active L3 sops reach this count; 0 disables the rule
+    reflectCooldownTurns: 10   # minimum turns between two reflection notices
+    nearDupeThreshold: 0.85    # token-set Jaccard threshold for near-duplicate dedupe
+    mergeCandidateThreshold: 0.45 # merge-candidate report threshold
+    minTokensForFuzzy: 12      # shorter content only uses exact-hash dedupe
+    heatHalfLifeDays: 14       # access-heat half-life in days
+    recencyWindowDays: 7       # recency protection window for fresh entries
+    coldReviewDays: 90         # cold-entry review window in days
+    namespaceCacheTtlMs: 60000 # TTL for the autoNamespace git probe cache, in ms
+~~~
 
 ## Storage layout
 
-```
+~~~
 <home>/.dsh/memory/
-├── <namespace>/                non-default namespace (explicit config recommended)
+├── <namespace>/                non-default namespace
 │   ├── memory_management_sop.md
 │   ├── index.txt
 │   ├── facts.md
@@ -79,32 +79,14 @@ dsh plugin --profile web add <repo dir>
 │   ├── memory-meta.json
 │   ├── maintenance-report.json
 │   ├── turn-state.json
-│   └── file_access_stats.json
-└── (when namespace=default, the same content is laid out under the root for back-compat)
-```
+│   ├── file_access_stats.json
+│   └── reflection-state.json
+└── with namespace default, the same files live at this root
+~~~
 
-## Core axioms
+## Links
 
-1. **Action verified (No Execution, No Memory).** `memory_write` requires `evidence`; only verified info gets written
-2. **Immutable.** Verified facts may be compressed / migrated / superseded / archived but never physically discarded
-3. **No volatile state.** Timestamps / PIDs / temp paths / one-shot IDs are not stored
-4. **Minimal pointers.** L1 holds only existence; details live in L2 / L3
-
-## Consistency boundary
-
-No automatic contradiction detection. Consistency rests on three process layers. Pre-write dedupe comes first, so same-topic evolution goes through `memory_update` (supersede keeps the old snapshot in `.history/`). `memory_maintain` then surfaces merge candidates for highly similar entries. Entries also carry `updatedAt` and evidence, so cross-entry conflicts are resolved by timeline at read time.
-
-## Develop & test
-
-```bash
-pnpm install
-pnpm build        # node --check over all src/*.js and lib/index.js (syntax gate; sources are the deliverable)
-pnpm test         # vitest
-pnpm test:smoke   # dsh --profile headless --dump-config
-```
-
-## Related
-
-- Underlying host integration points are `ctx.systemPrompt.context` / `ctx.skills.register` / `ctx.tools.register` / `session/event` events + `ctx.sessionQuery`
-- Full version history in [CHANGELOG.md](./CHANGELOG.md)
-- Released under the MIT license
+- [Design and scheduling](docs/design.md) (Chinese)
+- [Development and testing](docs/development.md) (Chinese)
+- [Changelog](CHANGELOG.md)
+- MIT license

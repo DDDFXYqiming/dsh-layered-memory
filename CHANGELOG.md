@@ -121,9 +121,6 @@ All notable changes to `dsh-layered-memory` are documented here.
 ### Breaking
 - 配置项 `maxIndexLines` 删除；`memory_maintain` 报告的 `compress` 段改为 `index` + `cold`。L1 语义变化：不再存在"被裁剪的条目"，因此 `memory_search` 的"找回隐藏条目"用途自然消失（检索本身不变）。
 
-### Not borrowed from GA（明确取舍）
-- L4 原始会话归档（其 `compress_session.py` Phase4 连 too-small 原文件一起删，属不可逆丢数据；DSH 用 session log + `memory_expand` 更安全）；OS 级 12h 计划任务（未采纳）；无锁并发写与"只能 patch 禁 overwrite"的纯提示词纪律（已被 CAS/原子写/快照取代）；单命名空间大杂烩。
-
 ### 并入自陈旧 [Unreleased]（N10：0.5.2→0.6.0 期间已交付，0.6.1 审查修复轮折叠；原节整体删除）
 - 跨进程更新丢失防护（CAS 读改写三段关窗：tmp 暂存 → rename 前一刻复核基座 → rename 后回读兜底；EPERM 退避每轮再复核；持续冲突超 3s 预算响亮抛错绝不静默丢。实测 40 进程错峰写 3×40/40 收敛）。`index.txt` 与热度/turn 计数维持直写（可随时重建 / 可容忍漂移）。
 - 持久化全部改为原子写（`atomic-write.js` 同目录 tmp + rename，21 处写点）；Windows rename 瞬态 EPERM/EACCES/EBUSY ≤15 次递增退避 + 抖动重试。

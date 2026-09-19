@@ -96,12 +96,6 @@ dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
 
 可以直接备份、进版本库或手改。写入侧会拒绝疑似密钥的明文。
 
-## 它不做什么
-
-不做自动矛盾检测。一致性靠流程保障，写入前查重，同主题演进用 `memory_update`，高相似条目由 `memory_maintain` 产出合并候选，跨条目矛盾在读取时按时间线裁决。
-
-也不做加密和同步。文件放在本地，跨机器要自己搬。
-
 ## 更多
 
 - [设计与调度原理](docs/design.md)

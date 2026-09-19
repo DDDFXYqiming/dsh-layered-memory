@@ -96,12 +96,6 @@ Memory is a pile of markdown files, with no database behind it. The default loca
 
 You can back it up, commit it, or edit it by hand. The write path refuses text that looks like a plaintext secret.
 
-## What it does not do
-
-It does not detect contradictions automatically. Consistency comes from process. Dedupe before writing, use `memory_update` when a topic evolves, let `memory_maintain` propose merge candidates for similar entries, and settle cross-entry conflicts by timeline at read time.
-
-It also does not encrypt or sync anything. The files are local, moving them between machines is up to you.
-
 ## More
 
 - [Design and scheduling](docs/design.md) (Chinese)

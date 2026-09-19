@@ -6,8 +6,8 @@
 
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { bumpTurnCounter, pendingNames, sopNames, isArchived, nsRoot, resolveNamespace, setEntryMeta, getEntryMeta, slugify } from "./store.js";
-import { readIndex, indexChars } from "./l1index.js";
+import { bumpTurnCounter, nsRoot, resolveNamespace, setEntryMeta, getEntryMeta, slugify } from "./store.js";
+import { computeContentRevision, readReflectionState, writeReflectionState, collectReflectionSignals, decideReflection, isSettledRevision } from "./reflection.js";
 import { runMaintain } from "./maintain.js";
 import { writePending } from "./memory-ops.js";
 
@@ -37,6 +37,14 @@ function resultTail(result, max = 200) {
 // 静默停摆（不再有 pending），届时应让序列携带 session 引用、turn/end 按其归并，
 // 而不是只换 key 类型。子代理内重试序列是否成对蒸馏属未验证路径（依赖其是否触发
 // 自身 session 的 turn/end）。
+/** [0.6.6] 反思提醒文本：显式标注来源，并对「没有重叠项就无需处理」给出终态说明。 */
+function buildReflectionText(buckets, signals, cfg) {
+	const parts = [];
+	if (buckets.includes("pending")) parts.push("pending 候选已累积 " + signals.pending + " 条（阈值 " + cfg.reflectPendingThreshold + "）：有价值的用 memory_accept 落库，其余忽略");
+	if (buckets.includes("sops")) parts.push("L3 SOP 活跃 " + signals.sops + " 条（阈值 " + cfg.reflectSopsThreshold + "）：如确有内容重叠可用 memory_maintain 看合并候选；没有重叠项时无需处理，同一内容不再重复提醒");
+	if (buckets.includes("index")) parts.push("L1 索引 " + signals.indexChars + " 字符超预算 " + cfg.l1MaxChars + "：请 memory_maintain 看合并候选/冷条目，并精简 [RULES]");
+	return "[记忆整理请求]（插件自动提醒，非用户消息；与当前任务无关时可忽略）" + parts.join("；") + "。（行动验证公理照旧：只沉淀有证据的内容）";
+}
 /**
  * @param ctx cordis context
  * @param cfg 生效配置
@@ -52,7 +60,21 @@ export function wireEvents(ctx, cfg, io) {
 	// [0.6.3] 维护节流与一次性诊断状态
 	const MAINTAIN_MIN_INTERVAL_MS = 10 * 60 * 1000;
 	let lastMaintainAt = 0;
-	let reflectDiagDone = false;
+let reflectDiagDone = false;
+// [0.6.6] 排队中的宏任务与清理标志：此前 setTimeout/setImmediate 的 handle 都没保存，
+// 插件卸载后已排队的提醒与维护仍会执行（审查 R6/R12）。
+let disposed = false;
+const timers = new Set();
+const scheduleTimeout = (fn) => {
+	const h = setTimeout(() => { timers.delete(h); fn(); }, 0);
+	timers.add(h);
+	return h;
+};
+const scheduleImmediate = (fn) => {
+	const h = setImmediate(() => { timers.delete(h); fn(); });
+	timers.add(h);
+	return h;
+};
 
 	disposers.push(ctx.on("tools/result", (exec, result) => {
 		try {
@@ -172,82 +194,97 @@ export function wireEvents(ctx, cfg, io) {
 		}
 	
 		// ── 周期维护（持久全局计数）──
-		try {
-			if (isInteractive && cfg.maintainEveryTurns > 0 && totalTurns > 0 && totalTurns % cfg.maintainEveryTurns === 0) {
-				// [0.6.3] runMaintain 实测一次约 1.26s（去重 O(n²) + 重写 index.txt + 写报告）。
-				// 此前它在宿主 Session.append 的同步发布窗口内执行，会拖长该窗口并与其它观察器的
-				// 重入守卫相邻；移到 setImmediate 让本次发布先收口。再加最短间隔节流，避免多
-				// 会话密集 turn/end 时同一阈值被重复排队。
-				const nowMs = Date.now();
-				if (nowMs - lastMaintainAt >= MAINTAIN_MIN_INTERVAL_MS) {
-					lastMaintainAt = nowMs;
-					const mRoot = root;
-					setImmediate(() => {
-						try { runMaintain(mRoot, cfg.l1MaxChars, cfg.maintainOpts); }
-						catch (err) { warnOnce("maintain-async", "周期维护（延迟执行）", err); }
-					});
-				}
-			}
-		} catch (err) {
-			warnOnce("maintain", "周期维护", err);
+try {
+	if (isInteractive && cfg.maintainEveryTurns > 0 && totalTurns > 0 && totalTurns % cfg.maintainEveryTurns === 0) {
+		// [0.6.3] runMaintain 实测一次约 1.26s（去重 O(n²) + 重写 index.txt + 写报告）。
+		// 此前它在宿主 Session.append 的同步发布窗口内执行，会拖长该窗口并与其它观察器的
+		// 重入守卫相邻；移到宏任务让本次发布先收口。再加最短间隔节流，避免多会话密集
+		// turn/end 时同一阈值被重复排队。
+		// [0.6.6] 句柄统一登记，插件清理时取消（此前排队中的维护会跨 dispose 继续执行，审查 R12）。
+		const nowMs = Date.now();
+		if (nowMs - lastMaintainAt >= MAINTAIN_MIN_INTERVAL_MS) {
+			lastMaintainAt = nowMs;
+			const mRoot = root;
+			scheduleImmediate(() => {
+				try { runMaintain(mRoot, cfg.l1MaxChars, cfg.maintainOpts); }
+				catch (err) { warnOnce("maintain-async", "周期维护（延迟执行）", err); }
+			});
 		}
-	
-		// ── 阈值反思注入（带冷却，替代旧的每 10 轮固定提醒）──
-		try {
-			if (isInteractive && sessionId) {
-				const pendingCount = pendingNames(root).length;
-				const sopCount = sopNames(root).filter((s) => !isArchived(root, "sop", s)).length;
-				const indexSize = indexChars(readIndex(root));
-				const overPending = cfg.autoPending && pendingCount >= cfg.reflectPendingThreshold;
-				const overSops = sopCount >= cfg.reflectSopsThreshold;
-				const overIndex = indexSize > cfg.l1MaxChars;
-				const state = reflectionState.get(sessionId) ?? { lastReflectionTurn: -Infinity };
-				const cooled = totalTurns - state.lastReflectionTurn >= cfg.reflectCooldownTurns;
-				if ((overPending || overSops || overIndex) && cooled) {
+	}
+} catch (err) {
+	warnOnce("maintain", "周期维护", err);
+}
+
+// ── 阈值反思注入（[0.6.6] 冷却前置 + 命名空间级消警 + 投递前复核）──
+// [0.6.6] 三处语义修正（专项审查 F1/F4/F6）：
+// 1) 先做廉价资格判断（开关 / 冷却），再做内容扫描。此前每轮 turn/end 都要遍历 SOP
+//    并逐条 isArchived（每条重读整份 memory-meta.json），冷却期内也一样（R10：46 条
+//    SOP 的一次冷却回合实测 46 次全量解析）。
+// 2) 判定依据从「存量阈值」改为「内容版本 + 维护终态」：同一 revision 已有
+//    no_action/done 结论时静默，已通知过同一 revision 也静默。新会话、并行会话、
+//    重载都不会重新喊话（R1/R3/R4/R5/R9/R11）；阈值 0 现在是「关闭该判据」而不是恒真（R8）。
+// 3) 投递前二次复核（disposed / 版本是否已被维护解决 / 是否已通知），排队中的过期
+//    提醒不再送达（R6/R7）。
+try {
+	if (isInteractive && sessionId && cfg.reflectionEnabled) {
+		const prevReflection = reflectionState.get(sessionId) ?? { lastReflectionTurn: -Infinity };
+		const cooled = totalTurns - prevReflection.lastReflectionTurn >= cfg.reflectCooldownTurns;
+		if (cooled) {
+			// 冷却已满足：本会话在本窗口内只评估一次，避免逐轮重复求值。
+			reflectionState.set(sessionId, { lastReflectionTurn: totalTurns });
+			const persisted = readReflectionState(root);
+			const revision = computeContentRevision(root);
+			if (!isSettledRevision(persisted, revision)) {
+				const signals = collectReflectionSignals(root);
+				const decision = decideReflection({ enabled: true, cooled, state: persisted, revision, signals, cfg });
+				if (decision.notify) {
 					const agentsService = ctx.get("agents");
 					const agent = agentsService?.get?.(sessionId);
 					if (!agent || typeof agent.inject !== "function") {
 						if (!reflectDiagDone) {
 							reflectDiagDone = true;
-							warnOnce("reflect-skip", "阈值反思判定通过但无法注入", new Error('agent=' + (agent ? "found" : "missing") + ' injectFn=' + typeof agent?.inject + ' pending=' + pendingCount + '/' + cfg.reflectPendingThreshold + ' sops=' + sopCount + '/' + cfg.reflectSopsThreshold + ' index=' + indexSize + '/' + cfg.l1MaxChars + ' autoPending=' + cfg.autoPending + ' cooldown=' + cfg.reflectCooldownTurns));
+							warnOnce("reflect-skip", "阈值反思判定通过但无法注入", new Error("agent=" + (agent ? "found" : "missing") + " injectFn=" + typeof agent?.inject + " buckets=" + decision.buckets.join(",") + " sops=" + signals.sops + " pending=" + signals.pending + " index=" + signals.indexChars + "/" + cfg.l1MaxChars + " autoPending=" + cfg.autoPending + " cooldown=" + cfg.reflectCooldownTurns));
 						}
-					}
-					if (agent && typeof agent.inject === "function") {
-						const parts = [];
-						if (overPending) parts.push(`pending 候选已累积 ${pendingCount} 条（阈值 ${cfg.reflectPendingThreshold}），请 memory_pending 逐条审阅：有价值的用 memory_accept 落库，其余忽略`);
-						if (overSops) parts.push(`L3 SOP 已达 ${sopCount} 条（阈值 ${cfg.reflectSopsThreshold}），请考虑用 memory_maintain 查看合并候选并整合相近条目`);
-						if (overIndex) parts.push(`L1 索引 ${indexSize} 字符超预算 ${cfg.l1MaxChars}（存在性不裁剪）：请 memory_maintain 看合并候选/冷条目，并精简 [RULES]`);
-						// [0.6.1 N7] inject 单独 try：抛错（agent 已 dispose 等）不再连带跳过
-						// reflectionState 更新——失败重试交由冷却期，而非下一轮立即重复注入。
-						// [0.6.1 I5] source.plugin 用插件导出名 layered-memory（src/index.js），
-						// 与 skill 名 memory 区分：转写归因指向提供方插件。
-						// [0.6.2] turn/end 观察器由宿主 Session.append 发布窗口内同步回调，
-						// 直接 inject 会撞重入守卫（session append cannot reenter）；延迟到下一宏任务
-						// 让本次发布先收口，期间 agent 若被 dispose 由 warnOnce 接住。
-						// [0.6.3] 宿主 inject 只做 inbox.splice、完全不校验形状：此前缺 id/role 的字面量
-						// 不会抛错，而是把一条畸形 user 消息直接落进会话历史。不用 dsh-llm 的
-							// createUserMessage——它在本仓只是 devDependency，运行时 import 会引入未声明
-						// 依赖，故手搓等价形状。
+					} else {
+						// [0.6.1 I5] source.plugin 用插件导出名 layered-memory（src/index.js），与 skill 名区分。
+						// [0.6.3] 宿主 inject 只做 inbox.splice、不校验形状，故手搓等价 UserMessage 形状。
+						// [0.6.6] 文本显式标注「插件自动提醒，非用户消息」：来源标签不是调度约束，
+						// 标注只是辅助，确定性抑制由上面的状态机负责。
 						const reflectionPayload = {
 							id: randomUUID(),
 							role: "user",
-							content: [{ type: "text", text: `[记忆整理请求] ${parts.join("；")}。（行动验证公理照旧：只沉淀有证据的内容）` }],
+							content: [{ type: "text", text: buildReflectionText(decision.buckets, signals, cfg) }],
 							source: { kind: "plugin", plugin: "layered-memory" },
 						};
-						setTimeout(() => {
+						const targetSession = sessionId;
+						scheduleTimeout(() => {
+							if (disposed) return;
 							try {
-								agent.inject(reflectionPayload);
+								const fresh = readReflectionState(root);
+								const freshRevision = computeContentRevision(root);
+								if (fresh?.notifiedRevision === freshRevision) return;
+								if (isSettledRevision(fresh, freshRevision)) return;
+								const liveAgent = ctx.get("agents")?.get?.(targetSession);
+								if (!liveAgent || typeof liveAgent.inject !== "function") return;
+								liveAgent.inject(reflectionPayload);
+								writeReflectionState(root, {
+									notifiedRevision: freshRevision,
+									notifiedAt: new Date().toISOString(),
+									notifiedSession: targetSession,
+									notifiedBuckets: decision.buckets,
+								});
 							} catch (err) {
 								warnOnce("inject", "反思注入（agent 可能已 dispose）", err);
 							}
-						}, 0);
-						reflectionState.set(sessionId, { lastReflectionTurn: totalTurns });
+						});
 					}
 				}
 			}
-		} catch (err) {
-			warnOnce("reflect", "阈值反思判定", err);
 		}
+	}
+} catch (err) {
+	warnOnce("reflect", "阈值反思判定", err);
+}
 		return undefined;
 	}));
 		disposers.push(ctx.on("agent/disposed", ({ agent }) => {
@@ -275,6 +312,14 @@ export function wireEvents(ctx, cfg, io) {
 	}));
 
 	return () => {
+		// [0.6.6] 先取消排队中的宏任务，再注销事件订阅：缺这一步时，插件卸载后
+		// 已排队的提醒与周期维护仍会执行（审查 R6/R12）。
+		disposed = true;
+		for (const h of timers) {
+			try { clearTimeout(h); } catch { /* 忽略 */ }
+			try { clearImmediate(h); } catch { /* 忽略 */ }
+		}
+		timers.clear();
 		for (const fn of disposers.reverse()) {
 			try { fn(); } catch { /* 忽略 */ }
 		}

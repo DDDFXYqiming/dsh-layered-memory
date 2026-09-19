@@ -2,6 +2,22 @@
 
 All notable changes to `dsh-layered-memory` are documented here.
 
+## [0.6.6] - 2026-09-19
+
+修复（反思提醒：从「存量阈值」改为「内容版本 + 维护终态」，2026-09-19 专项审查闭环）
+
+背景：0.6.2/0.6.3 修通了此前被宿主重入守卫挡住的提醒投递，却没有同时修「什么时候不该再提醒」。判定只看 `pending` / 活跃 SOP / 索引字符的存量阈值，既不消费维护结果，也没有「这批内容已经检查过」的状态。于是健康记忆库（46 条互不重复的 SOP）一旦越过 `reflectSopsThreshold`，就在每个新会话、每次重载、每个并行会话里反复把维护请求塞进当前任务——现场实测 24 个会话、111 条注入记录。本次按专项审查（基线 `3729dfe`）的 12 项探针落地修复。
+
+- **新增命名空间级反思状态 `src/reflection.js`**（落盘 `reflection-state.json`）：`revision`（内容指纹）+ `outcome`（`no_action` / `needs_review` / `done` / `failed`）+ `notifiedRevision`。指纹只取 `facts.md`、`index.txt`、`memory-meta.json`、`sops/*.md`、`pending/*.md` 的体积与 mtime，**排除** `turn-state.json`、访问热度、报告时间戳这类自写字段（否则每检查一次就把自己标脏，重新自激）。`no_action` 是有效终态：同一 revision 已有终态结论时静默，已通知过同一 revision 也静默。
+- **维护结果回写**：`runMaintain()` 收尾调用 `recordMaintainOutcome()`，自动周期维护与手动 `memory_maintain` 共用同一份消警依据；失败单独记 `failed`（允许冷却后重试），不会被误判成「已检查过」。
+- **冷却前置 + 廉价短路**：先判开关与冷却，再读状态、再做内容扫描。此前每轮 `turn/end` 都要遍历 SOP 并逐条 `isArchived`（每条重读整份 `memory-meta.json`，46 条 SOP 的一轮判定 = 46 次全量解析），冷却期内也一样。
+- **投递前二次复核**：排队中的提醒在真正投递前重读状态——插件已 dispose、该版本已被维护终结、或已通知过同一版本时直接丢弃，修掉「维护先跑完、旧提醒后送达」。
+- **定时任务纳入生命周期**：`setTimeout` / `setImmediate` 句柄统一登记，插件清理时取消。此前卸载后已排队的提醒与周期维护仍会执行。
+- **新增 `reflectionEnabled` 总开关**（默认 `true`）：关闭后只停「主动向会话投递整理请求」，不影响 L1 注入、检索、读取、主动写入与手动维护。此前没有真开关——`maintainEveryTurns=0` 只关周期维护，`autoPending=false` 只关自动候选分支，`reflectSopsThreshold=0` 反而是恒真。
+- **阈值 0 语义修正**：`reflectSopsThreshold: 0` / `reflectPendingThreshold: 0` 现在是「关闭该判据」，不再恒满足。
+- **提醒文本显式标注来源**：加「（插件自动提醒，非用户消息；与当前任务无关时可忽略）」，并对「没有重叠项就无需处理」给出终态说明。标注是辅助，确定性抑制由状态机负责——不改 `role`，宿主 `Agent.inject` 的契约就是 `UserMessage`。
+- **`readMeta` 读取缓存**：键为 `size:mtime:ino`，写入方显式失效。`memory-meta.json` 达数百 KB 时，热路径不再逐条全量 `JSON.parse`。
+- 回归：`test/v066.test.mjs`（11 例）覆盖审查 R1/R3/R4/R6/R7/R8/R9/R10/R12 场景与新增开关、缓存、指纹稳定性。全量 73/73 绿。
 ## [0.6.5] - 2026-09-18
 
 修复（0.6.4 归档横幅的检索副作用）

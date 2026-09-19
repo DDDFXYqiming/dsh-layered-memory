@@ -161,10 +161,42 @@ export function pendingNames(root) {
 	}
 }
 
-export function readMeta(root) {
+// [0.6.6] meta 读取缓存：getEntryMeta / isArchived 是 turn/end 热路径上的按条查询，
+// 此前每一条都要 readFileSync + JSON.parse 整份 memory-meta.json（实测 46 条 SOP 的
+// 一轮判定 = 46 次全量解析 200KB+ 文件）。缓存键为 size+mtime+ino：任何写盘（含
+// rename 换 inode）都会自动换键；写入方另调 invalidateMetaCache 做显式双保险。
+const metaCache = new Map(); // path -> { key, value }
+
+/** 失效命名空间（或全部）的 meta 缓存。写入方调用。 */
+export function invalidateMetaCache(root) {
+	if (root) metaCache.delete(join(root, META_FILE));
+	else metaCache.clear();
+}
+
+function metaCacheKey(p) {
 	try {
-		return JSON.parse(readFileSync(join(root, META_FILE), "utf8"));
+		const s = statSync(p);
+		return `${s.size}:${Math.round(s.mtimeMs)}:${s.ino ?? 0}`;
 	} catch {
+		return null;
+	}
+}
+
+export function readMeta(root) {
+	const p = join(root, META_FILE);
+	const key = metaCacheKey(p);
+	if (key === null) {
+		metaCache.delete(p);
+		return { facts: {}, sops: {} };
+	}
+	const hit = metaCache.get(p);
+	if (hit && hit.key === key) return hit.value;
+	try {
+		const value = JSON.parse(readFileSync(p, "utf8"));
+		metaCache.set(p, { key, value });
+		return value;
+	} catch {
+		metaCache.delete(p);
 		return { facts: {}, sops: {} };
 	}
 }
@@ -236,6 +268,7 @@ export function setEntryMeta(root, kind, key, patch) {
 		out = store[key];
 		return JSON.stringify(m, null, 2);
 	});
+	invalidateMetaCache(root);
 	return out;
 }
 

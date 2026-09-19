@@ -5,6 +5,7 @@
 import { existsSync, readFileSync, copyFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteFileSync } from "./atomic-write.js";
+import { recordMaintainOutcome, recordMaintainFailure } from "./reflection.js";
 import {
 	ARCHIVE_DIR,
 	factSections,
@@ -205,23 +206,32 @@ export function findColdEntries(root, { heat = {}, days, limit = 10 } = {}) {
 	return { threshold_days: windowDays, count: rows.length, entries: rows.slice(0, limit) };
 }
 
-/** 执行一次完整维护：去重 + 索引核对（存在性全量，不裁剪）+ 统计 + 合并候选 + 冷条目复核。 */
+/** 执行一次完整维护：去重 + 索引核对（存在性全量，不裁剪）+ 统计 + 合并候选 + 冷条目复核。
+ * [0.6.6] 结束时把「这批内容已检查过、结论是什么」写回命名空间级反思状态：
+ * 自动周期维护与手动 memory_maintain 共用同一份消警依据（审查 F1：此前维护结果
+ * 无人消费，健康存量每过一个冷却窗口就被重新要求整理一次）。 */
 export function runMaintain(root, maxChars = L1_MAX_CHARS_DEFAULT, opts = {}) {
-	const dedupe = dedupeEntries(root, opts);
-	const index = syncIndex(root, maxChars);
-	const stats = computeNamespaceStats(root);
-	const mergeCandidates = findMergeCandidates(root, opts);
-	const cold = findColdEntries(root, { ...opts, days: opts.coldReviewDays });
-	const report = {
-		runAt: new Date().toISOString(),
-		dedupe,
-		index: { ...index, index_chars_actual: indexChars(readIndex(root)) },
-		stats,
-		mergeCandidates,
-		cold,
-	};
-	atomicWriteFileSync(join(root, "maintenance-report.json"), JSON.stringify(report, null, 2));
-	return report;
+	try {
+		const dedupe = dedupeEntries(root, opts);
+		const index = syncIndex(root, maxChars);
+		const stats = computeNamespaceStats(root);
+		const mergeCandidates = findMergeCandidates(root, opts);
+		const cold = findColdEntries(root, { ...opts, days: opts.coldReviewDays });
+		const report = {
+			runAt: new Date().toISOString(),
+			dedupe,
+			index: { ...index, index_chars_actual: indexChars(readIndex(root)) },
+			stats,
+			mergeCandidates,
+			cold,
+		};
+		atomicWriteFileSync(join(root, "maintenance-report.json"), JSON.stringify(report, null, 2));
+		try { recordMaintainOutcome(root, report); } catch { /* 状态回写失败不阻断维护 */ }
+		return report;
+	} catch (err) {
+		try { recordMaintainFailure(root, err); } catch { /* 忽略 */ }
+		throw err;
+	}
 }
 
 /** 收集一个命名空间的全部可检索文档（facts sections + sops + 归档条目）。 */

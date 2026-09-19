@@ -52,8 +52,9 @@ dsh plugin --profile web add <repo dir>
     autoNamespace: true        # default = workspace dir name + git branch (home dir falls back to default)
     autoPending: false         # [v0.6] off by default: candidates were mostly tool-usage noise and went unconsumed (108 in 6 days)
     maintainEveryTurns: 20     # auto-maintain every N turns (counter persisted, accumulates across sessions)
-    reflectPendingThreshold: 5 # only when autoPending is on: inject consolidation request at this pending count
-    reflectSopsThreshold: 40   # inject consolidation request when L3 SOP count >= threshold
+    reflectionEnabled: true    # [0.6.6] master switch for reflection notices; false stops proactive delivery only (L1/read/write/manual maintain unaffected)
+    reflectPendingThreshold: 5 # only when autoPending is on: inject consolidation request at this pending count; 0 disables the rule
+    reflectSopsThreshold: 40   # inject consolidation request when active L3 SOP count >= threshold; 0 disables the rule
     reflectCooldownTurns: 10   # min turns between two reflection injections (cooldown)
     nearDupeThreshold: 0.85    # token-set Jaccard threshold for near-duplicate dedupe (0..1)
     mergeCandidateThreshold: 0.45 # merge-candidate report threshold (0..1)
@@ -65,6 +66,8 @@ dsh plugin --profile web add <repo dir>
 ```
 
 **L1 existence first (no trimming since v0.6).** The AUTO section lists every active entry name, one line per layer joined by `" | "`. The budget unit is characters (`l1MaxChars`), not lines: the old line budget allowed "compliant lines, runaway tokens", and one-entry-per-line meant 30 lines could only hold 16 entries, silently hiding the rest — which is permanent invisibility, since the model never searches for what it does not know exists. Over budget only warns (tool return + maintenance report); merge/archive entries or trim `[RULES]`. The index file is not rewritten when its content is unchanged, keeping the system-prompt prefix cache stable. Decayed heat (14-day half-life) now feeds the **cold-entry review** list in `memory_maintain` instead of hiding entries.
+
+**[0.6.6] One notice per content revision.** After any maintenance run (scheduled or manual `memory_maintain`) the plugin records "this content has been inspected, and the verdict was X" in `reflection-state.json` at the namespace root. A healthy library that reaches the `no_action` verdict is not asked to tidy itself again: new sessions, parallel sessions and hot reloads stay silent, and only a real content change (entries added or rewritten, index over budget, merge candidates found) re-opens the question. The trigger moved from "how many memories do I hold" to "has this content been inspected", because a healthy store can easily hold dozens of non-duplicate SOPs. The fingerprint tracks content only — turn counters and access heat are excluded.
 
 ## Storage layout
 

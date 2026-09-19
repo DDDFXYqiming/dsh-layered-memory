@@ -33,6 +33,11 @@ export const Config = Schema.object({
 	// [v0.6] 默认关闭：实测 6 天累积 108 条候选、消费≈0，且内容多为工具用法噪声（TS 引号错、
 	// 未知工具名等），对未来任务零复用价值。需要时显式开启，或直接用 memory_write 主动沉淀。
 	autoPending: Schema.boolean().default(false),
+	// [0.6.6] 反思提醒总开关（专项审查 F6：此前没有真正的开关——maintainEveryTurns=0
+	// 只关周期维护，autoPending=false 只关自动候选及其通知分支，reflectSopsThreshold=0
+	// 反而是恒真）。关闭它只停「主动向会话投递整理请求」，不影响 L1 注入、检索、读取、
+	// 主动写入与手动 memory_maintain。
+	reflectionEnabled: Schema.boolean().default(true),
 	// v0.4 自动维护（v0.5 起计数持久化，跨会话累计触发）
 	// [0.6.1 N4] 轮数/条数阈值属整数语义：natural()（>=0 整数）让 -1/2.5 这类
 	// 无效配置在插件加载期响亮失败（config.zh.md「配置错误要响亮」），与 l1MaxChars 等

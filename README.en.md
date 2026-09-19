@@ -107,10 +107,6 @@ pnpm test         # vitest
 pnpm test:smoke   # dsh --profile headless --dump-config
 ```
 
-Unit tests need `@deepseek-ai/dsh-tools` and `@deepseek-ai/schemastery`, both host-internal packages. During development, junction or symlink `node_modules/@deepseek-ai` from a local DSH install into this repository; `auto-install-peers=false` in `.npmrc` stops pnpm from resolving those private peers against the registry.
-
-Before running any script, pnpm 11 performs a dependency pre-check that walks the peer chain and looks for host-private packages such as `@deepseek-ai/dsh-type-meta`. Those are not published, so `pnpm test` fails with `ERR_PNPM_FETCH_404`. The repository declares `verifyDepsBeforeRun: false` at the top level of `pnpm-workspace.yaml` to skip that pre-check; pnpm 11 only reads it from there, and the kebab-case key in `.npmrc` has no effect. A fresh clone can run `pnpm test` directly. If a machine still gets intercepted by the pre-check, fall back to `./node_modules/.bin/vitest run`.
-
 ## Related
 
 - Underlying host integration points are `ctx.systemPrompt.context` / `ctx.skills.register` / `ctx.tools.register` / `session/event` events + `ctx.sessionQuery`

@@ -107,10 +107,6 @@ pnpm test         # vitest 全量回归
 pnpm test:smoke   # dsh --profile headless --dump-config
 ```
 
-单元测试需要 `@deepseek-ai/dsh-tools` 与 `@deepseek-ai/schemastery` 这两个宿主内置包。开发时把本地 DSH 环境里的 `node_modules/@deepseek-ai` 用 junction 或软链接接进本仓库即可，`.npmrc` 里的 `auto-install-peers=false` 会拦住 pnpm，不让它去 registry 解析这批私有 peer。
-
-pnpm 11 在执行 `run` 之前会先做依赖预检，解析 peer 链时会去找 `@deepseek-ai/dsh-type-meta` 这类并未公开发布的宿主私有包，`pnpm test` 因此报 `ERR_PNPM_FETCH_404`。仓库已在 `pnpm-workspace.yaml` 顶层声明 `verifyDepsBeforeRun: false` 跳过这一步，pnpm 11 只认这个位置，写在 `.npmrc` 里的 kebab 版本无效。克隆后 `pnpm test` 可直接运行。若某台机器仍被预检拦住，改用 `./node_modules/.bin/vitest run`。
-
 ## 相关
 
 - 底层依赖的宿主接缝有 `ctx.systemPrompt.context` / `ctx.skills.register` / `ctx.tools.register` / `session/event` 事件 + `ctx.sessionQuery`

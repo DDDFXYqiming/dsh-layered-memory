@@ -2,13 +2,33 @@
 
 # dsh-layered-memory
 
-Cross-session long-term memory for DeepSeek Harness (DSH).
+Cross-session memory for DeepSeek Harness (DSH).
 
-Context disappears when a session ends. This plugin writes what is worth keeping to files on disk and pulls it back when a later session needs it. Memory has three layers. L1 is the index, and it tells the model which entries exist. L2 holds environment facts such as paths, configuration and measured parameters. L3 holds task experience such as preconditions, pitfalls and the stable steps of a workflow.
+A DSH session loses its context the moment it ends. Come back to the same project tomorrow and you explain the environment again, and rediscover how you worked around that error last time. This plugin writes that kind of information to files on disk and pulls it back when a later session needs it.
 
-## Tools
+Memory has three layers: an index, environment facts, and task experience. The L1 / L2 / L3 labels in the tool list below refer to those three.
 
-14 tools. In progressive mode they stay hidden until the agent calls `memory_activate` once.
+## What it looks like in use
+
+Once installed, you just tell the agent.
+
+> The build command for this project is ```pnpm build && pnpm test~~, and the tests take about forty seconds. Remember that.
+
+It writes the line into the memory store. Open a fresh session the next day and say "run the tests for me", and the command is already known.
+
+It works the other way too. If you forget the flags a service needs, ask the agent to look them up in memory instead of scrolling back through old chats.
+
+## Install
+
+`%powershell
+dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
+`%
+
+The plugin creates its directories and template files under `<home>/.dsh/memory`.
+
+## Usage
+
+The agent decides when to read and write memory. The plugin registers one `memory` skill and 14 tools. Under progressive mode those tools stay hidden until the agent calls `memory_activate` once.
 
 | Tool | Purpose |
 |---|---|
@@ -27,19 +47,9 @@ Context disappears when a session ends. This plugin writes what is worth keeping
 | `memory_maintain` | Dedupe, index audit, stats, merge candidates, cold-entry review |
 | `memory_promote` | Promote project-local experience to the global namespace |
 
-## Install
-
-~~~powershell
-# GitHub install, bundles cordis.patch.yml with contribution id: dsh-layered-memory
-dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
-
-# Local development, point straight at the repo directory
-dsh plugin --profile web add <repo dir>
-~~~
-
 ## Configuration
 
-~~~yaml
+`%yaml
 # a bare entry in the profile cordis.patch.yml, overriding the bundle row; do not duplicate the insert
 - id: dsh-layered-memory
   config:
@@ -61,11 +71,13 @@ dsh plugin --profile web add <repo dir>
     recencyWindowDays: 7       # recency protection window for fresh entries
     coldReviewDays: 90         # cold-entry review window in days
     namespaceCacheTtlMs: 60000 # TTL for the autoNamespace git probe cache, in ms
-~~~
+`%
 
-## Storage layout
+## Storage
 
-~~~
+Memory is a pile of markdown files, with no database behind it. The default location is `<home>/.dsh/memory`.
+
+`%
 <home>/.dsh/memory/
 ├── <namespace>/                non-default namespace
 │   ├── memory_management_sop.md
@@ -80,11 +92,22 @@ dsh plugin --profile web add <repo dir>
 │   ├── file_access_stats.json
 │   └── reflection-state.json
 └── with namespace default, the same files live at this root
-~~~
+`%
 
-## Links
+You can back it up, commit it, or edit it by hand. The write path refuses text that looks like a plaintext secret.
+
+## What it does not do
+
+It does not detect contradictions automatically. Consistency comes from process. Dedupe before writing, use `memory_update` when a topic evolves, let `memory_maintain` propose merge candidates for similar entries, and settle cross-entry conflicts by timeline at read time.
+
+It also does not encrypt or sync anything. The files are local, moving them between machines is up to you.
+
+## More
 
 - [Design and scheduling](docs/design.md) (Chinese)
 - [Development and testing](docs/development.md) (Chinese)
 - [Changelog](CHANGELOG.md)
-- MIT license
+
+## License
+
+MIT

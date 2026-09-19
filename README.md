@@ -2,13 +2,33 @@
 
 # dsh-layered-memory
 
-给 DeepSeek Harness（DSH）装一层跨会话的长期记忆。
+给 DeepSeek Harness（DSH）装一层跨会话记忆。
 
-会话一结束，上下文就清空了。这个插件把值得留下的信息写成文件放在磁盘上，之后的会话再按需取回。记忆分三层。L1 是索引，让模型知道库里有哪些条目。L2 放环境事实，路径、配置、实测参数这类。L3 放任务经验，某个流程的前置条件、坑点和稳定步骤。
+DSH 的会话一结束，上下文就清空了。下次回到同一个项目，环境是怎么配的、上次那个报错最后怎么绕过去的，都得重新讲一遍。这个插件把这些信息写成文件留在磁盘上，之后的会话按需取回。
 
-## 工具
+记忆分三层，索引、环境事实、任务经验。工具说明里的 L1、L2、L3 指的就是这三层。
 
-14 个工具。progressive 模式下它们先不出现，Agent 调用一次 `memory_activate` 后才会挂上。
+## 用起来是什么样
+
+装好之后直接对 Agent 说。
+
+> 这个项目的构建命令是 ```pnpm build && pnpm test~~，测试要跑四十秒，记住。
+
+它会把这条写进记忆库。第二天新开一个会话，你只说一句"帮我跑一遍测试"，命令它已经知道，不用重新交代。
+
+反过来也一样。忘了某个服务的启动参数，让它去记忆里找，比翻聊天记录快。
+
+## 安装
+
+`%powershell
+dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
+`%
+
+装好之后 `<home>/.dsh/memory` 下会自动建好目录和模板文件。
+
+## 用法
+
+读写记忆的时机由 Agent 判断，插件提供了一个 `memory` skill 和 14 个工具。progressive 模式下这些工具先不出现，Agent 调用一次 `memory_activate` 之后才会挂上。
 
 | 工具 | 用途 |
 |---|---|
@@ -27,19 +47,9 @@
 | `memory_maintain` | 去重、索引核对、统计、合并候选、冷条目复核 |
 | `memory_promote` | 跨命名空间提升（项目局部经验升为全局） |
 
-## 安装
-
-```powershell
-# 从 GitHub 安装，自带 cordis.patch.yml，贡献 id: dsh-layered-memory
-dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
-
-# 本地开发时也可以直接指向仓库目录
-dsh plugin --profile web add <本目录>
-```
-
 ## 配置
 
-```yaml
+`%yaml
 # profile cordis.patch.yml 里的裸条目，覆盖 bundle 行，不要重复 insert
 - id: dsh-layered-memory
   config:
@@ -61,11 +71,13 @@ dsh plugin --profile web add <本目录>
     recencyWindowDays: 7       # 新条目无访问时的 recency 保护窗口（天）
     coldReviewDays: 90         # 冷条目复核窗口，默认 90 天
     namespaceCacheTtlMs: 60000 # autoNamespace 的 git 分支探测缓存 TTL（毫秒）
-```
+`%
 
-## 存储布局
+## 存储
 
-```
+记忆就是一堆 markdown 文件，没有数据库。默认放在 `<home>/.dsh/memory`。
+
+`%
 <home>/.dsh/memory/
 ├── <namespace>/                非 default 命名空间
 │   ├── memory_management_sop.md
@@ -80,11 +92,22 @@ dsh plugin --profile web add <本目录>
 │   ├── file_access_stats.json
 │   └── reflection-state.json
 └── namespace 为 default 时，以上内容兼容地放在此根目录
-```
+`%
 
-## 相关
+可以直接备份、进版本库或手改。写入侧会拒绝疑似密钥的明文。
+
+## 它不做什么
+
+不做自动矛盾检测。一致性靠流程保障，写入前查重，同主题演进用 `memory_update`，高相似条目由 `memory_maintain` 产出合并候选，跨条目矛盾在读取时按时间线裁决。
+
+也不做加密和同步。文件放在本地，跨机器要自己搬。
+
+## 更多
 
 - [设计与调度原理](docs/design.md)
 - [开发与测试](docs/development.md)
-- [完整更新历史](CHANGELOG.md)
-- 采用 MIT 授权
+- [更新历史](CHANGELOG.md)
+
+## 许可
+
+MIT

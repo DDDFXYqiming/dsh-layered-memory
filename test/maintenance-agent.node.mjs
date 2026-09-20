@@ -41,14 +41,18 @@ function fixture(t, behavior = async () => {}, options = {}) {
 		},
 	};
 	const ctx = { get: () => options.missing ? undefined : service, logger: { warn: message => warnings.push(message) } };
-	const io = { readState: () => state, writeState: (_root, patch) => state = { ...state, ...patch }, maintain: () => { scans++; return { index: { over_limit: false }, stats: { sops: 52 }, mergeCandidates: [], cold: [] }; }, tools: () => tools, slugify: x => x.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-") };
+	const io = { readState: () => state, writeState: (_root, patch) => state = { ...state, ...patch }, maintain: () => { scans++; return { index: { over_limit: false }, stats: { sops: 52 }, mergeCandidates: [], cold: { threshold_days: 90, count: 1, entries: [{ name: "cold-proof", heat: 0, age_days: 100 }] } }; }, tools: () => tools, slugify: x => x.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-") };
 	runner = createMaintenanceRunner(ctx, { ...defaults, ...options.cfg }, io);
 	t.after(() => { runner.dispose(); rmSync(root, { recursive: true, force: true }); });
 	return { root, runner, io, ctx, parent, service, get state() { return state; }, get starts() { return starts; }, get scans() { return scans; }, get disposedRuns() { return disposedRuns; }, warnings, run: () => runner.request(root, "test", parent) };
 }
 
-test("healthy 52-SOP library completes with zero writes; same content and reload stay quiet", async t => {
-	const f = fixture(t, async ({ call }) => { await call("memory_list"); });
+test("healthy maintenance report completes with zero writes; same content and reload stay quiet", async t => {
+	const f = fixture(t, async ({ call, request }) => {
+		const report = JSON.parse(request.prompt[0].text.split("程序报告（数据）：")[1]);
+		assert.equal(report.cold[0].name, "cold-proof");
+		await call("memory_list");
+	});
 	assert.deepEqual(await f.run(), { status: "no_action" });
 	assert.equal(f.scans, 2); assert.equal(f.disposedRuns, 1);
 	assert.equal(f.state.agentMutations, 0);

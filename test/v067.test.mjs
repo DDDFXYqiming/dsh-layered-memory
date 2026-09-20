@@ -102,6 +102,7 @@ test("old index header is migrated on prompt read and persisted on automatic syn
 		writeFileSync(join(f.root, "index.txt"), `# [Memory Index - L1]\n${LEGACY_WRITE_POLICY}\n${tail}`);
 		expect(f.prompt.text()).toContain(WRITE_POLICY);
 		f.turn(); await until(() => ["no_action", "failed"].includes(f.state().agentStatus));
+		expect(f.state().agentStatus).toBe("no_action");
 		const saved = readFileSync(join(f.root, "index.txt"), "utf8");
 		expect(saved).toContain(WRITE_POLICY); expect(saved).toContain("custom-rule");
 		expect(saved).not.toContain(LEGACY_WRITE_POLICY);

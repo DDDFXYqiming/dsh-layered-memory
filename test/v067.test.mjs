@@ -71,7 +71,7 @@ for (const progressive of [true, false]) {
 			await call("memory_read", { name: "known" });
 			await call("memory_update", { topic: "known", entry_type: "fact", content: "verified original value; compressed wording", evidence: "original fixture verification", supersede: false });
 			if (globals.has("memory_activate")) {
-				expect(() => globals.get("memory_activate").execute({}, { agent: child })).toThrow("maintenance_id required");
+				await expect(globals.get("memory_activate").execute({}, { agent: child })).rejects.toThrow("maintenance_id required");
 			}
 		}, { progressive });
 		try {

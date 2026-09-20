@@ -6,7 +6,7 @@ import { defineTool } from "@deepseek-ai/dsh-tools";
 import Schema from "@deepseek-ai/schemastery";
 import { ensureNamespaceLayout, nsRoot, resolveNamespace, defaultMemDir, backfillMeta, HEAT_HALF_LIFE_DAYS, RECENCY_WINDOW_MS, NAMESPACE_CACHE_TTL_MS_DEFAULT } from "./store.js";
 import { NEAR_DUPE_THRESHOLD, MERGE_CANDIDATE_THRESHOLD, MIN_TOKENS_FOR_FUZZY, COLD_REVIEW_DAYS } from "./maintain.js";
-import { readIndex, L1_MAX_CHARS_DEFAULT } from "./l1index.js";
+import { readIndex, L1_MAX_CHARS_DEFAULT, buildPromptIndex } from "./l1index.js";
 import { buildTools } from "./tools.js";
 import { wireEvents } from "./events.js";
 import { SKILL_NAME, SKILL_DESCRIPTION, SKILL_WHEN_TO_USE, SKILL_CONTENT } from "./skill-content.js";
@@ -128,12 +128,14 @@ function apply(ctx, config = {}) {
 
 	// ── 记忆注入（L1 存在性索引每轮可见）──
 	// [v0.5.3] 注入面防护：index.txt 由 memory_write 的 topic/content 拼接而成，
-	// 属用户可写数据。注入 system prompt 前做长度熔断 + 控制字符剥离，
+	// 属用户可写数据。注入 system prompt 前做控制字符剥离 + 长度熔断，
 	// 并用 sentinel 标记为不可信段，防止 topic 里的指令字串污染系统上下文。
+	// [0.6.8] 熔断改为结构化预算（buildPromptIndex）：超预算时规则段与头部完整保留、
+	// 条目按分类入口折叠并显式标注；此前的前缀截断会先丢掉尾部 [RULES] 且不留痕迹。
 	const L1_MAX_CHARS = cfg.l1MaxChars;
 	function sanitizeIndexForPrompt(idx) {
 		let s = String(idx ?? "").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
-		if (s.length > L1_MAX_CHARS) s = s.slice(0, L1_MAX_CHARS) + "\n[memory:index 已截断]";
+		s = buildPromptIndex(s, L1_MAX_CHARS);
 		const trimmed = s.trim();
 		if (!trimmed) return "";
 		return `<memory_index source="user-writable">\n${trimmed}\n</memory_index>`;

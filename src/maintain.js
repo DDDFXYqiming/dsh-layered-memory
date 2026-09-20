@@ -25,7 +25,7 @@ import {
 import { syncIndex, readIndex, indexChars, L1_MAX_CHARS_DEFAULT } from "./l1index.js";
 import { normalizeText, tokenize, jaccard } from "./similarity.js";
 
-/** 近重复判定阈值：分词集合 Jaccard 达到该值视为同一记忆的微编辑版本。 */
+/** 近重复候选阈值：分词集合 Jaccard 达到该值即列入候选（不自动归档，见 dedupeEntries）。 */
 export const NEAR_DUPE_THRESHOLD = 0.85;
 /** 合并候选报告阈值：达到该值提示"内容高度重叠，可考虑合并"。 */
 export const MERGE_CANDIDATE_THRESHOLD = 0.45;
@@ -47,87 +47,93 @@ function fuzzyEligible(a, b, minTokens = MIN_TOKENS_FOR_FUZZY) {
 }
 
 /**
- * 去重：两级检测。
- * 1) 精确内容 hash（快速路径，行为与 v0.4 一致）；
- * 2) [v0.5] 词元集合 Jaccard ≥ NEAR_DUPE_THRESHOLD 的近重复（同事实改写/微调）。
- * 重复项归档并保留 citation（不物理删除）。
+ * 近重复候选的报告上限（候选只报告不处置，超出部分按相似度取前 N）。
+ */
+export const NEAR_DUPE_REPORT_LIMIT = 20;
+
+/**
+ * 在活跃条目之间收集近重复候选（只报告，不修改任何条目）。
+ * 词元集合无法表达否定、参数与操作顺序，因此这里的结果必须经语义确认后才能合并。
+ */
+function collectNearDuplicates(entries, kind, threshold, minTokens, out) {
+	const names = [...entries.keys()].sort();
+	const found = [];
+	for (let i = 0; i < names.length; i++) {
+		for (let j = i + 1; j < names.length; j++) {
+			const a = entries.get(names[i]);
+			const b = entries.get(names[j]);
+			if (!fuzzyEligible(a, b, minTokens)) continue;
+			const score = jaccard(a, b);
+			if (score < threshold) continue;
+			found.push({ kind, a: names[i], b: names[j], similarity: Number(score.toFixed(4)) });
+		}
+	}
+	found.sort((x, y) => y.similarity - x.similarity || x.a.localeCompare(y.a));
+	for (const row of found.slice(0, NEAR_DUPE_REPORT_LIMIT)) out.push(row);
+	return found.length;
+}
+
+/**
+ * 去重：程序只归档**内容完全一致**的重复条目；内容级近重复（Jaccard ≥ NEAR_DUPE_THRESHOLD）
+ * 仅产出候选，交由受限整理子任务或人工确认后再合并。
+ *
+ * [0.6.8] 此前 Jaccard ≥ 0.85 直接归档，实测三类反例都会被判成重复：
+ * 端口 8080→9090（0.9259）、认证 enabled→disabled（0.9259）、操作顺序对调（1.0000）。
+ * 相似度能找出候选，不足以独自决定隐藏哪一条。
  */
 export function dedupeEntries(root, opts = {}) {
 	const nearDupe = opts.nearDupeThreshold ?? NEAR_DUPE_THRESHOLD;
 	const minTokens = opts.minTokensForFuzzy ?? MIN_TOKENS_FOR_FUZZY;
-	const report = { removed: [], merged: [] };
-	const meta = readMeta(root);
+	const report = { removed: [], merged: [], nearDuplicates: [] };
 
-	// ── SOP：精确 hash 快速路径 ──
+	// ── SOP：第一遍按精确内容 hash 归档完全一致项，第二遍在剩余活跃项间找候选 ──
 	const seenSopHash = new Map();
-	const sopTokenSets = new Map();
+	const liveSops = new Map();
 	for (const slug of sopNames(root)) {
 		if (isArchived(root, "sop", slug)) continue;
 		const content = readSop(root, slug);
 		if (content === null) continue;
 		const norm = normalizeText(content);
 		const h = hashText(norm);
-		let duplicateOf = null;
 		if (seenSopHash.has(h)) {
-			duplicateOf = seenSopHash.get(h);
-		} else {
-			// 近重复：与之前每个 SOP 比 Jaccard（条目量级为百以内，O(n²) 可接受）
-			const cur = tokenSet(norm);
-			for (const [prevSlug, prevSet] of sopTokenSets) {
-				if (!fuzzyEligible(cur, prevSet, minTokens)) continue;
-				if (jaccard(cur, prevSet) >= nearDupe) {
-					duplicateOf = prevSlug;
-					break;
-				}
-			}
-		}
-		if (duplicateOf) {
+			const duplicateOf = seenSopHash.get(h);
 			const ts = Date.now();
 			try {
 				copyFileSync(join(root, "sops", `${slug}.md`), join(root, ARCHIVE_DIR, `sop-${slug}-${ts}.md`));
 			} catch { /* 忽略 */ }
 			setEntryMeta(root, "sop", slug, { archived: true, duplicateOf, archivedAt: new Date().toISOString() });
 			report.removed.push(`sop:${slug} -> duplicate of ${duplicateOf}`);
-		} else {
-			seenSopHash.set(h, slug);
-			sopTokenSets.set(slug, tokenSet(norm));
+			continue;
 		}
+		seenSopHash.set(h, slug);
+		liveSops.set(slug, tokenSet(norm));
 	}
+	collectNearDuplicates(liveSops, "sop", nearDupe, minTokens, report.nearDuplicates);
 
-	// ── fact：同样两级 ──
+	// ── fact：同样两遍 ──
 	const seenFactHash = new Map();
-	const factTokenSets = new Map();
+	const liveFacts = new Map();
 	for (const topic of factSections(root)) {
 		if (isArchived(root, "fact", topic)) continue;
 		const content = readFact(root, topic);
 		if (content === null) continue;
 		const norm = normalizeText(content);
 		const h = hashText(norm);
-		let duplicateOf = null;
 		if (seenFactHash.has(h)) {
-			duplicateOf = seenFactHash.get(h);
-		} else {
-			const cur = tokenSet(norm);
-			for (const [prevTopic, prevSet] of factTokenSets) {
-				if (!fuzzyEligible(cur, prevSet, minTokens)) continue;
-				if (jaccard(cur, prevSet) >= nearDupe) {
-					duplicateOf = prevTopic;
-					break;
-				}
-			}
-		}
-		if (duplicateOf) {
+			const duplicateOf = seenFactHash.get(h);
 			const ts = Date.now();
 			try {
 				atomicWriteFileSync(join(root, ARCHIVE_DIR, `fact-${slugify(topic)}-${ts}.md`), factArchiveText(root, topic));
 			} catch { /* 忽略 */ }
 			setEntryMeta(root, "fact", topic, { archived: true, duplicateOf, archivedAt: new Date().toISOString() });
 			report.removed.push(`fact:${topic} -> duplicate of ${duplicateOf}`);
-		} else {
-			seenFactHash.set(h, topic);
-			factTokenSets.set(topic, tokenSet(norm));
+			continue;
 		}
+		seenFactHash.set(h, topic);
+		liveFacts.set(topic, tokenSet(norm));
 	}
+	collectNearDuplicates(liveFacts, "fact", nearDupe, minTokens, report.nearDuplicates);
+
 	return report;
 }
 

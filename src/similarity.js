@@ -14,7 +14,17 @@ export function normalizeText(text) {
 export function tokenize(text) {
 	const s = normalizeText(text);
 	const tokens = [];
-	for (const m of s.matchAll(/[a-z0-9_+\-./]{2,}|\d/g)) tokens.push(m[0]);
+	for (const m of s.matchAll(/[a-z0-9_+\-./]{2,}|\d/g)) {
+		const token = m[0];
+		tokens.push(token);
+		// [0.6.8] 复合标识符额外索引拆分后的子词：完整名字仍能命中（dsh-layered-memory），
+		// 拆开写法也能命中（layered memory）。此前只有整体词元，拆开查询零结果。
+		if (/[._+/-]/.test(token)) {
+			for (const part of token.split(/[._+/-]+/)) {
+				if (part.length >= 2) tokens.push(part);
+			}
+		}
+	}
 	for (const m of s.matchAll(/[\u4e00-\u9fff]{2,}/g)) {
 		const run = m[0];
 		for (let i = 0; i + 2 <= run.length; i++) tokens.push(run.slice(i, i + 2));

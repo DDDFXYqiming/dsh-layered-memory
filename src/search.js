@@ -3,9 +3,31 @@
 
 import { readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { BM25Index } from "./similarity.js";
+import { BM25Index, tokenize } from "./similarity.js";
 import { collectDocs } from "./maintain.js";
 import { stripArchiveBanner } from "./store.js";
+
+/**
+ * 摘要：优先展示命中位置附近的内容。
+ * [0.6.8] 此前固定取正文开头 160 字符——命中信息在正文后段时，
+ * 模型拿到了结果却看不到它为什么相关。
+ */
+export function snippetAround(text, query, width = 160) {
+	const flat = String(text ?? "").replace(/\s+/g, " ").trim();
+	if (flat.length <= width) return flat;
+	const lower = flat.toLowerCase();
+	let hit = -1;
+	for (const term of new Set(tokenize(query))) {
+		const t = term.toLowerCase();
+		if (t.length < 2) continue;
+		const i = lower.indexOf(t);
+		if (i >= 0 && (hit < 0 || i < hit)) hit = i;
+	}
+	if (hit < 0) return flat.slice(0, width);
+	const start = Math.max(0, hit - Math.floor(width / 3));
+	const end = Math.min(flat.length, start + width);
+	return `${start > 0 ? "…" : ""}${flat.slice(start, end)}${end < flat.length ? "…" : ""}`;
+}
 
 /** 列出全部命名空间根目录（default = memoryDir 本身，其余为子目录）。 */
 export function listNamespaces(memDir) {
@@ -52,7 +74,7 @@ export function searchNamespaces(memDir, namespaces, query, { limit = 8, include
 				name: m.name,
 				archived: m.archived,
 				score: Number(score.toFixed(4)),
-				snippet: (m.text || "").replace(/\s+/g, " ").trim().slice(0, 160),
+				snippet: snippetAround(m.text, query),
 			};
 		})
 		.slice(0, Math.max(1, limit));

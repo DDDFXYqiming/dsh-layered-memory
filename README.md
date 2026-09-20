@@ -44,7 +44,7 @@ dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
 | `memory_rollback` | 回滚到 `.history/` 中最近快照 |
 | `memory_expand` | 展开 sourceSession/sourceSeqs 对应的原始事件 |
 | `memory_stats` | 统计 L2/L3/pending/archived 与占用 |
-| `memory_maintain` | 去重、索引核对、统计、合并候选、冷条目复核 |
+| `memory_maintain` | 精确去重（仅内容完全一致）、索引核对、统计、近重复与合并候选、冷条目复核 |
 | `memory_promote` | 跨命名空间提升（项目局部经验升为全局） |
 
 ## 配置
@@ -54,7 +54,7 @@ dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
 - id: dsh-layered-memory
   config:
     memoryDir: ''              # 默认 <home>/.dsh/memory
-    l1MaxChars: 12288         # L1 索引的字符预算，超预算只告警，不隐藏条目
+    l1MaxChars: 12288         # L1 索引的字符预算；超预算时注入视图按分类入口折叠条目，规则段完整保留
     progressive: true
     defaultNamespace: ''       # 固定默认命名空间，留空则由 autoNamespace 决定
     autoNamespace: true        # 默认取 workspace 目录名加 git 分支名，家目录归 default
@@ -64,7 +64,7 @@ dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
     reflectPendingThreshold: 5 # 仅 autoPending 开启时生效，0 表示关闭该判据
     reflectSopsThreshold: 40   # 活跃 L3 SOP 达到该值时报整理提醒，0 表示关闭该判据
     reflectCooldownTurns: 10   # 两次反思注入之间的最小轮数
-    nearDupeThreshold: 0.85    # 近重复去重的词元集合 Jaccard 阈值
+    nearDupeThreshold: 0.85    # 近重复候选的词元集合 Jaccard 阈值（只报告，不自动归档）
     mergeCandidateThreshold: 0.45 # 合并候选报告阈值
     minTokensForFuzzy: 12      # 低于该词元数的内容只走精确 hash 去重
     heatHalfLifeDays: 14       # 访问热度半衰期（天）

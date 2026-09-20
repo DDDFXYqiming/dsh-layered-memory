@@ -507,7 +507,7 @@ export function buildTools(ctx, cfg) {
 		name: "memory_maintain",
 		// [0.6.1 I6] 阈值数字从生效配置动态拼接（注册期一次性求值，不违反 render/presentCall
 		// 纯函数约束——description 不是回调）；顺带修正 v0.6 起已废除的「按热度压缩 L1」陈旧表述。
-		description: `执行记忆库维护：去重（精确 + 内容级近重复，Jaccard 阈值 ${cfg.maintainOpts?.nearDupeThreshold ?? NEAR_DUPE_THRESHOLD}，重复项归档保留 citation）、L1 索引核对（存在性全量列出、不裁剪）、生成统计、产出内容高度重叠的合并候选（阈值 ${cfg.maintainOpts?.mergeCandidateThreshold ?? MERGE_CANDIDATE_THRESHOLD}，需人工/模型确认）、冷条目复核（创建超过 ${cfg.maintainOpts?.coldReviewDays ?? COLD_REVIEW_DAYS} 天且热度趋零）。可选 namespace。`,
+		description: `执行记忆库维护：仅对内容完全一致的重复项自动归档（保留 citation）；内容级近重复（Jaccard 阈值 ${cfg.maintainOpts?.nearDupeThreshold ?? NEAR_DUPE_THRESHOLD}）只产出候选，需确认后再合并；L1 索引核对（存在性全量列出、不裁剪）、生成统计、产出内容高度重叠的合并候选（阈值 ${cfg.maintainOpts?.mergeCandidateThreshold ?? MERGE_CANDIDATE_THRESHOLD}，需人工/模型确认）、冷条目复核（创建超过 ${cfg.maintainOpts?.coldReviewDays ?? COLD_REVIEW_DAYS} 天且热度趋零）。可选 namespace。`,
 		parameters: {
 			namespace: {
 				type: "string",
@@ -533,6 +533,19 @@ export function buildTools(ctx, cfg) {
 							properties: {
 								removed: { ...STR_ARR, required: true },
 								merged: { ...STR_ARR, required: true },
+								nearDuplicates: {
+									type: "array",
+									items: {
+										type: "object",
+										additionalProperties: true,
+										properties: {
+											kind: { type: "string", required: true },
+											a: { type: "string", required: true },
+											b: { type: "string", required: true },
+											similarity: { type: "number", required: true },
+										},
+									},
+								},
 							},
 						},
 						index: {
@@ -588,8 +601,8 @@ export function buildTools(ctx, cfg) {
 		},
 			render: (_args, value) => [{
 				type: "text",
-				text: [`维护完成[${value.namespace}]：去重归档 ${value.report.dedupe?.removed?.length || 0} 条；L1 索引 ${value.report.index?.index_chars || 0} 字符 / 预算 ${value.report.index?.max_chars || 0}（L2=${value.report.index?.facts_listed || 0}、L3=${value.report.index?.sops_listed || 0} 全量列出，不裁剪）`,
-					`合并候选 ${value.report.mergeCandidates?.length || 0} 组；冷条目（>${value.report.cold?.threshold_days || 90} 天零访问）${value.report.cold?.count || 0} 条，建议复核是否已过时`,
+				text: [`维护完成[${value.namespace}]：去重归档 ${value.report.dedupe?.removed?.length || 0} 条（仅内容完全一致）；L1 索引 ${value.report.index?.index_chars || 0} 字符 / 预算 ${value.report.index?.max_chars || 0}（L2=${value.report.index?.facts_listed || 0}、L3=${value.report.index?.sops_listed || 0} 全量列出，不裁剪）`,
+					`近重复候选 ${value.report.dedupe?.nearDuplicates?.length || 0} 组（需确认，未归档）；合并候选 ${value.report.mergeCandidates?.length || 0} 组；冷条目（>${value.report.cold?.threshold_days || 90} 天零访问）${value.report.cold?.count || 0} 条，建议复核是否已过时`,
 					value.report.index?.over_limit ? "⚠️ L1 超预算：请合并/归档或精简 [RULES]" : "",
 				].filter(Boolean).join("\n")
 			}]

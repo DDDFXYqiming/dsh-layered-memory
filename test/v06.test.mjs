@@ -153,3 +153,19 @@ test("memory_write 成功后由 turn/end 自动补齐 sourceSession/sourceSeqs",
 	expect(meta.facts.prov.sourceSession).toBe("sess-9");
 	expect(meta.facts.prov.sourceSeqs).toEqual([42]);
 });
+
+test("[0.6.8] 溯源优先记录本回合的工具结果事件，而不是回合结束事件", async () => {
+	await write({ topic: "prov-tools", entry_type: "fact", content: "带工具结果的溯源" });
+	// 本回合先跑了两条验证命令（tool/result 事件），随后写入记忆
+	fire("session/event", { id: "sess-tr" }, { type: "tool/result", seq: 11 });
+	fire("session/event", { id: "sess-tr" }, { type: "tool/result", seq: 13 });
+	fire("tools/result", {
+		name: "memory_write",
+		agent: { id: "sess-tr" },
+		arguments: { topic: "prov-tools", entry_type: "fact", namespace: "test" },
+	}, { isError: false });
+	fire("session/event", { id: "sess-tr" }, { type: "turn/end", seq: 42 });
+	const meta = JSON.parse(readFileSync(join(root(), "memory-meta.json"), "utf8"));
+	expect(meta.facts["prov-tools"].sourceSeqs).toEqual([11, 13]);
+	expect(meta.facts["prov-tools"].sourceSeqs).not.toContain(42);
+});

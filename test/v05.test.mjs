@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply } from "../lib/index.js";
 import { tokenize, jaccard, BM25Index } from "../src/similarity.js";
+import { snippetAround } from "../src/search.js";
 import { entryHeat } from "../src/store.js";
 
 let memDir;
@@ -106,18 +107,65 @@ test("similarity: tokenize extracts ascii words and cjk bigrams", () => {
 
 // ── 近重复去重与合并候选 ──
 
-test("memory_maintain archives reworded near-duplicate SOPs (content-level)", async () => {
+test("memory_maintain reports reworded near-duplicates as candidates without archiving them", async () => {
 	const sopsDir = join(memDir, "test", "sops");
 	mkdirSync(sopsDir, { recursive: true });
-	// 近重复 = 同一记忆的微编辑副本（≥0.85 Jaccard）→ 自动归档；
-	// 重度改写不在此列（走合并候选报告，见下方测试）。
+	// 内容级近重复（≥0.85 Jaccard）只产候选：[0.6.8] 起程序不再凭相似度自行归档，
+	// 归档决定留给语义确认（词元集合读不出否定、参数与操作顺序）。
 	const body = "DSH 插件安装后需要重启宿主才能生效。插件加载发生在宿主启动阶段，热更新不可用。安装命令是 dsh plugin --profile web add。";
 	writeFileSync(join(sopsDir, "install-a.md"), `# install-a\n\n${body}\n`, "utf8");
 	writeFileSync(join(sopsDir, "install-b.md"), `# install-b\n\n${body.replace("热更新不可用", "热更新不支持")}\n`, "utf8");
 
 	const report = await tool("memory_maintain").execute({ namespace: "test" });
-	expect(report.report.dedupe.removed.length).toBeGreaterThanOrEqual(1);
-	expect(report.report.dedupe.removed[0]).toMatch(/duplicate of install-a/);
+	expect(report.report.dedupe.removed).toHaveLength(0);
+	const candidate = report.report.dedupe.nearDuplicates.find((c) => c.a === "install-a" && c.b === "install-b");
+	expect(candidate).toBeTruthy();
+	expect(candidate.similarity).toBeGreaterThanOrEqual(0.85);
+	expect(candidate.kind).toBe("sop");
+	// 两条都保持活跃：候选不写 archived（meta 文件在从未归档时不存在）
+	const metaPath = join(memDir, "test", "memory-meta.json");
+	const meta = existsSync(metaPath) ? JSON.parse(readFileSync(metaPath, "utf8")) : {};
+	expect(meta.sops?.["install-a"]?.archived ?? false).toBe(false);
+	expect(meta.sops?.["install-b"]?.archived ?? false).toBe(false);
+});
+
+test("parameter, negation and step-order differences are never auto-archived", async () => {
+	const sopsDir = join(memDir, "test", "sops");
+	mkdirSync(sopsDir, { recursive: true });
+	// 三个合成反例：相似度都会越过 0.85，但语义互不等价，因此一条都不许自动归档。
+	// 每对条目带各自的标记句，避免三对之间出现「完全一致」而走精确归档路径。
+	const base = "部署说明：服务监听端口 8080，认证 enabled，执行顺序为先停服务，再复制数据库，最后启动服务。操作前确认备份完整。";
+	const withPort = `${base} 端口档记录。`;
+	const withAuth = `${base} 认证档记录。`;
+	const withOrder = `${base} 顺序档记录。`;
+	writeFileSync(join(sopsDir, "deploy-port-a.md"), `# deploy-port-a\n\n${withPort}\n`, "utf8");
+	writeFileSync(join(sopsDir, "deploy-port-b.md"), `# deploy-port-b\n\n${withPort.replace("8080", "9090")}\n`, "utf8");
+	writeFileSync(join(sopsDir, "deploy-auth-a.md"), `# deploy-auth-a\n\n${withAuth}\n`, "utf8");
+	writeFileSync(join(sopsDir, "deploy-auth-b.md"), `# deploy-auth-b\n\n${withAuth.replace("认证 enabled", "认证 disabled")}\n`, "utf8");
+	writeFileSync(join(sopsDir, "deploy-order-a.md"), `# deploy-order-a\n\n${withOrder}\n`, "utf8");
+	writeFileSync(join(sopsDir, "deploy-order-b.md"), `# deploy-order-b\n\n${withOrder.replace("先停服务，再复制数据库，最后启动服务", "先复制数据库，再停服务，最后启动服务")}\n`, "utf8");
+
+	const report = await tool("memory_maintain").execute({ namespace: "test" });
+	expect(report.report.dedupe.removed).toHaveLength(0);
+	expect(report.report.dedupe.nearDuplicates.length).toBeGreaterThanOrEqual(1);
+	const metaPath = join(memDir, "test", "memory-meta.json");
+	const meta = existsSync(metaPath) ? JSON.parse(readFileSync(metaPath, "utf8")) : {};
+	for (const slug of ["deploy-port-a", "deploy-port-b", "deploy-auth-a", "deploy-auth-b", "deploy-order-a", "deploy-order-b"]) {
+		expect(meta.sops?.[slug]?.archived ?? false).toBe(false);
+	}
+});
+
+test("identical content is still auto-archived (exact duplicates only)", async () => {
+	const sopsDir = join(memDir, "test", "sops");
+	mkdirSync(sopsDir, { recursive: true });
+	// 完全一致 = 含标题在内逐字相同；程序只对这种重复自动归档。
+	const identical = "# dup-title\n\n完全一致的重复条目：同样的正文，同样的命令，同样的结论。\n";
+	writeFileSync(join(sopsDir, "exact-a.md"), identical, "utf8");
+	writeFileSync(join(sopsDir, "exact-b.md"), identical, "utf8");
+
+	const report = await tool("memory_maintain").execute({ namespace: "test" });
+	expect(report.report.dedupe.removed).toHaveLength(1);
+	expect(report.report.dedupe.removed[0]).toMatch(/duplicate of exact-a/);
 });
 
 test("merge candidates are content-based: unrelated names no longer pair up", async () => {
@@ -459,4 +507,30 @@ test("L1 injection into systemPrompt is capped and wrapped in a sentinel", () =>
 	expect(captured.startsWith("<memory_index source=\"user-writable\">")).toBe(true);
 	expect(captured.endsWith("</memory_index>")).toBe(true);
 	expect(captured.length).toBeLessThan(9000);
+});
+
+// ── [0.6.8] 检索改进：复合词拆分索引 + 命中位置摘要 ──
+
+test("tokenize indexes compound identifiers together with their split parts", () => {
+	const tokens = tokenize("dsh-layered-memory");
+	expect(tokens).toContain("dsh-layered-memory");
+	expect(tokens).toContain("layered");
+	expect(tokens).toContain("memory");
+});
+
+test("BM25 finds a hyphenated identifier from its split words", () => {
+	const idx = new BM25Index();
+	idx.addDoc("lm", "记忆插件 dsh-layered-memory 的索引与注入实现");
+	idx.addDoc("other", "完全无关的内容，讲的是显示器接线与分辨率设置");
+	expect(idx.search("layered memory", 3)[0]?.id).toBe("lm");
+	expect(idx.search("dsh-layered-memory", 3)[0]?.id).toBe("lm");
+});
+
+test("snippet shows the hit neighbourhood instead of the document head", () => {
+	const head = "开头是一大段与查询无关的说明文字。".repeat(12);
+	const text = `${head}关键结论：qwen3.8-27b 在 128K 下必须启用 q4 KV 缓存。`;
+	const snippet = snippetAround(text, "q4 KV", 160);
+	expect(snippet).toContain("q4 KV");
+	expect(snippet.startsWith("…")).toBe(true);
+	expect(snippet.length).toBeLessThanOrEqual(165);
 });

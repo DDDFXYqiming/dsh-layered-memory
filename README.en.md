@@ -44,7 +44,7 @@ The agent decides when to read and write memory. The plugin registers one `memor
 | `memory_rollback` | Roll back to the most recent `.history/` snapshot |
 | `memory_expand` | Expand the original events behind sourceSession / sourceSeqs |
 | `memory_stats` | Counts for L2 / L3 / pending / archived and total size |
-| `memory_maintain` | Dedupe, index audit, stats, merge candidates, cold-entry review |
+| `memory_maintain` | Exact dedupe (identical content only), index audit, stats, near-duplicate and merge candidates, cold-entry review |
 | `memory_promote` | Promote project-local experience to the global namespace |
 
 ## Configuration
@@ -54,7 +54,7 @@ The agent decides when to read and write memory. The plugin registers one `memor
 - id: dsh-layered-memory
   config:
     memoryDir: ''              # defaults to <home>/.dsh/memory
-    l1MaxChars: 12288         # character budget for the L1 index; over budget only warns
+    l1MaxChars: 12288         # character budget for the L1 index; over budget folds entries into category entries while rules stay intact
     progressive: true
     defaultNamespace: ''       # fixed namespace; empty lets autoNamespace decide
     autoNamespace: true        # workspace dir name plus git branch; home falls back to default
@@ -64,7 +64,7 @@ The agent decides when to read and write memory. The plugin registers one `memor
     reflectPendingThreshold: 5 # only with autoPending on; 0 disables this rule
     reflectSopsThreshold: 40   # notice when active L3 sops reach this count; 0 disables the rule
     reflectCooldownTurns: 10   # minimum turns between two reflection notices
-    nearDupeThreshold: 0.85    # token-set Jaccard threshold for near-duplicate dedupe
+    nearDupeThreshold: 0.85    # token-set Jaccard threshold for near-duplicate candidates (reported only, never auto-archived)
     mergeCandidateThreshold: 0.45 # merge-candidate report threshold
     minTokensForFuzzy: 12      # shorter content only uses exact-hash dedupe
     heatHalfLifeDays: 14       # access-heat half-life in days

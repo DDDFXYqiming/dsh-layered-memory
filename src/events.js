@@ -62,6 +62,9 @@ export function wireEvents(ctx, cfg, io) {
 	const capturedSequences = new Map(); // agentId -> [{ tool, fails, errorTail, successTail }]
 	const reflectionState = new Map(); // sessionId -> { lastReflectionTurn }
 	const writeProvenance = new Map(); // agentId -> [{ kind, key }]，turn/end 时补 sourceSession/sourceSeqs
+	// [0.6.8] 本回合工具结果事件的 seq。此前溯源只写 turn/end 自身的 seq，memory_expand
+	// 展开后只能看到「回合结束」这个空壳事件，复核不到证明该条目的工具结果。
+	const toolResultSeqs = new Map(); // sessionId -> number[]
 	const turnEndWarned = new Set(); // [0.6.1 N7] 已提醒过的 turn/end 故障类别（同类只 console.warn 一次）
 	const disposers = [];
 	// [0.6.3] 维护节流与一次性诊断状态
@@ -142,6 +145,19 @@ const scheduleImmediate = (fn) => {
 		try { console.warn(msg); } catch { /* console 不可用（非常规宿主）时放弃提醒 */ }
 	};
 	
+	// [0.6.8] 收集本回合的工具结果事件 seq，供 turn/end 写入 sourceSeqs。
+	// 只保留最近 400 条，避免长会话无界增长。
+	disposers.push(ctx.on("session/event", (session, event) => {
+		if (!event || event.type !== "tool/result" || typeof event.seq !== "number") return undefined;
+		const id = String(session?.id ?? "");
+		if (!id) return undefined;
+		const arr = toolResultSeqs.get(id) ?? [];
+		arr.push(event.seq);
+		if (arr.length > 400) arr.splice(0, arr.length - 400);
+		toolResultSeqs.set(id, arr);
+		return undefined;
+	}));
+
 	disposers.push(ctx.on("session/event", (session, event) => {
 		if (!event || event.type !== "turn/end") return undefined;
 		const sessionId = String(session?.id ?? "");
@@ -160,11 +176,17 @@ const scheduleImmediate = (fn) => {
 			return undefined;
 		}
 	
-		// ── 溯源回写：把本次会话 id 与该 turn 的 seq 补进刚写入条目的 meta ──
+		// ── 溯源回写：把本次会话 id 与本回合的工具结果 seq 补进刚写入条目的 meta ──
 		try {
+			const turnToolSeqs = toolResultSeqs.get(sessionId);
+			toolResultSeqs.delete(sessionId);
 			const writes = writeProvenance.get(sessionId);
 			if (Array.isArray(writes) && writes.length) {
-				const seqs = typeof event?.seq === "number" ? [event.seq] : [];
+				// [0.6.8] 优先写本回合的工具结果事件（含证明该条目的实测输出）；
+				// 宿主未提供 tool/result 事件时退回 turn/end 自身 seq（原行为）。
+				const seqs = Array.isArray(turnToolSeqs) && turnToolSeqs.length
+					? [...turnToolSeqs]
+					: (typeof event?.seq === "number" ? [event.seq] : []);
 				for (const w of writes) {
 					try {
 						const wRoot = w.namespace ? nsRoot(cfg.memoryDir, resolveNamespace(cfg, w.namespace)) : root;
@@ -329,6 +351,7 @@ try {
 		capturedSequences.delete(id);
 		reflectionState.delete(id);
 		writeProvenance.delete(id);
+		toolResultSeqs.delete(id);
 		return undefined;
 	}));
 

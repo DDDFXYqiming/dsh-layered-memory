@@ -19,7 +19,7 @@ export const SKILL_CONTENT = `# 记忆管理（DSH 版）
 ### 读取（什么时候查记忆）
 - **新任务开始时**：若任务涉及本机环境、工具配置、特定技术栈、以前做过的类似事 → 先 \`memory_list\` 看有什么，再 \`memory_read\` 取相关条目
 - **遇到困难/踩坑时**：\`memory_search\` 全文检索（含已归档条目），比按文件名猜准得多
-- **模型提示词中的记忆索引（memory:index）**：每轮可见的 L1 存在性索引——看到相关触发词就应主动 \`memory_read\`/\`memory_list\` 取细节
+- **模型提示词中的记忆索引（memory:index）**：每轮可见的 L1 存在性索引——看到相关触发词就应主动 \`memory_read\`/\`memory_list\` 取细节；条目极多时注入视图按分类入口折叠（规则段不受影响），完整列表始终在 index.txt
 
 ### 写入（什么时候沉淀记忆）
 ${WRITE_POLICY}
@@ -41,7 +41,7 @@ ${WRITE_POLICY}
 
 ### 维护与检索
 - 可启用 \`reflectionMode: auto\`，由独立 DSH 子任务完成有限范围整理；不要求主会话先整理全库。条目数量只触发检查，不是必须压低的目标；零修改是有效结论。
-- \`memory_maintain\`：内容级近重复去重（词元集合 Jaccard 阈值可配，默认 0.85）、L1 索引核对（**全量列出，不裁剪**）、统计、合并候选（默认 0.45）、冷条目复核（默认 >90 天零访问）——阈值均可在 Config 调整
+- \`memory_maintain\`：只对内容完全一致的重复项自动归档；内容级近重复（词元集合 Jaccard 默认 0.85）与合并候选（默认 0.45）只产出待确认项，语义确认后才合并；L1 索引核对（**全量列出，不裁剪**）、统计、冷条目复核（默认 >90 天零访问）——阈值均可在 Config 调整
 - 也可配置 \`maintainEveryTurns\` 自动触发（计数持久化，跨会话累计）
 - \`memory_search\`：BM25 全文检索（含归档）；\`all_namespaces=true\` 跨库检索
 - \`memory_promote\`：把项目局部经验提升为全局（default）记忆
@@ -82,7 +82,7 @@ ${WRITE_POLICY}
 | \`memory_rollback\` | 回滚到最近历史快照 |
 | \`memory_expand\` | 展开 sourceSession/sourceSeqs 原始事件 |
 | \`memory_stats\` | 查看统计 |
-| \`memory_maintain\` | 去重/索引核对/统计/合并候选/冷条目复核 |
+| \`memory_maintain\` | 精确去重/索引核对/统计/近重复与合并候选/冷条目复核 |
 | \`memory_promote\` | 跨命名空间提升记忆 |
 
 ## 原则

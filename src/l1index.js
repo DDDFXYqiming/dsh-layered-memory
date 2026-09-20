@@ -11,12 +11,12 @@ export const L1_MAX_CHARS_DEFAULT = 12288;
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteFileSync } from "./atomic-write.js";
-import { AUTO_BEGIN, AUTO_END, INDEX_TEMPLATE } from "./templates.js";
+import { AUTO_BEGIN, AUTO_END, INDEX_TEMPLATE, migrateIndexPolicy } from "./templates.js";
 import { activeEntries } from "./store.js";
 
 export function readIndex(root) {
 	try {
-		return readFileSync(join(root, "index.txt"), "utf8");
+		return migrateIndexPolicy(readFileSync(join(root, "index.txt"), "utf8"));
 	} catch {
 		return "";
 	}
@@ -44,7 +44,7 @@ function readIndexSections(root) {
 	let head = INDEX_TEMPLATE.slice(0, templateBegin);
 	let tail = INDEX_TEMPLATE.slice(templateEnd + AUTO_END.length);
 	try {
-		const cur = readFileSync(join(root, "index.txt"), "utf8");
+		const cur = migrateIndexPolicy(readFileSync(join(root, "index.txt"), "utf8"));
 		const b = cur.indexOf(AUTO_BEGIN);
 		const e = cur.indexOf(AUTO_END);
 		if (b >= 0 && e > b) {

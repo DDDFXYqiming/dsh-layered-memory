@@ -1,6 +1,6 @@
 {
   "name": "dsh-layered-memory",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "description": "DSH 跨会话长期记忆：命名空间隔离 + L1 索引注入（存在性编码）+ 行动验证写入 + 内容级近重复去重 + BM25 全文检索 + 跨命名空间提升 + 自动蒸馏候选 + 溯源/归档/回滚 + 自动维护。",
   "type": "module",
   "main": "lib/index.js",
@@ -22,7 +22,8 @@
   "scripts": {
     "build": "node -e \"const fs=require('fs'),p=require('path');let fail=0;for(const f of fs.readdirSync('src')){if(!f.endsWith('.js'))continue;try{require('node:child_process').execFileSync(process.execPath,['--check',p.join('src',f)],{stdio:'pipe'})}catch(e){fail=1;console.error(e.stderr.toString())}};for(const f of ['lib/index.js']){try{require('node:child_process').execFileSync(process.execPath,['--check',f],{stdio:'pipe'})}catch(e){fail=1;console.error(e.stderr.toString())}};process.exit(fail)\"",
     "check:lib": "node --check lib/index.js",
-    "test": "pnpm build && vitest run",
+    "test": "pnpm build && vitest run && node --test test/maintenance-agent.node.mjs",
+    "test:maintenance": "node --test test/maintenance-agent.node.mjs",
     "check": "pnpm test",
     "test:smoke": "dsh --profile headless --dump-config"
   },

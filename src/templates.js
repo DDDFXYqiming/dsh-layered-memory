@@ -33,10 +33,22 @@ ROI = (不放这个词的犯错概率 × 代价) / 每轮词数成本。
 - 其余（常识/易变/未验证）→ 不存
 `;
 
+export const LEGACY_WRITE_POLICY = "任务完成且【行动验证成功】时主动 memory_write 沉淀（无需等用户提醒；无验证信息则不写）";
+export const WRITE_POLICY = "仅在获得已验证、未来可复用的新信息或已有记忆确需纠正时主动 memory_write；普通任务完成、例行检查成功、重复确认已有事实不构成写入理由。已有条目能覆盖时不新增；无值得保存的信息就直接结束，无需额外调用记忆工具。";
+
+/** 精确迁移旧版头部指令；保留 AUTO 段、用户规则与其他手写内容。 */
+export function migrateIndexPolicy(text) {
+	const s = String(text ?? "");
+	const auto = s.indexOf(AUTO_BEGIN);
+	const rules = s.indexOf("[RULES]");
+	const boundary = auto >= 0 ? auto : rules >= 0 ? rules : s.length;
+	return s.slice(0, boundary).replace(LEGACY_WRITE_POLICY, WRITE_POLICY) + s.slice(boundary);
+}
+
 export const INDEX_TEMPLATE = `# [Memory Index - L1]
 分层记忆: L0规则(memory_management_sop.md) | L1索引(this) | L2事实(facts.md) | L3技能(sops/)
 需要细节时用 memory_read / memory_list 取 L2/L3；新增经验用 memory_write（须带证据）
-任务完成且【行动验证成功】时主动 memory_write 沉淀（无需等用户提醒；无验证信息则不写）
+${WRITE_POLICY}
 记忆工具不在列表里时先调用 memory_activate 激活（L1 常驻但工具是渐进暴露的）
 <!-- AUTO-BEGIN -->
 [L2] （facts.md 的条目将在此列出）

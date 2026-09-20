@@ -1,3 +1,5 @@
+import { WRITE_POLICY } from "./templates.js";
+
 // runtime skill「memory」的内容（版本以 package.json 为准）。
 // 注：dsh 插件不是 skill，本文件只是 ctx.skills.register 的运行时内容源，
 // 不使用 Agent Skills 标准的 SKILL.md 文件。
@@ -6,7 +8,7 @@ export const SKILL_NAME = "memory";
 
 export const SKILL_DESCRIPTION = "跨会话长期记忆：读写经验 SOP 与环境事实；全文检索；管理 pending 候选、溯源、归档/回滚、统计与维护。当任务涉及本机环境、工具配置、以前踩过的坑，或任务完成发现值得沉淀的验证经验时使用。";
 
-export const SKILL_WHEN_TO_USE = "新任务开始时需要历史经验/环境事实；任务完成且存在行动验证成功、未来可复用的信息（写入）；记忆索引需要同步；pending 候选需要确认；需要全文检索或跨命名空间提升记忆";
+export const SKILL_WHEN_TO_USE = "新任务开始时需要历史经验/环境事实；获得经过验证、有未来复用价值的信息增量或已有记忆需纠正（写入）；记忆索引需要同步；pending 候选需要确认；需要全文检索或跨命名空间提升记忆";
 
 export const SKILL_CONTENT = `# 记忆管理（DSH 版）
 
@@ -20,7 +22,7 @@ export const SKILL_CONTENT = `# 记忆管理（DSH 版）
 - **模型提示词中的记忆索引（memory:index）**：每轮可见的 L1 存在性索引——看到相关触发词就应主动 \`memory_read\`/\`memory_list\` 取细节
 
 ### 写入（什么时候沉淀记忆）
-任务完成（或阶段完成）且存在**行动验证成功**的信息时，调用 \`memory_write\`：
+${WRITE_POLICY}
 
 **可以写的**（必须带 evidence 证据）：
 - 环境特异性事实：路径、配置、实测参数、工具行为（→ \`entry_type: fact\`）
@@ -38,6 +40,7 @@ export const SKILL_CONTENT = `# 记忆管理（DSH 版）
 - 沉淀经验的主路径因此是主动 \`memory_write\`（带证据）；\`memory_pending\`/\`memory_accept\` 仍可用于人工登记的候选。
 
 ### 维护与检索
+- 可启用 \`reflectionMode: auto\`，由独立 DSH 子任务完成有限范围整理；不要求主会话先整理全库。条目数量只触发检查，不是必须压低的目标；零修改是有效结论。
 - \`memory_maintain\`：内容级近重复去重（词元集合 Jaccard 阈值可配，默认 0.85）、L1 索引核对（**全量列出，不裁剪**）、统计、合并候选（默认 0.45）、冷条目复核（默认 >90 天零访问）——阈值均可在 Config 调整
 - 也可配置 \`maintainEveryTurns\` 自动触发（计数持久化，跨会话累计）
 - \`memory_search\`：BM25 全文检索（含归档）；\`all_namespaces=true\` 跨库检索
@@ -68,7 +71,7 @@ export const SKILL_CONTENT = `# 记忆管理（DSH 版）
 |---|---|
 | \`memory_list\` | 列出全部记忆（facts + sops + pending + L1 字符数/预算） |
 | \`memory_read\` | 读取指定记忆（index / fact 主题 / sop 文件名），含溯源 meta 与关联指针 |
-| \`memory_search\` | BM25 全文检索（含归档；可跨命名空间） |
+| \`memory_search\` | BM25 全文检索（含归档；可跨库检索） |
 | \`memory_activate\` | 渐进式暴露兜底：skill 加载后工具未自动出现时调用一次 |
 | \`memory_write\` | 写入记忆（fact/sop，**evidence 必填**；覆盖同名自动快照 .history/；疑似密钥明文与 fact 正文的 "## " 行直接拒绝；返回体附 L0 判据） |
 | \`memory_index\` | 重建 L1 索引自动段（顺带补登记缺失的 memory-meta 记录） |

@@ -7,9 +7,10 @@
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { bumpTurnCounter, nsRoot, resolveNamespace, setEntryMeta, getEntryMeta, slugify } from "./store.js";
-import { computeContentRevision, readReflectionState, writeReflectionState, collectReflectionSignals, decideReflection, isSettledRevision } from "./reflection.js";
+import { computeContentRevision, readReflectionState, writeReflectionState, collectReflectionSignals, decideReflection, isSettledRevision, reflectionBuckets } from "./reflection.js";
 import { runMaintain } from "./maintain.js";
 import { writePending } from "./memory-ops.js";
+import { createMaintenanceRunner } from "./maintenance-agent.js";
 
 /** 从工具结果对象里尽力抽取文本尾部（结构未知，防御式）。 */
 function resultTail(result, max = 200) {
@@ -51,6 +52,12 @@ function buildReflectionText(buckets, signals, cfg) {
  * @param io { resolveRoot, onSkillResult } 依赖回调
  */
 export function wireEvents(ctx, cfg, io) {
+	const maintenance = createMaintenanceRunner(ctx, cfg, {
+		readState: readReflectionState, writeState: writeReflectionState, slugify,
+		maintain: root => runMaintain(root, cfg.l1MaxChars, cfg.maintainOpts),
+		tools: namespace => io.maintenanceTools(namespace),
+	});
+	io.onMaintenanceRunner?.(maintenance);
 	const retryTrackers = new Map(); // agentId -> Map(tool -> { fails, lastErrorTail })
 	const capturedSequences = new Map(); // agentId -> [{ tool, fails, errorTail, successTail }]
 	const reflectionState = new Map(); // sessionId -> { lastReflectionTurn }
@@ -89,11 +96,11 @@ const scheduleImmediate = (fn) => {
 				const kind = a.entry_type === "sop" ? "sop" : "fact";
 				const key = kind === "sop" ? slugify(topic) : topic;
 				const list = writeProvenance.get(String(exec.agent.id)) ?? [];
-				list.push({ kind, key, namespace: String(a.namespace || "") || null });
+				list.push({ kind, key, namespace: maintenance.namespaceFor(exec.agent) ?? (String(a.namespace || "") || null) });
 				writeProvenance.set(String(exec.agent.id), list);
 			}
 		}
-		if (!cfg.autoPending || !exec?.agent?.id) return undefined;
+		if (!cfg.autoPending || !exec?.agent?.id || maintenance.owns(exec.agent)) return undefined;
 		const id = String(exec.agent.id);
 		const toolName = exec.name || "unknown";
 		if (result?.isError) {
@@ -195,7 +202,7 @@ const scheduleImmediate = (fn) => {
 	
 		// ── 周期维护（持久全局计数）──
 try {
-	if (isInteractive && cfg.maintainEveryTurns > 0 && totalTurns > 0 && totalTurns % cfg.maintainEveryTurns === 0) {
+	if ((cfg.reflectionMode === "notify" || !cfg.reflectionEnabled) && isInteractive && cfg.maintainEveryTurns > 0 && totalTurns > 0 && totalTurns % cfg.maintainEveryTurns === 0) {
 		// [0.6.3] runMaintain 实测一次约 1.26s（去重 O(n²) + 重写 index.txt + 写报告）。
 		// 此前它在宿主 Session.append 的同步发布窗口内执行，会拖长该窗口并与其它观察器的
 		// 重入守卫相邻；移到宏任务让本次发布先收口。再加最短间隔节流，避免多会话密集
@@ -226,7 +233,21 @@ try {
 // 3) 投递前二次复核（disposed / 版本是否已被维护解决 / 是否已通知），排队中的过期
 //    提醒不再送达（R6/R7）。
 try {
-	if (isInteractive && sessionId && cfg.reflectionEnabled) {
+	if (isInteractive && sessionId && cfg.reflectionEnabled && cfg.reflectionMode !== "notify") {
+		const prev = reflectionState.get(sessionId) ?? { lastReflectionTurn: -Infinity };
+		const periodic = cfg.maintainEveryTurns > 0 && totalTurns % cfg.maintainEveryTurns === 0;
+		if (periodic || totalTurns - prev.lastReflectionTurn >= cfg.reflectCooldownTurns) {
+			reflectionState.set(sessionId, { lastReflectionTurn: totalTurns });
+			if (periodic || readReflectionState(root).agentStatus === "deferred" || reflectionBuckets(collectReflectionSignals(root), cfg).length) {
+				const namespace = resolveNamespace(cfg); // freeze namespace with this root
+				scheduleImmediate(() => {
+					if (disposed) return;
+					const parent = ctx.get("agents")?.get?.(sessionId);
+					void maintenance.request(root, namespace, parent).catch(err => warnOnce("maintenance-agent", "独立记忆维护", err));
+				});
+			}
+		}
+	} else if (isInteractive && sessionId && cfg.reflectionEnabled) {
 		const prevReflection = reflectionState.get(sessionId) ?? { lastReflectionTurn: -Infinity };
 		const cooled = totalTurns - prevReflection.lastReflectionTurn >= cfg.reflectCooldownTurns;
 		if (cooled) {
@@ -315,6 +336,7 @@ try {
 		// [0.6.6] 先取消排队中的宏任务，再注销事件订阅：缺这一步时，插件卸载后
 		// 已排队的提醒与周期维护仍会执行（审查 R6/R12）。
 		disposed = true;
+		maintenance.dispose();
 		for (const h of timers) {
 			try { clearTimeout(h); } catch { /* 忽略 */ }
 			try { clearImmediate(h); } catch { /* 忽略 */ }

@@ -35,9 +35,16 @@ export const Config = Schema.object({
 	autoPending: Schema.boolean().default(false),
 	// [0.6.6] 反思提醒总开关（专项审查 F6：此前没有真正的开关——maintainEveryTurns=0
 	// 只关周期维护，autoPending=false 只关自动候选及其通知分支，reflectSopsThreshold=0
-	// 反而是恒真）。关闭它只停「主动向会话投递整理请求」，不影响 L1 注入、检索、读取、
-	// 主动写入与手动 memory_maintain。
+	// 反而是恒真）。关闭它停止提醒或独立模型整理，不影响 L1 注入、检索、读取、
+	// 主动写入、周期程序维护与手动 memory_maintain。
 	reflectionEnabled: Schema.boolean().default(true),
+	// [0.6.7] auto 派发独立维护子任务；首版 opt-in，notify 保持现有安装兼容。
+	reflectionMode: Schema.union([Schema.const("auto"), Schema.const("notify")]).default("notify"),
+	maintenanceProvider: Schema.string().default("spawn"),
+	maintenanceCooldownMinutes: Schema.natural().min(1).default(30),
+	maintenanceTimeoutSeconds: Schema.natural().min(10).default(300),
+	maintenanceMaxCalls: Schema.natural().min(1).default(32),
+	maintenanceMaxWrites: Schema.natural().min(1).default(6),
 	// v0.4 自动维护（v0.5 起计数持久化，跨会话累计触发）
 	// [0.6.1 N4] 轮数/条数阈值属整数语义：natural()（>=0 整数）让 -1/2.5 这类
 	// 无效配置在插件加载期响亮失败（config.zh.md「配置错误要响亮」），与 l1MaxChars 等
@@ -161,6 +168,7 @@ function apply(ctx, config = {}) {
 
 	// ── 工具注册（渐进暴露：progressive 时经 memory_activate 激活）──
 	const allTools = buildTools(ctx, cfg);
+	let maintenanceRunner;
 
 	const disposeAll = (fns) => {
 		for (const fn of [...fns].reverse()) {
@@ -195,6 +203,8 @@ function apply(ctx, config = {}) {
 
 	disposers.push(wireEvents(ctx, cfg, {
 		resolveRoot,
+		onMaintenanceRunner(runner) { maintenanceRunner = runner; },
+		maintenanceTools(namespace) { return buildTools(ctx, { ...cfg, defaultNamespace: namespace, autoNamespace: false }); },
 		onSkillResult(exec, result) {
 			// 激活 memory skill 的既有逻辑
 			if (!result?.isError
@@ -202,7 +212,7 @@ function apply(ctx, config = {}) {
 				&& exec?.agent
 				&& exec?.arguments
 				&& exec.arguments.name === "memory") {
-				activate(exec.agent);
+				if (!maintenanceRunner?.owns(exec.agent)) activate(exec.agent);
 			}
 		},
 	}));
@@ -210,6 +220,7 @@ function apply(ctx, config = {}) {
 	// [0.6.1 N14] agents 经 inject 声明为必需，缺席则插件不加载；`Boolean(agents)`
 	// 降级分支永不可达（死代码），删除。progressive 回归纯配置语义。
 	const progressive = cfg.progressive;
+	if (cfg.reflectionMode === "auto") ctx.tools.register(defineActivateTool(true)); // 独立入口：子任务无法误激活不受限的普通工具。
 	if (progressive) {
 		ctx.tools.register(defineActivateTool());
 		disposers.push(ctx.on("agent/disposed", ({ agent }) => detach(agent)));
@@ -219,11 +230,11 @@ function apply(ctx, config = {}) {
 
 	ctx.logger?.info?.(`[dsh-layered-memory] v0.6 ready; memoryDir=${cfg.memoryDir}; l1MaxChars=${cfg.l1MaxChars}; autoPending=${cfg.autoPending}`);
 
-	function defineActivateTool() {
+	function defineActivateTool(maintenanceOnly = false) {
 		return defineTool({
-			name: "memory_activate",
-			description: "加载 memory skill 后，为当前 Agent 激活记忆工具（memory_read / memory_list / memory_write / memory_search / memory_index / memory_stats / memory_maintain / memory_pending / memory_accept / memory_update / memory_archive / memory_rollback / memory_expand / memory_promote）。skill 加载成功后通常会自动激活；仅当工具未出现时调用一次。",
-			parameters: {},
+			name: maintenanceOnly ? "memory_maintenance_activate" : "memory_activate",
+			description: maintenanceOnly ? "独立维护子任务专用入口；需要插件派发的 maintenance_id，普通任务不要调用。" : "加载 memory skill 后，为当前 Agent 激活记忆工具（memory_read / memory_list / memory_write / memory_search / memory_index / memory_stats / memory_maintain / memory_pending / memory_accept / memory_update / memory_archive / memory_rollback / memory_expand / memory_promote）。skill 加载成功后通常会自动激活；仅当工具未出现时调用一次。",
+			parameters: maintenanceOnly ? { maintenance_id: { type: "string", required: true, description: "插件派发的维护运行标识" } } : {},
 			output: {
 				schema: {
 					type: "object",
@@ -236,8 +247,11 @@ function apply(ctx, config = {}) {
 				},
 				render: (_args, value) => [{ type: "text", text: value.already ? `记忆工具早已激活（无需重复调用）: ${value.tools.join(", ")}` : `记忆工具已激活: ${value.tools.join(", ")}` }]
 			},
-			execute: (_args, exec) => {
+			execute: (args, exec) => {
 				if (!exec.agent) throw new Error("memory_activate: 需要 Agent 会话");
+				if (maintenanceOnly) return Promise.resolve(maintenanceRunner.activate(exec.agent, args.maintenance_id));
+				// 已绑定的维护子任务不能通过省略标识激活不受限工具。
+				if (maintenanceRunner?.owns(exec.agent)) throw new Error("memory_activate: maintenance_id required in a maintenance task");
 				return Promise.resolve(activate(exec.agent));
 			},
 			presentCall: () => ({ card: "generic", title: "激活记忆工具", kind: "execute" })

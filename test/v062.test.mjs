@@ -51,7 +51,7 @@ test("turn/end reflection inject is deferred out of the append publish window an
 		expect(delivered.length).toBe(1);
 		expect(String(delivered[0].content[0].text)).toContain("[记忆整理请求]");
 		expect(String(delivered[0].content[0].text)).toContain("pending 候选已累积 5 条");
-		expect(delivered[0].source).toEqual({ kind: "plugin", plugin: "layered-memory" });
+		expect(delivered[0].source).toEqual({ kind: "plugin:layered-memory" });
 		// 关键断言③：冷却期内下一 turn 不再重复调度（reflectionState 同步更新）
 		eventHandlers["session/event"]({ id: "sess-v062" }, { type: "turn/end", seq: 2 });
 		await new Promise((r) => setTimeout(r, 10));

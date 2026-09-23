@@ -75,7 +75,7 @@ test("teammate (parentSession) turn/end neither bumps the global counter nor rec
 		expect(typeof msg.id).toBe("string");
 		expect(msg.id.length).toBeGreaterThan(8);
 		expect(msg.role).toBe("user");
-		expect(msg.source).toEqual({ kind: "plugin", plugin: "layered-memory" });
+		expect(msg.source).toEqual({ kind: "plugin:layered-memory" });
 		expect(String(msg.content[0].text)).toContain("[记忆整理请求]");
 	} finally {
 		if (typeof disposer === "function") disposer();

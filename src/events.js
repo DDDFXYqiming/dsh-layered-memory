@@ -297,7 +297,7 @@ try {
 							id: randomUUID(),
 							role: "user",
 							content: [{ type: "text", text: buildReflectionText(decision.buckets, signals, cfg) }],
-							source: { kind: "plugin", plugin: "layered-memory" },
+							source: { kind: "plugin:layered-memory" },
 						};
 						const targetSession = sessionId;
 						scheduleTimeout(() => {

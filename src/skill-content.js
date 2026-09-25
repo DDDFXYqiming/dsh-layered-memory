@@ -17,9 +17,10 @@ export const SKILL_CONTENT = `# 记忆管理（DSH 版）
 ## 触发时机
 
 ### 读取（什么时候查记忆）
-- **新任务开始时**：若任务涉及本机环境、工具配置、特定技术栈、以前做过的类似事 → 先 \`memory_list\` 看有什么，再 \`memory_read\` 取相关条目
+- **新任务开始时**：L1 索引里已有准确条目名 → 直接 \`memory_read\` 取；只知道说法/关键词 → \`memory_search\` 检索；确实要浏览全库目录才 \`memory_list\`
 - **遇到困难/踩坑时**：\`memory_search\` 全文检索（含已归档条目），比按文件名猜准得多
-- **模型提示词中的记忆索引（memory:index）**：每轮可见的 L1 存在性索引——看到相关触发词就应主动 \`memory_read\`/\`memory_list\` 取细节；条目极多时注入视图按分类入口折叠（规则段不受影响），完整列表始终在 index.txt
+- **模型提示词中的记忆索引（memory:index）**：每轮可见的 L1 存在性索引——看到相关触发词就应主动 \`memory_read\` 取细节；条目极多时注入视图按分类入口折叠（规则段不受影响），完整列表始终在 index.txt
+- **超大条目**：\`memory_read\` 自动给 outline + 首尾片段（truncated=true），用 \`from_line\` 续读或 \`full=true\` 取全文，别重复整读
 
 ### 写入（什么时候沉淀记忆）
 ${WRITE_POLICY}
@@ -41,7 +42,7 @@ ${WRITE_POLICY}
 
 ### 维护与检索
 - 可启用 \`reflectionMode: auto\`，由独立 DSH 子任务完成有限范围整理；不要求主会话先整理全库。条目数量只触发检查，不是必须压低的目标；零修改是有效结论。
-- \`memory_maintain\`：只对内容完全一致的重复项自动归档；内容级近重复（词元集合 Jaccard 默认 0.85）与合并候选（默认 0.45）只产出待确认项，语义确认后才合并；L1 索引核对（**全量列出，不裁剪**）、统计、冷条目复核（默认 >90 天零访问）——阈值均可在 Config 调整
+- \`memory_maintain\`：同名同内容的重复 section 自动无损合并；跨条目内容一致（含归一化后一致）与内容级近重复（词元集合 Jaccard 默认 0.85）、合并候选（默认 0.45）都只产出待确认项，语义确认后才合并/归档；L1 索引核对（**全量列出，不裁剪**）、统计、冷条目复核（默认 >90 天零访问）——阈值均可在 Config 调整
 - 也可配置 \`maintainEveryTurns\` 自动触发（计数持久化，跨会话累计）
 - \`memory_search\`：BM25 全文检索（含归档）；\`all_namespaces=true\` 跨库检索
 - \`memory_promote\`：把项目局部经验提升为全局（default）记忆
@@ -70,19 +71,19 @@ ${WRITE_POLICY}
 | 工具 | 用途 |
 |---|---|
 | \`memory_list\` | 列出全部记忆（facts + sops + pending + L1 字符数/预算） |
-| \`memory_read\` | 读取指定记忆（index / fact 主题 / sop 文件名），含溯源 meta 与关联指针 |
+| \`memory_read\` | 读取指定记忆（index / fact 主题 / sop 文件名），含溯源 meta 与关联指针；超大条目给 outline + 首尾片段，可 from_line/to_line 续读或 full=true 全文 |
 | \`memory_search\` | BM25 全文检索（含归档；可跨库检索） |
 | \`memory_activate\` | 渐进式暴露兜底：skill 加载后工具未自动出现时调用一次 |
-| \`memory_write\` | 写入记忆（fact/sop，**evidence 必填**；覆盖同名自动快照 .history/；疑似密钥明文与 fact 正文的 "## " 行直接拒绝；返回体附 L0 判据） |
+| \`memory_write\` | 写入记忆（fact/sop，**evidence 必填**；覆盖同名自动快照 .history/；正文疑似密钥明文与 fact 正文的 "## " 行直接拒绝；evidence 自动逐行引用编码与密钥脱敏；返回体附 L0 判据） |
 | \`memory_index\` | 重建 L1 索引自动段（顺带补登记缺失的 memory-meta 记录） |
 | \`memory_pending\` | 查看重试序列蒸馏候选 |
 | \`memory_accept\` | 接受 pending 候选入正式记忆 |
-| \`memory_update\` | 更新记忆（supersede 保留历史） |
-| \`memory_archive\` | 归档记忆（L1 隐藏、正文保留并在首部写归档横幅，取消归档时自动剥离） |
-| \`memory_rollback\` | 回滚到最近历史快照 |
+| \`memory_update\` | 更新记忆（supersede 保留历史，正文与溯源元数据成对快照；新实测可传 sourceSession/sourceSeqs） |
+| \`memory_archive\` | 归档记忆（L1 隐藏、正文保留并在首部写归档横幅，归档前自动快照）；\`unarchive=true\` 恢复可见性 |
+| \`memory_rollback\` | 回滚到最近历史快照（正文与溯源元数据成对恢复） |
 | \`memory_expand\` | 展开 sourceSession/sourceSeqs 原始事件 |
 | \`memory_stats\` | 查看统计 |
-| \`memory_maintain\` | 精确去重/索引核对/统计/近重复与合并候选/冷条目复核 |
+| \`memory_maintain\` | 同名重复合并/一致与近重复候选/索引核对/统计/合并候选/冷条目复核 |
 | \`memory_promote\` | 跨命名空间提升记忆 |
 
 ## 原则

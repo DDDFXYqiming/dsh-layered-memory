@@ -2,6 +2,38 @@
 
 All notable changes to `dsh-layered-memory` are documented here.
 
+## [0.6.9] - 2026-09-25
+
+修复（交叉审查闭环：误归档、工作区隔离、并发丢写与正文-证据版本一致性）
+
+背景：对基线 `1fc5e56` 的交叉审查用 19 个边界反例复现出四类问题——检索归一化把不同事实判成重复并隐藏、自动命名空间取服务进程启动目录而不是会话工作区、单文件 CAS 之外的「一轮多文件写」仍有丢更新窗口、evidence 与溯源元数据可以绕过正文校验且与正文版本错位。本次按「先防错误写入/错误隐藏/错误选库，再补接口语义」两批落地；所有新约束都只加在会改变「哪些记忆可见、内容是否被换掉」的判据上，正常写入、读取、整理的路径保持原样。
+
+**第一批：防错误写入、错误隐藏、错误选库、并发丢写**
+
+- **去重判定与检索归一化彻底分离**：新增 `exactNormalize()`（只统一换行、去行尾空白与尾部空行，不折叠大小写与正文空白——路径、命令、参数里的大小写与空格是语义）。自动处理只针对同名同内容的重复 section（`upsertFact` 无损合并，多余段先快照）；同名不同内容记 `conflicts` 候选；跨条目内容一致（逐字节相同或归一化后相同）记 `exactDuplicates` 候选，不再自动归档——不同主题名在陈述不同对象的事实，正文一样不代表第二条可以被第一条替代。
+- **evidence 校验收口到所有持久化字段**：证据逐行引用编码（每行 `> `，首行保留 `> 证据: `），含 `## ` 的证据行不再可能被解析成新的 fact section；evidence 与 related 里的疑似密钥自动脱敏为 `[redacted:<pattern>]`（真实证据不陪葬），正文保持响亮拒写；topic 同样过密钥判据。
+- **会话感知命名空间**：`resolveNamespace(cfg, explicit, cwd)` 以会话工作区为准——工具从 `exec.agent.session.header.cwd` 取，prompt 注入从 assembly 的 `context.agent` 取，事件从 `session` 取；显式参数与 `defaultNamespace` 的优先级不变。纯中文/符号目录名不再塌进 `default`（跨项目串库），改用完整路径短 hash 命名空间；旧 `default` 库不迁移。
+- **命名空间写锁 `withNsWriteLock()`**：保护「读取 → 快照 → 正文 → meta → 索引」整轮多文件写（`writeMemory`、archive、rollback、promote、维护），锁内重新读取再计算；同进程可重入，死亡进程/超时的陈旧锁可回收，等待超预算响亮抛错、绝不静默丢写。锁只在实际提交期间持有（毫秒级），不跨模型思考与维护子任务。
+- **名字防护**：SOP slug 折叠碰撞拦截（`Build.A` 与 `Build-A` 映射到同一文件时拒绝覆盖并指路改名；同名不同大小写按宽松归一放行）；保留名（`readme`/`license`/`index`/`l1`/`索引`）写入侧统一拒绝——这些名字写进去也列不出来、读不到。
+
+**第二批：接口语义**
+
+- **正文与元数据成对快照/恢复**：`snapshotEntry()` 同步写 `.meta.json` sidecar（当时的 evidence/sourceSession/sourceSeqs/related/createdAt）；`memory_rollback` 成对恢复，老快照缺 sidecar 时返回 `meta_restored: false` 并保持现状；`memory_archive` 归档前先给当前版本建快照（返回 `history`），「更新 → 归档 → 回滚」不再丢中间版本。
+- **unarchive 与 rollback 分离**：`memory_archive({ unarchive: true })` 只恢复可见性（解除隐藏、剥掉归档横幅，内容不动）；恢复历史版本仍归 `memory_rollback`。
+- **写入即激活**：write/update/accept 覆盖已归档条目时 `archived` 同步复位，与横幅剥离后的新正文保持一致，消除「无横幅却仍隐身」。
+- **related 空数组语义**：未提供参数继承旧关联，明确传 `[]` 清空旧关联。
+- **memory_update 来源契约**：新增 `sourceSession`/`sourceSeqs` 参数——新实测结论传新来源；仅整理措辞时沿用原来源，「证据已换、来源仍旧」的组合给出提示（不阻断）。
+- **自动维护边界**：「必须先读全文再改」挂到是否覆盖已有内容（`memory_write`/`memory_accept` 撞上已有条目才要求，新条目自由写；`memory_read` 截断读取不算读完整）；归档需要具体的「源条目 → 替代条目」依据（替代条目已写入且在其 `related` 中关联源条目，或 `memory_archive` 显式传 `replacement`），写过任意一条别的记忆不再能换到归档资格。
+- **memory_read 分段**：超过约 1.6 万字符的条目默认返回 outline（标题+行号）+ 首尾片段，带 `truncated`/`revision`/`next`；`full: true` 取全文，`from_line`/`to_line` 精确续读。短条目照旧一次完整返回。
+- **memory_expand 事件预算**：单事件文本上限 4000、合计 12000 字符，超出按事件截断并显式标注（替代此前一刀切的 2000 字符截尾）。
+- **L1 注入视图每层保底**：先为每个非空层保留「前缀 + 总条数」的最小入口行，再把剩余预算按层分配给逐条名字与分类聚合；极端预算下层不再整行消失，压缩标注统一可见。
+
+口径修正：`syncIndex` 的「无变化重写」注释改为真实收益（避免维护自激与 revision 抖动）；skill 读取路由改为「已知名字直接 read、不知道名字就 search、要浏览目录才 list」。
+
+回归：新增 `test/v069.test.mjs`（14 例：证据编码与脱敏、写入即激活、related 语义、快照成对恢复、来源契约、碰撞与保留名、分段读取、L1 保底、会话命名空间、写锁、可用性回归），两组去重旧口径断言更新为候选语义。全量 125 项通过（vitest 105 + node --test 20）。
+
+配置语义变化：无。新增工具参数均为可选，默认行为仅在「会错误隐藏条目或写坏内容」的判据上收紧。
+
 ## [0.6.8] - 2026-09-20
 
 修复（维护边界、注入视图与溯源可复核性；承接 0.6.7 的自主整理 `reflectionMode: auto`）

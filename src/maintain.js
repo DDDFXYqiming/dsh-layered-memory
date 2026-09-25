@@ -2,7 +2,7 @@
 // [v0.5] 相似度从"文件名分词 + 精确内容相等"升级为词元集合 Jaccard，
 // 消灭纯名称匹配产生的大量误报（实测 20/20 全错）。
 
-import { existsSync, readFileSync, copyFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteFileSync } from "./atomic-write.js";
 import { recordMaintainOutcome, recordMaintainFailure } from "./reflection.js";
@@ -11,19 +11,19 @@ import {
 	factSections,
 	sopNames,
 	isArchived,
-	setEntryMeta,
 	readFact,
 	readSop,
+	readFactDupes,
+	upsertFact,
 	readMeta,
 	hashText,
-	slugify,
 	computeNamespaceStats,
 	activeEntries,
 	loadAccess,
 	entryHeat,
 } from "./store.js";
 import { syncIndex, readIndex, indexChars, L1_MAX_CHARS_DEFAULT } from "./l1index.js";
-import { normalizeText, tokenize, jaccard } from "./similarity.js";
+import { normalizeText, exactNormalize, tokenize, jaccard } from "./similarity.js";
 
 /** 近重复候选阈值：分词集合 Jaccard 达到该值即列入候选（不自动归档，见 dedupeEntries）。 */
 export const NEAR_DUPE_THRESHOLD = 0.85;
@@ -31,10 +31,6 @@ export const NEAR_DUPE_THRESHOLD = 0.85;
 export const MERGE_CANDIDATE_THRESHOLD = 0.45;
 /** 模糊比对最小词元数：过短内容信号不足，只走精确 hash 去重（防止 "fact 1" vs "fact 2" 这类误判）。 */
 export const MIN_TOKENS_FOR_FUZZY = 12;
-
-function factArchiveText(root, topic) {
-	return `# ${topic}\n\n${readFact(root, topic) ?? ""}\n`;
-}
 
 /** 分词集合（ASCII 词 + 单数字 + CJK bigram）：对中文微编辑比字符 n-gram 更稳健。 */
 function tokenSet(text) {
@@ -74,65 +70,80 @@ function collectNearDuplicates(entries, kind, threshold, minTokens, out) {
 }
 
 /**
- * 去重：程序只归档**内容完全一致**的重复条目；内容级近重复（Jaccard ≥ NEAR_DUPE_THRESHOLD）
- * 仅产出候选，交由受限整理子任务或人工确认后再合并。
- *
- * [0.6.8] 此前 Jaccard ≥ 0.85 直接归档，实测三类反例都会被判成重复：
- * 端口 8080→9090（0.9259）、认证 enabled→disabled（0.9259）、操作顺序对调（1.0000）。
- * 相似度能找出候选，不足以独自决定隐藏哪一条。
+ * [0.6.9] 自动去重判定与检索归一化彻底分离（review 反例：normalizeText 折叠
+ * 大小写与空白后，/srv/App 与 /srv/app、两空格与一空格被判同；且 fact 分支比较的
+ * 是不含主题名的正文，"开发环境构建命令" 与 "生产环境构建命令" 同写 pnpm build
+ * 也会被误判重复而隐藏）。现行判定：
+ *  - 判定重复只用 exactNormalize（换行/行尾空白/尾部空行的明确规范化），不折叠大小写；
+ *  - 只有同名同内容（同一身份）才自动处理——facts.md 同名重复 section 无损合并；
+ *  - 同名不同内容是冲突不是重复：只报告，交人工/维护子任务裁决；
+ *  - 跨条目内容一致（哪怕逐字节相同）只报候选：不同主题名在陈述不同对象的事实，
+ *    正文一样不代表第二条可以被第一条替代。
  */
 export function dedupeEntries(root, opts = {}) {
 	const nearDupe = opts.nearDupeThreshold ?? NEAR_DUPE_THRESHOLD;
 	const minTokens = opts.minTokensForFuzzy ?? MIN_TOKENS_FOR_FUZZY;
-	const report = { removed: [], merged: [], nearDuplicates: [] };
+	const report = { removed: [], merged: [], conflicts: [], exactDuplicates: [], nearDuplicates: [] };
 
-	// ── SOP：第一遍按精确内容 hash 归档完全一致项，第二遍在剩余活跃项间找候选 ──
-	const seenSopHash = new Map();
+	// ── facts：同名重复段处理 + 跨名一致候选 + 近重复候选 ──
+	const seenTopics = new Set();
+	const byExactHash = new Map();
+	const byNormHash = new Map();
+	const liveFacts = new Map();
+	for (const topic of factSections(root)) {
+		if (seenTopics.has(topic)) continue; // 同名重复段只按首次出现处理一次
+		seenTopics.add(topic);
+		const dupes = readFactDupes(root, topic);
+		if (dupes.length > 1) {
+			const hashes = new Set(dupes.map((d) => hashText(exactNormalize(d))));
+			if (hashes.size === 1) {
+				// 同名同内容：无损合并（upsertFact 会先把多余段快照到 .history/）。
+				try {
+					upsertFact(root, topic, dupes[0]);
+					report.merged.push(`fact:${topic}（同名同内容重复段已合并）`);
+				} catch { /* 合并失败保持现状，等下轮 */ }
+			} else {
+				report.conflicts.push({ kind: "fact", name: topic, sections: dupes.length, reason: "同名段内容不同，需人工裁决（未自动合并）" });
+			}
+		}
+		if (isArchived(root, "fact", topic)) continue;
+		const content = readFact(root, topic);
+		if (content === null) continue;
+		const exactHash = hashText(exactNormalize(content));
+		const normHash = hashText(normalizeText(content));
+		if (byExactHash.has(exactHash)) {
+			report.exactDuplicates.push({ kind: "fact", a: byExactHash.get(exactHash), b: topic, match: "exact" });
+		} else if (byNormHash.has(normHash)) {
+			report.exactDuplicates.push({ kind: "fact", a: byNormHash.get(normHash), b: topic, match: "normalized" });
+		} else {
+			byExactHash.set(exactHash, topic);
+			byNormHash.set(normHash, topic);
+		}
+		liveFacts.set(topic, tokenSet(normalizeText(content)));
+	}
+	collectNearDuplicates(liveFacts, "fact", nearDupe, minTokens, report.nearDuplicates);
+
+	// ── sops：跨名一致候选 + 近重复候选（文件名唯一，无同名重复段）──
+	const bySopExact = new Map();
+	const bySopNorm = new Map();
 	const liveSops = new Map();
 	for (const slug of sopNames(root)) {
 		if (isArchived(root, "sop", slug)) continue;
 		const content = readSop(root, slug);
 		if (content === null) continue;
-		const norm = normalizeText(content);
-		const h = hashText(norm);
-		if (seenSopHash.has(h)) {
-			const duplicateOf = seenSopHash.get(h);
-			const ts = Date.now();
-			try {
-				copyFileSync(join(root, "sops", `${slug}.md`), join(root, ARCHIVE_DIR, `sop-${slug}-${ts}.md`));
-			} catch { /* 忽略 */ }
-			setEntryMeta(root, "sop", slug, { archived: true, duplicateOf, archivedAt: new Date().toISOString() });
-			report.removed.push(`sop:${slug} -> duplicate of ${duplicateOf}`);
-			continue;
+		const exactHash = hashText(exactNormalize(content));
+		const normHash = hashText(normalizeText(content));
+		if (bySopExact.has(exactHash)) {
+			report.exactDuplicates.push({ kind: "sop", a: bySopExact.get(exactHash), b: slug, match: "exact" });
+		} else if (bySopNorm.has(normHash)) {
+			report.exactDuplicates.push({ kind: "sop", a: bySopNorm.get(normHash), b: slug, match: "normalized" });
+		} else {
+			bySopExact.set(exactHash, slug);
+			bySopNorm.set(normHash, slug);
 		}
-		seenSopHash.set(h, slug);
-		liveSops.set(slug, tokenSet(norm));
+		liveSops.set(slug, tokenSet(normalizeText(content)));
 	}
 	collectNearDuplicates(liveSops, "sop", nearDupe, minTokens, report.nearDuplicates);
-
-	// ── fact：同样两遍 ──
-	const seenFactHash = new Map();
-	const liveFacts = new Map();
-	for (const topic of factSections(root)) {
-		if (isArchived(root, "fact", topic)) continue;
-		const content = readFact(root, topic);
-		if (content === null) continue;
-		const norm = normalizeText(content);
-		const h = hashText(norm);
-		if (seenFactHash.has(h)) {
-			const duplicateOf = seenFactHash.get(h);
-			const ts = Date.now();
-			try {
-				atomicWriteFileSync(join(root, ARCHIVE_DIR, `fact-${slugify(topic)}-${ts}.md`), factArchiveText(root, topic));
-			} catch { /* 忽略 */ }
-			setEntryMeta(root, "fact", topic, { archived: true, duplicateOf, archivedAt: new Date().toISOString() });
-			report.removed.push(`fact:${topic} -> duplicate of ${duplicateOf}`);
-			continue;
-		}
-		seenFactHash.set(h, topic);
-		liveFacts.set(topic, tokenSet(norm));
-	}
-	collectNearDuplicates(liveFacts, "fact", nearDupe, minTokens, report.nearDuplicates);
 
 	return report;
 }

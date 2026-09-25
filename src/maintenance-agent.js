@@ -123,11 +123,31 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 							if (args.all_namespaces || (args.namespace && args.namespace !== job.namespace)) throw new Error("maintenance: cross-namespace access is disabled");
 							const writing = WRITE_TOOLS.has(def.name);
 							if (writing && job.mutations >= cfg.maintenanceMaxWrites) throw new Error("maintenance: write budget reached; finish now");
-							if (["memory_update", "memory_archive"].includes(def.name)
-								&& !job.reads.has(String(args.topic)) && !job.reads.has(io.slugify(String(args.topic)))) {
+							// [0.6.9] 「必须先读全文再改」挂到"是否覆盖已有内容"，不再只看工具名：
+							// update/archive 恒覆盖；write/accept 仅在撞上已有条目时要求（新条目自由写，
+							// 不给正常沉淀设门槛）。memory_read 读到未截断的完整正文才算读过。
+							const topicStr = String(args.topic ?? "").trim();
+							const topicKey = args.entry_type === "sop" ? io.slugify(topicStr) : topicStr;
+							const topicRead = topicStr && (job.reads.has(topicStr) || job.reads.has(io.slugify(topicStr)));
+							const isUnarchive = def.name === "memory_archive" && args.unarchive === true;
+							const overwrites =
+								def.name === "memory_update"
+								|| (def.name === "memory_archive" && !isUnarchive)
+								|| ((def.name === "memory_write" || def.name === "memory_accept") && topicStr && io.entryExists(job.root, args.entry_type === "sop" ? "sop" : "fact", topicKey));
+							if (overwrites && !topicRead) {
 								throw new Error("maintenance: read this entry in full before changing it");
 							}
-							if (def.name === "memory_archive" && !job.saved) throw new Error("maintenance: save a verified replacement before archiving; count/age alone is not a reason");
+							// [0.6.9] 归档需要具体的「源条目 → 替代条目」依据：替代条目已写入且
+							// 通过 related 关联到源条目（或显式给 replacement 指向已写条目）。
+							// "保存过任意一条别的记忆"不再能换到归档所有已读条目的资格。
+							if (def.name === "memory_archive" && !isUnarchive) {
+								const rep = String(args.replacement ?? "").trim();
+								const linked = topicStr && (job.savedLinks.has(topicStr) || job.savedLinks.has(io.slugify(topicStr)));
+								const explicit = rep && (job.savedKeys.has(rep) || job.savedKeys.has(io.slugify(rep)));
+								if (!linked && !explicit) {
+									throw new Error("maintenance: archiving needs a verified replacement — write the replacement entry first and link the source in its related (or pass replacement pointing at the saved entry); count/age alone is not a reason");
+								}
+							}
 							assertUnchanged(job);
 							const before = job.expectedRevision;
 							const pending = def.execute({ ...args, namespace: job.namespace, ...(def.name === "memory_update" ? { supersede: true } : {}) }, exec);
@@ -140,9 +160,22 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 								throw error;
 							}
 							assertUnchanged(job);
-							if (def.name === "memory_read" && !value?.not_found) job.reads.add(String(args.name));
+							if (def.name === "memory_read" && !value?.not_found && !value?.truncated) job.reads.add(String(args.name));
 							if (writing) job.mutations++;
-							if (["memory_write", "memory_update", "memory_accept"].includes(def.name)) job.saved = true;
+							if (["memory_write", "memory_update", "memory_accept"].includes(def.name) && topicStr) {
+								job.savedKeys.add(topicStr);
+								job.savedKeys.add(io.slugify(topicStr));
+								if (Array.isArray(args.related)) {
+									for (const r of args.related) {
+										const name = String(r ?? "").trim();
+										if (name) { job.savedLinks.add(name); job.savedLinks.add(io.slugify(name)); }
+									}
+								}
+								if (args.replacement) {
+									const name = String(args.replacement).trim();
+									if (name) { job.savedLinks.add(name); job.savedLinks.add(io.slugify(name)); }
+								}
+							}
 							return value;
 						});
 						job.queue = next.catch(() => {});
@@ -176,7 +209,7 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 			if (!provider || provider.inheritsParentContext !== false || !provider.capabilities?.toolFilter || !provider.capabilities?.outputSchema) {
 				throw new Error(`maintenance: enable a fresh-context DSH subagent provider supporting toolFilter/outputSchema '${cfg.maintenanceProvider}'; program maintenance completed, model review not executed`);
 			}
-			job = { id, root, namespace, parentId: parent.session.id, controller: new AbortController(), expectedRevision: revision(root), calls: 0, mutations: 0, saved: false, reads: new Set(), queue: Promise.resolve(), disposers: [], agentId: null, names: [] };
+			job = { id, root, namespace, parentId: parent.session.id, controller: new AbortController(), expectedRevision: revision(root), calls: 0, mutations: 0, savedKeys: new Set(), savedLinks: new Set(), reads: new Set(), queue: Promise.resolve(), disposers: [], agentId: null, names: [] };
 			jobs.set(id, job);
 			timer = setTimeout(() => job.controller.abort(new Error("maintenance: timeout")), cfg.maintenanceTimeoutSeconds * 1000);
 			timer.unref?.();
@@ -184,9 +217,9 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 				"你是独立的记忆维护子任务。只处理下面命名空间，不执行父会话任务。",
 				`首先调用 memory_maintenance_activate({maintenance_id:${JSON.stringify(id)}})，然后使用返回的记忆工具。`,
 				`命名空间：${namespace}。最多 ${cfg.maintenanceMaxCalls} 次工具调用、${cfg.maintenanceMaxWrites} 次写操作。`,
-				"程序维护已经完成。程序只在内容完全一致时自动归档，相似度候选一律交给你判断。请自行判断并完成必要的语义整理，而不是只列建议或请求用户确认。",
+				"程序维护已经完成。程序只自动合并同名同内容的重复段；跨条目内容一致与相似度候选一律交给你判断。请自行判断并完成必要的语义整理，而不是只列建议或请求用户确认。",
 				"先检查报告中的候选/超预算/待确认项；没有候选时，可用一次 memory_list 查看名称，只抽查明确相关的少量条目。不要全库逐条读取。",
-				"必须先读完整原文再修改。保留已验证事实、条件差异、证据和来源；不确定的冲突保持并列，不靠猜测覆盖。合并先写好替代条目并验证，再归档源条目。",
+				"必须先读完整原文再修改。保留已验证事实、条件差异、证据和来源；不确定的冲突保持并列，不靠猜测覆盖。合并先写好替代条目并验证，再归档源条目；归档源条目时在替代条目的 related 里关联源条目（或 memory_archive 传 replacement），否则归档会被拒绝。",
 				"条目数量不是压缩目标，年龄或低访问量不是归档理由。没有值得改的内容就正常结束，零写入是有效结果。",
 				"只复用原记忆的已验证证据；本次维护没有执行外部验证，不得伪造新证据。不要把维护过程或完成总结写成新记忆。",
 				"pending 只接受确有复用价值且证据充分的内容，其余保留不动。索引仍超预算且无法安全缩减时说明待复核，不强行删掉有效信息。",

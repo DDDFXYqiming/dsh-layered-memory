@@ -5,9 +5,24 @@
 // 分词策略：ASCII 词元（≥2 位）+ 单个数字（端口/版本等区分性重要）+ CJK bigram。
 // 中文没有空格边界，bigram 是无模型条件下最稳的召回单元。
 
-/** 规范化文本：小写、压缩空白。 */
+/** 规范化文本：小写、压缩空白。只用于检索/相似度评分，**不用于"是否同一内容"的归档判定**。 */
 export function normalizeText(text) {
 	return String(text ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
+ * [0.6.9] 精确内容比较的唯一规范化（自动去重判定专用）：统一换行、去行尾空白、
+ * 去尾部空行。不折叠大小写、不合并正文空白——路径、命令、参数里的大小写与空格
+ * 都是语义（/srv/App 与 /srv/app 是两个目录）。这与 normalizeText（检索用）分离：
+ * 适合搜索的归一化不适合决定某条记忆是否可以被隐藏。
+ */
+export function exactNormalize(text) {
+	return String(text ?? "")
+		.replace(/\r\n?/g, "\n")
+		.split("\n")
+		.map((line) => line.replace(/[ \t]+$/, ""))
+		.join("\n")
+		.replace(/\n+$/, "");
 }
 
 /** 混合分词：ASCII 词 + 单个数字 + CJK bigram。用于 BM25 检索与 Jaccard。 */

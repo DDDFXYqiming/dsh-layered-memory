@@ -33,18 +33,18 @@ dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
 | 工具 | 用途 |
 |---|---|
 | `memory_list` | 列出全部记忆（L2 facts + L3 sops + pending + L1 字符数/预算） |
-| `memory_read` | 读取指定记忆（index / fact 主题 / sop 文件名），返回溯源 meta 与 related 关联指针 |
+| `memory_read` | 读取指定记忆（index / fact 主题 / sop 文件名），返回溯源 meta 与 related 关联指针；超大条目自动给 outline + 首尾片段，可 `full` 取全文或 `from_line`/`to_line` 续读 |
 | `memory_search` | BM25 全文检索（含已归档条目；`all_namespaces` 跨库） |
-| `memory_write` | 写入记忆（fact/sop，evidence 必填；撞名自动快照旧版本；拒密钥明文） |
+| `memory_write` | 写入记忆（fact/sop，evidence 必填；撞名自动快照旧版本；evidence 逐行引用编码并自动脱敏疑似密钥；正文拒密钥明文） |
 | `memory_index` | 重建 L1 索引自动段（保留 [RULES] 手动段） |
 | `memory_pending` | 查看重试序列蒸馏候选（同工具先失败后成功） |
 | `memory_accept` | 接受 pending 候选入正式记忆 |
-| `memory_update` | 更新记忆（supersede 保留历史快照） |
-| `memory_archive` | 归档记忆（从 L1 与 `memory_read` 隐藏，文件原地不搬，检索仍可命中） |
-| `memory_rollback` | 回滚到 `.history/` 中最近快照 |
+| `memory_update` | 更新记忆（supersede 保留历史快照，正文与溯源元数据成对保存；新实测可传 `sourceSession`/`sourceSeqs`，仅整理措辞则沿用原来源） |
+| `memory_archive` | 归档记忆（从 L1 与 `memory_read` 隐藏，文件原地不搬，检索仍可命中，归档前自动快照）；`unarchive: true` 恢复可见性 |
+| `memory_rollback` | 回滚到 `.history/` 中最近快照（正文与溯源元数据成对恢复） |
 | `memory_expand` | 展开 sourceSession/sourceSeqs 对应的原始事件 |
 | `memory_stats` | 统计 L2/L3/pending/archived 与占用 |
-| `memory_maintain` | 精确去重（仅内容完全一致）、索引核对、统计、近重复与合并候选、冷条目复核 |
+| `memory_maintain` | 同名重复合并、一致与近重复候选、索引核对、统计、合并候选、冷条目复核 |
 | `memory_promote` | 跨命名空间提升（项目局部经验升为全局） |
 
 ## 配置
@@ -57,7 +57,7 @@ dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
     l1MaxChars: 12288         # L1 索引的字符预算；超预算时注入视图按分类入口折叠条目，规则段完整保留
     progressive: true
     defaultNamespace: ''       # 固定默认命名空间，留空则由 autoNamespace 决定
-    autoNamespace: true        # 默认取 workspace 目录名加 git 分支名，家目录归 default
+    autoNamespace: true        # 默认取会话工作区的目录名加 git 分支名（exec.agent.session.header.cwd），家目录归 default
     autoPending: false         # 默认关闭：候选绝大多数是工具用法噪声，长期无人消费
     maintainEveryTurns: 20     # 每 N 轮自动维护一次，计数跨会话累计
     reflectionEnabled: true    # 反思提醒总开关，false 只停主动投递
@@ -66,7 +66,7 @@ dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
     reflectCooldownTurns: 10   # 两次反思注入之间的最小轮数
     nearDupeThreshold: 0.85    # 近重复候选的词元集合 Jaccard 阈值（只报告，不自动归档）
     mergeCandidateThreshold: 0.45 # 合并候选报告阈值
-    minTokensForFuzzy: 12      # 低于该词元数的内容只走精确 hash 去重
+    minTokensForFuzzy: 12      # 低于该词元数的内容只走精确内容比较（不折叠大小写与空白）
     heatHalfLifeDays: 14       # 访问热度半衰期（天）
     recencyWindowDays: 7       # 新条目无访问时的 recency 保护窗口（天）
     coldReviewDays: 90         # 冷条目复核窗口，默认 90 天

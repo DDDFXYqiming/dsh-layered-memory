@@ -98,8 +98,11 @@ function apply(ctx, config = {}) {
 	// 懒创建新命名空间不受影响。
 	const ensuredRoots = new Set();
 
-	const resolveRoot = () => {
-		const ns = resolveNamespace(cfg);
+	// [0.6.9] cwd 入参：命名空间按会话工作区解析（prompt 注入取 assembly 的
+	// context.agent.session.header.cwd，工具取 exec.agent.session.header.cwd）；
+	// 不传时回退服务进程启动目录（加载期初始化、无会话装配的兜底）。
+	const resolveRoot = (cwd) => {
+		const ns = resolveNamespace(cfg, undefined, cwd);
 		const root = nsRoot(cfg.memoryDir, ns);
 		if (!ensuredRoots.has(root)) {
 			try {
@@ -147,9 +150,10 @@ function apply(ctx, config = {}) {
 		disposers.push(sysPrompt.context({
 			name: "memory:index",
 			order: 10,
-			text: () => {
+			text: (context) => {
 				try {
-					return sanitizeIndexForPrompt(readIndex(resolveRoot()));
+					// [0.6.9] 会话感知：注入哪个库由当前 agent 的会话工作区决定。
+					return sanitizeIndexForPrompt(readIndex(resolveRoot(context?.agent?.session?.header?.cwd)));
 				} catch {
 					return "";
 				}

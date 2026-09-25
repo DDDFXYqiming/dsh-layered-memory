@@ -1,8 +1,8 @@
 // 存储原语：命名空间、目录布局、facts/sops/pending 读写、meta 溯源、访问热度（带衰减）。
 // 本模块不依赖索引逻辑（l1index），保持单向依赖。
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, openSync, writeFileSync, closeSync } from "node:fs";
+import { homedir, hostname } from "node:os";
 import { join, basename } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -18,6 +18,9 @@ export const TURN_STATE_FILE = "turn-state.json";
 
 // [fix 2026-08-20] sops/ 保留名：非 SOP 内容文件不得计入 L3 条目。
 export const SOP_RESERVED_NAMES = new Set(["readme", "license", "index"]);
+// [0.6.9] 写入侧统一保留名（含 L1 索引别名）：这些名字写进去也读不出来（read 的
+// index 分支、sopNames 的过滤都会拦掉），属于"写入即隐身"，写入口直接拒绝。
+export const RESERVED_ENTRY_NAMES = new Set([...SOP_RESERVED_NAMES, "l1", "索引"]);
 // recency 保护窗口：新建条目在窗口内获得加成，避免"写完即隐身"。
 export const RECENCY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 export const RECENCY_BONUS = 1;
@@ -73,17 +76,27 @@ function queryCurrentBranch(cwd) {
  * prompt 装配（systemPrompt.context 的 text 回调）与每次 memory_* 工具执行的
  * 同步路径上，此前无缓存导致每轮 spawn git（正常几十 ms、文件系统挂起时最长
  * 2s timeout），全程阻塞宿主事件循环。TTL 由配置 namespaceCacheTtlMs 控制，0 关闭缓存。
+ * [0.6.9] cwd 改为入参（缺省才回退 process.cwd()）：DSH 的工作区按会话确定
+ * （exec.agent.session.header.cwd），服务进程启动目录只是无会话上下文时的兜底。
  */
-export function detectNamespace(ttlMs = NAMESPACE_CACHE_TTL_MS_DEFAULT, now = Date.now()) {
+export function detectNamespace(ttlMs = NAMESPACE_CACHE_TTL_MS_DEFAULT, now = Date.now(), cwd = process.cwd()) {
 	try {
-		const cwd = process.cwd();
 		// 家目录不是项目：此前实测在 ~/.dsh/memory 下生成了以用户名命名的垃圾命名空间。
 		if (join(cwd).replace(/[\\/]+$/, "") === join(homedir()).replace(/[\\/]+$/, "")) return "default";
 		const hit = nsCache.get(cwd);
 		if (ttlMs > 0 && hit && hit.expires > now) return hit.ns;
 		const base = basename(cwd) || "default";
 		const branch = queryCurrentBranch(cwd);
-		const ns = safeNs(branch ? `${base}__${branch}` : base);
+		// [0.6.9] 纯中文/符号名字经 safeNs 会塌成 "default"（等于跨项目串库）：
+		// 这类名字改用完整路径短 hash 命名空间。旧 default 库不迁移，只是新目录不再落进去。
+		const baseNs = safeNs(base);
+		const anchor = baseNs === "default" && base.toLowerCase() !== "default"
+			? `p${createHash("sha256").update(String(cwd)).digest("hex").slice(0, 8)}`
+			: baseNs;
+		const branchNs = branch ? safeNs(branch) : "";
+		const ns = branchNs && branchNs !== "default"
+			? safeNs(`${anchor}__${branchNs}`)
+			: anchor;
 		if (ttlMs > 0) nsCache.set(cwd, { ns, expires: now + ttlMs });
 		return ns;
 	} catch {
@@ -91,10 +104,10 @@ export function detectNamespace(ttlMs = NAMESPACE_CACHE_TTL_MS_DEFAULT, now = Da
 	}
 }
 
-export function resolveNamespace(cfg, explicit) {
+export function resolveNamespace(cfg, explicit, cwd) {
 	if (explicit) return safeNs(explicit);
 	if (cfg.defaultNamespace) return safeNs(cfg.defaultNamespace);
-	if (cfg.autoNamespace) return detectNamespace(cfg.namespaceCacheTtlMs ?? NAMESPACE_CACHE_TTL_MS_DEFAULT);
+	if (cfg.autoNamespace) return detectNamespace(cfg.namespaceCacheTtlMs ?? NAMESPACE_CACHE_TTL_MS_DEFAULT, Date.now(), cwd ?? process.cwd());
 	return "default";
 }
 
@@ -121,6 +134,28 @@ export function slugify(topic) {
 		.replace(/[^\p{L}\p{N}]+/gu, "-")
 		.replace(/^-+|-+$/g, "");
 	return s.slice(0, 48) || "entry";
+}
+
+/**
+ * [0.6.9] SOP slug 碰撞检查：slugify 会折叠标点并截断 48 字符，不同主题名可能
+ * 映射到同一文件（Build.A vs Build-A、两个长前缀相同的 SOP）。此时覆盖写等于
+ * 用另一条事实替换这条事实。返回冲突的已有主题名；无冲突（含同名覆盖）返回 null。
+ * 比较用"连字符/下划线视为空格 + 小写"的宽松归一，同名不同大小写不算碰撞。
+ */
+export function sopSlugConflict(root, topic, slug) {
+	const p = join(root, "sops", `${slug}.md`);
+	if (!existsSync(p)) return null;
+	try {
+		const head = readFileSync(p, "utf8").split("\n")[0].trim();
+		const m = head.match(/^#\s+(.+)$/);
+		const existingTopic = m ? m[1].trim() : "";
+		if (!existingTopic) return null; // 无标题行的旧文件无法判定，不拦
+		const norm = (s) => s.toLowerCase().replace(/[-_]+/g, " ").trim();
+		if (norm(existingTopic) !== norm(String(topic).trim())) return existingTopic;
+		return null;
+	} catch {
+		return null;
+	}
 }
 
 /** facts.md 的 section 名列表。 */
@@ -202,6 +237,57 @@ export function readMeta(root) {
 }
 
 const SLEEP_BUF = new Int32Array(new SharedArrayBuffer(4));
+
+// ── [0.6.9] 命名空间写锁（跨进程，短持有）────────────────────────────────────
+// casRewrite 是单文件 CAS，能防单文件互相覆盖，但"读取→快照→正文→meta→索引"
+// 这一整轮写不是原子的：两个进程交错执行时，后完成者的 meta/索引可能盖掉先完成者的
+// 正文（独立 worker 实测可复现"只剩 B 的更新"）。所有多文件写流程包这把锁，
+// 锁内重新读取再算，锁外不预计算结果。锁只在实际提交期间持有（毫秒级），
+// 不跨模型思考/维护子任务，锁等待超预算响亮抛错、绝不静默丢写。
+const WRITE_LOCK_FILE = ".write.lock";
+const WRITE_LOCK_STALE_MS = 5_000;
+const WRITE_LOCK_WAIT_MS = 3_000;
+const heldWriteLocks = new Set(); // 同进程重入（同步执行段内不会再开并发写）
+
+/** 命名空间级写锁：fn 内完成一轮多文件读改写。同进程可重入。 */
+export function withNsWriteLock(root, fn, { waitBudgetMs = WRITE_LOCK_WAIT_MS } = {}) {
+	if (heldWriteLocks.has(root)) return fn();
+	const lockPath = join(root, WRITE_LOCK_FILE);
+	const id = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+	const t0 = Date.now();
+	for (;;) {
+		let fd = null;
+		try {
+			fd = openSync(lockPath, "wx");
+			try { writeFileSync(fd, JSON.stringify({ id, pid: process.pid, host: hostname(), at: Date.now() })); } finally { closeSync(fd); fd = null; }
+			break;
+		} catch (error) {
+			if (fd !== null) { try { closeSync(fd); } catch { /* 忽略 */ } }
+			if (error.code !== "EEXIST") throw error;
+			let stale = true;
+			try {
+				const info = JSON.parse(readFileSync(lockPath, "utf8"));
+				let dead = false;
+				try { process.kill(info.pid, 0); } catch (e) { if (e.code === "ESRCH") dead = true; }
+				const age = Date.now() - (Number(info.at) || 0);
+				stale = dead || age > WRITE_LOCK_STALE_MS;
+			} catch { /* 锁文件损坏/半写：视为陈旧可回收 */ }
+			if (stale) { try { rmSync(lockPath, { force: true }); } catch { /* 下轮重试 */ } continue; }
+			if (Date.now() - t0 > waitBudgetMs) {
+				throw new Error(`withNsWriteLock: 命名空间写锁等待超 ${waitBudgetMs}ms（另一进程正在写入），请重试: ${root}`);
+			}
+			Atomics.wait(SLEEP_BUF, 0, 0, 5 + Math.floor(Math.random() * 10));
+		}
+	}
+	heldWriteLocks.add(root);
+	try {
+		return fn();
+	} finally {
+		heldWriteLocks.delete(root);
+		try { rmSync(lockPath, { force: true }); } catch { /* 残留锁按陈旧处理 */ }
+	}
+}
+
 /**
  * 跨进程更新丢失防护：CAS 读改写（无锁无死锁），三段关窗。
  * 1) 暂存：内容先写进唯一下 tmp（rename 的弹药备好，正式文件未动）；
@@ -312,6 +398,11 @@ export function readSop(root, slug) {
 	return existsSync(p) ? readFileSync(p, "utf8") : null;
 }
 
+/** 条目是否已存在（maintenance 的"覆盖已有内容须先读"判据用）。 */
+export function entryExists(root, kind, key) {
+	return kind === "fact" ? readFact(root, key) !== null : readSop(root, key) !== null;
+}
+
 /** facts.md 里所有同名 ## SECTION 的 [start,end) 行区间。 */
 function factSectionSpans(text, topic) {
 	const lines = String(text ?? "").split("\n");
@@ -324,6 +415,20 @@ function factSectionSpans(text, topic) {
 		if (lines[start].slice(3).trim() === topic) spans.push([start, end]);
 	}
 	return spans;
+}
+
+/**
+ * [0.6.9] 读出 facts.md 中同名 topic 的全部重复段正文（按出现顺序）。
+ * 维护侧用它区分"同名同内容"（可合并的重复）与"同名不同内容"（需人工裁决的冲突）。
+ */
+export function readFactDupes(root, topic) {
+	try {
+		const text = readFileSync(join(root, "facts.md"), "utf8");
+		return factSectionSpans(text, topic)
+			.map(([s, e]) => text.split("\n").slice(s + 1, e).join("\n").trim());
+	} catch {
+		return [];
+	}
 }
 
 /**
@@ -372,22 +477,29 @@ export function upsertFact(root, topic, content) {
  * 修复此前"write 静默覆盖且不留历史"的数据丢失缺陷。
  * [0.6.1 N13] 此前失败也静默返回 ""，与「无内容」不可区分——磁盘满/EPERM 会让
  * 上述保护被无声绕过。现失败原因显式返回，由 writeMemory 汇入 advisories 响亮上报。
+ * [0.6.9] 正文与溯源元数据成对快照：写 <base>.meta.json sidecar（当时 evidence/
+ * sourceSession/sourceSeqs/related 的快照），回滚时一起恢复，避免"正文回到旧版、
+ * 证据还是新版"的版本错位。老快照没有 sidecar，恢复时明确标记缺失。
  */
 export function snapshotEntry(root, kind, key) {
 	try {
 		const ts = Date.now();
+		const meta = getEntryMeta(root, kind, key);
+		const metaJson = JSON.stringify(meta ?? { missing: true, note: "本快照创建于元数据成对快照之前" }, null, 2);
 		if (kind === "fact") {
 			const old = readFact(root, key);
 			if (old === null) return { path: "" };
-			const rel = join(HISTORY_DIR, `fact-${slugify(key)}-${ts}.md`);
-			atomicWriteFileSync(join(root, rel), `# ${key}\n\n${old}\n`);
-			return { path: rel };
+			const base = `fact-${slugify(key)}-${ts}`;
+			atomicWriteFileSync(join(root, HISTORY_DIR, `${base}.md`), `# ${key}\n\n${old}\n`);
+			try { atomicWriteFileSync(join(root, HISTORY_DIR, `${base}.meta.json`), metaJson); } catch { /* sidecar 失败不阻断快照 */ }
+			return { path: join(HISTORY_DIR, `${base}.md`) };
 		}
 		const old = readSop(root, key);
 		if (old === null) return { path: "" };
-		const rel = join(HISTORY_DIR, `sop-${key}-${ts}.md`);
-		atomicWriteFileSync(join(root, rel), old);
-		return { path: rel };
+		const base = `sop-${key}-${ts}`;
+		atomicWriteFileSync(join(root, HISTORY_DIR, `${base}.md`), old);
+		try { atomicWriteFileSync(join(root, HISTORY_DIR, `${base}.meta.json`), metaJson); } catch { /* sidecar 失败不阻断快照 */ }
+		return { path: join(HISTORY_DIR, `${base}.md`) };
 	} catch (error) {
 		return { path: "", error: String(error?.message || error) };
 	}
@@ -528,6 +640,23 @@ export function archiveEntryBody(root, kind, key, at = new Date()) {
 	const head = lines.length && lines[0].startsWith("# ") ? lines.shift() : null;
 	const rest = lines.join("\n").replace(/^\n+/, "");
 	atomicWriteFileSync(join(root, "sops", `${key}.md`), `${head ? head + "\n\n" : ""}${archiveBannerLine(at)}\n\n${rest}`);
+	return true;
+}
+
+/**
+ * [0.6.9] 恢复可见性的正文侧：剥掉归档横幅写回（与 archiveEntryBody 对称）。
+ * memory_archive({unarchive:true}) 用；与 rollback（恢复历史版本）语义分开。
+ */
+export function unarchiveEntryBody(root, kind, key) {
+	if (kind === "fact") {
+		const body = readFact(root, key);
+		if (body === null || !hasArchiveBanner(body)) return false;
+		upsertFact(root, key, stripArchiveBanner(body));
+		return true;
+	}
+	const text = readSop(root, key);
+	if (text === null || !hasArchiveBanner(text)) return false;
+	atomicWriteFileSync(join(root, "sops", `${key}.md`), stripArchiveBanner(text));
 	return true;
 }
 

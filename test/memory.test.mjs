@@ -118,7 +118,7 @@ test("memory_index rebuilds L1 auto segment", async () => {
 	expect(readFileSync(join(memDir, "test", "index.txt"), "utf8")).toContain("index-fact");
 });
 
-test("memory_maintain dedupes identical SOP files", async () => {
+test("memory_maintain reports identical SOP files as candidates without archiving", async () => {
 	// create two identical SOPs directly
 	const sopsDir = join(memDir, "test", "sops");
 	await import("node:fs").then((fs) => fs.mkdirSync(sopsDir, { recursive: true }));
@@ -128,8 +128,14 @@ test("memory_maintain dedupes identical SOP files", async () => {
 		fs.writeFileSync(join(sopsDir, "dup-b.md"), content, "utf8");
 	});
 	const report = await tool("memory_maintain").execute({ namespace: "test" });
-	expect(report.report.dedupe.removed.length).toBeGreaterThanOrEqual(1);
-	expect(existsSync(join(memDir, "test", "archive"))).toBe(true);
+	// [0.6.9] 不同名字的条目即使内容逐字节相同也只报候选：不同主题在陈述不同对象的
+	// 事实（开发/生产环境同写一条命令），正文一样不代表可以互相替代而隐藏。
+	expect(report.report.dedupe.removed).toHaveLength(0);
+	expect(report.report.dedupe.exactDuplicates.length).toBeGreaterThanOrEqual(1);
+	const metaPath = join(memDir, "test", "memory-meta.json");
+	const meta = existsSync(metaPath) ? JSON.parse(readFileSync(metaPath, "utf8")) : {};
+	expect(meta.sops?.["dup-a"]?.archived ?? false).toBe(false);
+	expect(meta.sops?.["dup-b"]?.archived ?? false).toBe(false);
 });
 
 test("memory_maintain keeps a complete fitting index and normalizes blank padding", async () => {

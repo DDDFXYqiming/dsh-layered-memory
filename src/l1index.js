@@ -87,7 +87,10 @@ export function syncIndex(root, maxChars = L1_MAX_CHARS_DEFAULT) {
 	const current = existsSync(join(root, "index.txt")) ? readFileSync(join(root, "index.txt"), "utf8") : null;
 	let rewritten = false;
 	if (current !== rebuilt) {
-		// 只在内容真的变化时写盘：无变化的重写会打碎 system prompt 前缀缓存。
+		// 只在内容真的变化时写盘。直接收益是避免 maintenance 自激与 revision 抖动：
+		// computeContentRevision 含 size+mtime，无变化重写会让同内容反复"变更"、
+		// 反思/维护轮询不停被重新触发；顺带保持文件稳定、少一次 I/O。
+		// （API 前缀缓存按实际请求内容前缀匹配，与本机文件 mtime 无关。）
 		atomicWriteFileSync(join(root, "index.txt"), rebuilt);
 		rewritten = true;
 	}
@@ -164,45 +167,75 @@ function parseAutoLine(line) {
 }
 
 /**
- * 渲染 AUTO 段：整行装得下就原样；装不下则逐条保留到预算耗尽，其余折叠成分类入口。
- * 每一行的最终长度都受 room 约束，保证整体不超过注入预算。
+ * [0.6.9] 每层最小保底行：层前缀 + 总条数。预算再紧也不让整层消失——
+ * 保证"模型还能发现这一层存在"比塞满几个具体条目更重要（此前按序消费预算，
+ * 后面的层会被整行省略：1024 字符预算下 37 条 facts 挤掉整个 L3 入口）。
+ */
+function minLayerLine(parsed) {
+	return `${parsed.prefix} 共 ${parsed.names.length} 条`;
+}
+
+/**
+ * 渲染 AUTO 段（每层保底 + 剩余预算展开）：
+ * 1) 先为每个非空层保留"前缀 + 总条数"的最小入口行；
+ * 2) 剩余预算按层顺序把入口升级为逐条名字 + 分类聚合，且不侵占后面层的保底；
+ * 3) 保底都放不下的极端情况：按行填充到预算并显式标注省略。
  */
 function renderAutoSection(autoText, budget) {
+	const rows = autoText.split("\n").filter((l) => l.trim()).map((line) => ({ line, parsed: parseAutoLine(line) }));
+	const minOf = (r) => (r.parsed && r.parsed.names.length ? minLayerLine(r.parsed) : r.line);
+	const minTotal = rows.reduce((s, r) => s + minOf(r).length + 1, 0);
+	if (minTotal > budget) {
+		const out = [];
+		let used = 0;
+		for (const r of rows) {
+			const m = minOf(r);
+			if (used + m.length + 1 > budget) { out.push("…（预算不足，后续层省略）"); break; }
+			out.push(m);
+			used += m.length + 1;
+		}
+		return out.join("\n");
+	}
 	const out = [];
 	let used = 0;
-	const push = (line) => { out.push(line); used += line.length + 1; };
-	for (const line of autoText.split("\n").filter((l) => l.trim())) {
-		const parsed = parseAutoLine(line);
+	for (let i = 0; i < rows.length; i++) {
+		const { line, parsed } = rows[i];
+		const restMin = rows.slice(i + 1).reduce((s, r) => s + minOf(r).length + 1, 0);
+		const room = budget - used - restMin; // 本层可用：为后面层留保底
 		if (!parsed || parsed.names.length === 0) {
-			if (used + line.length + 1 <= budget) push(line);
+			const m = line;
+			out.push(m);
+			used += m.length + 1;
 			continue;
 		}
-		if (used + line.length + 1 <= budget) { push(line); continue; }
-		const room = budget - used;
-		if (room <= parsed.prefix.length + 8) continue; // 连前缀和入口都放不下：本层整行省略
-		// 给"其余按入口聚合"预留空间：否则逐条会把预算吃光，折叠信息反而丢失
-		const reserve = Math.min(200, Math.max(60, Math.floor(room * 0.3)));
-		const kept = [];
-		let len = parsed.prefix.length + 1;
-		for (const name of parsed.names) {
-			const add = (kept.length ? 3 : 0) + name.length;
-			if (len + add + reserve > room) break;
-			kept.push(name);
-			len += add;
-		}
-		const rest = parsed.names.slice(kept.length);
-		let rendered;
-		if (!kept.length) {
-			rendered = `${parsed.prefix} 共 ${parsed.names.length} 条 · 入口：${fitSummary(parsed.names, room - parsed.prefix.length - 12)}`;
-		} else {
-			rendered = `${parsed.prefix} ${kept.join(" | ")}`;
-			if (rest.length) {
-				const summary = fitSummary(rest, Math.max(24, room - rendered.length - 14));
-				rendered += ` | … 其余 ${rest.length} 条按入口聚合：${summary}`;
+		if (line.length + 1 <= room) { out.push(line); used += line.length + 1; continue; }
+		const min = minOf(rows[i]);
+		let rendered = min;
+		if (room > min.length + 8) {
+			// 给"其余按入口聚合"预留空间：否则逐条会把预算吃光，折叠信息反而丢失
+			const reserve = Math.min(200, Math.max(60, Math.floor(room * 0.3)));
+			const kept = [];
+			let len = parsed.prefix.length + 1;
+			for (const name of parsed.names) {
+				const add = (kept.length ? 3 : 0) + name.length;
+				if (len + add + reserve > room) break;
+				kept.push(name);
+				len += add;
 			}
+			const rest = parsed.names.slice(kept.length);
+			if (kept.length) {
+				rendered = `${parsed.prefix} ${kept.join(" | ")}`;
+				if (rest.length) {
+					const summary = fitSummary(rest, Math.max(24, room - rendered.length - 14));
+					rendered += ` | … 其余 ${rest.length} 条按入口聚合：${summary}`;
+				}
+			} else {
+				rendered = `${min} · 入口：${fitSummary(parsed.names, Math.max(12, room - min.length - 8))}`;
+			}
+			if (rendered.length + 1 > room) rendered = min;
 		}
-		if (rendered.length + 1 > room) continue; // 兜底：仍放不下则省略该行
-		push(rendered);
+		out.push(rendered);
+		used += rendered.length + 1;
 	}
 	return out.join("\n");
 }
@@ -243,7 +276,11 @@ export function buildPromptIndex(indexText, maxChars) {
 	const auto = text.slice(b + AUTO_BEGIN.length, e);
 	const tail = text.slice(e);
 	const fixed = head.length + tail.length + INDEX_TRUNCATION_NOTE.length + 2;
-	// 头部+规则段本身已吃满预算：条目只留入口摘要，规则仍不截断。
-	if (fixed >= cap) return `${head}\n${summarizeAutoSection(auto)}\n${tail}`;
+	// 头部+规则段本身已吃满预算：条目只留"共 N 条 · 入口"保底行，规则仍不截断。
+	// 压缩标注在此分支允许溢出标注本身的长度——"压缩原因可见"优先于严格字符对齐。
+	if (fixed >= cap) {
+		const summary = summarizeAutoSection(auto);
+		return `${head}\n${summary}\n${INDEX_TRUNCATION_NOTE}\n${tail}`;
+	}
 	return `${head}\n${renderAutoSection(auto, cap - fixed)}\n${tail}\n${INDEX_TRUNCATION_NOTE}`;
 }

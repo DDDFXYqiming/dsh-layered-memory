@@ -41,7 +41,7 @@ function fixture(t, behavior = async () => {}, options = {}) {
 		},
 	};
 	const ctx = { get: () => options.missing ? undefined : service, logger: { warn: message => warnings.push(message) } };
-	const io = { readState: () => state, writeState: (_root, patch) => state = { ...state, ...patch }, maintain: () => { scans++; return { index: { over_limit: false }, stats: { sops: 52 }, mergeCandidates: [], cold: { threshold_days: 90, count: 1, entries: [{ name: "cold-proof", heat: 0, age_days: 100 }] } }; }, tools: () => tools, slugify: x => x.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-") };
+	const io = { readState: () => state, writeState: (_root, patch) => state = { ...state, ...patch }, maintain: () => { scans++; return { index: { over_limit: false }, stats: { sops: 52 }, mergeCandidates: [], cold: { threshold_days: 90, count: 1, entries: [{ name: "cold-proof", heat: 0, age_days: 100 }] } }; }, tools: () => tools, slugify: x => x.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-"), entryExists: (_root, _kind, key) => readFileSync(join(root, "facts.md"), "utf8").includes(`## ${key}`) };
 	runner = createMaintenanceRunner(ctx, { ...defaults, ...options.cfg }, io);
 	t.after(() => { runner.dispose(); rmSync(root, { recursive: true, force: true }); });
 	return { root, runner, io, ctx, parent, service, get state() { return state; }, get starts() { return starts; }, get scans() { return scans; }, get disposedRuns() { return disposedRuns; }, warnings, run: () => runner.request(root, "test", parent) };
@@ -117,13 +117,22 @@ test("worker cannot access other namespaces or use maintain/promote", async t =>
 	assert.equal((await f.run()).status, "no_action");
 });
 
-test("modification requires a full read; archiving requires saving a replacement", async t => {
+test("modification requires a full read; archiving requires a verified replacement link", async t => {
 	const f = fixture(t, async ({ call }) => {
 		await assert.rejects(call("memory_update", { topic: "original", content: "bad" }), /read this entry/);
+		// [0.6.9] 覆盖判定挂"是否覆盖已有内容"：write 撞上已有条目同样要先读（新条目自由写）
+		await assert.rejects(call("memory_write", { topic: "original", content: "overwrite blind" }), /read this entry/);
+		await call("memory_write", { topic: "fresh-entry", content: "brand new content" });
 		await call("memory_read", { name: "original" });
-		await assert.rejects(call("memory_archive", { topic: "original" }), /save a verified replacement/);
+		// 读过但没有替代条目：归档仍被拒，理由是缺「源条目 → 替代条目」关系
+		await assert.rejects(call("memory_archive", { topic: "original" }), /archiving needs a verified replacement/);
+		// 替代条目已写入且在 related 关联源条目后，归档放行
+		await call("memory_write", { topic: "merged", content: "merged verified fact", related: ["original"] });
+		await call("memory_archive", { topic: "original" });
 	});
-	await f.run(); assert.match(readFileSync(join(f.root, "facts.md"), "utf8"), /verified fact/);
+	// 断言终态可暴露被 run() 吞掉的内部 assertion（behavior 抛错只会变成 status:"failed"）
+	assert.equal((await f.run()).status, "done");
+	assert.match(readFileSync(join(f.root, "facts.md"), "utf8"), /archived/);
 });
 
 test("tool budget aborts runaway workers; cleanup still runs", async t => {

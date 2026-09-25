@@ -33,18 +33,18 @@ The agent decides when to read and write memory. The plugin registers one `memor
 | Tool | Purpose |
 |---|---|
 | `memory_list` | List all memory (L2 facts + L3 sops + pending + L1 chars/budget) |
-| `memory_read` | Read one entry (index / fact topic / sop filename) with provenance meta and `related` links |
+| `memory_read` | Read one entry (index / fact topic / sop filename) with provenance meta and `related` links; oversized entries return an outline plus head/tail excerpts, with `full` and `from_line`/`to_line` for the rest |
 | `memory_search` | BM25 full-text search over facts, sops and archived entries |
-| `memory_write` | Write a memory (fact/sop, evidence required, name collision snapshots the old version) |
+| `memory_write` | Write a memory (fact/sop, evidence required, name collision snapshots the old version; evidence is quoted line by line and suspected secrets in it are redacted; plain-text secrets in the body are refused) |
 | `memory_index` | Rebuild the L1 index auto-segment, keeping the `[RULES]` manual segment |
 | `memory_pending` | List distilled candidates (fail-then-retry sequences) |
 | `memory_accept` | Promote a pending candidate into a real entry |
-| `memory_update` | Update an entry, keeping a history snapshot |
-| `memory_archive` | Archive an entry (hidden from L1 and `memory_read`, file stays in place, still searchable) |
-| `memory_rollback` | Roll back to the most recent `.history/` snapshot |
+| `memory_update` | Update an entry, keeping a history snapshot (body and provenance meta snapshotted together); new measurements can pass `sourceSession`/`sourceSeqs`, wording-only edits inherit the original source |
+| `memory_archive` | Archive an entry (hidden from L1 and `memory_read`, file stays in place, still searchable, current version snapshotted first); `unarchive: true` restores visibility |
+| `memory_rollback` | Roll back to the most recent `.history/` snapshot (body and provenance meta restored together) |
 | `memory_expand` | Expand the original events behind sourceSession / sourceSeqs |
 | `memory_stats` | Counts for L2 / L3 / pending / archived and total size |
-| `memory_maintain` | Exact dedupe (identical content only), index audit, stats, near-duplicate and merge candidates, cold-entry review |
+| `memory_maintain` | Merge same-name duplicate sections, exact/near-duplicate candidates, index audit, stats, merge candidates, cold-entry review |
 | `memory_promote` | Promote project-local experience to the global namespace |
 
 ## Configuration
@@ -57,7 +57,7 @@ The agent decides when to read and write memory. The plugin registers one `memor
     l1MaxChars: 12288         # character budget for the L1 index; over budget folds entries into category entries while rules stay intact
     progressive: true
     defaultNamespace: ''       # fixed namespace; empty lets autoNamespace decide
-    autoNamespace: true        # workspace dir name plus git branch; home falls back to default
+    autoNamespace: true        # session workspace dir name plus git branch (exec.agent.session.header.cwd); home falls back to default
     autoPending: false         # off by default, candidates are mostly tool-usage noise
     maintainEveryTurns: 20     # run auto-maintenance every N turns, counted across sessions
     reflectionEnabled: true    # master switch for reflection notices
@@ -66,7 +66,7 @@ The agent decides when to read and write memory. The plugin registers one `memor
     reflectCooldownTurns: 10   # minimum turns between two reflection notices
     nearDupeThreshold: 0.85    # token-set Jaccard threshold for near-duplicate candidates (reported only, never auto-archived)
     mergeCandidateThreshold: 0.45 # merge-candidate report threshold
-    minTokensForFuzzy: 12      # shorter content only uses exact-hash dedupe
+    minTokensForFuzzy: 12      # shorter content only uses exact content comparison (case and inner whitespace preserved)
     heatHalfLifeDays: 14       # access-heat half-life in days
     recencyWindowDays: 7       # recency protection window for fresh entries
     coldReviewDays: 90         # cold-entry review window in days

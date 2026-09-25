@@ -155,17 +155,36 @@ test("parameter, negation and step-order differences are never auto-archived", a
 	}
 });
 
-test("identical content is still auto-archived (exact duplicates only)", async () => {
+test("identical content across different names is reported as candidate, never auto-archived", async () => {
 	const sopsDir = join(memDir, "test", "sops");
 	mkdirSync(sopsDir, { recursive: true });
-	// 完全一致 = 含标题在内逐字相同；程序只对这种重复自动归档。
+	// [0.6.9] 判定与检索归一化分离：内容逐字节相同但主题名不同也只报候选。
+	// 两个主题名在陈述不同对象的事实，正文一样不代表第二条可以被第一条替代。
 	const identical = "# dup-title\n\n完全一致的重复条目：同样的正文，同样的命令，同样的结论。\n";
 	writeFileSync(join(sopsDir, "exact-a.md"), identical, "utf8");
 	writeFileSync(join(sopsDir, "exact-b.md"), identical, "utf8");
 
 	const report = await tool("memory_maintain").execute({ namespace: "test" });
-	expect(report.report.dedupe.removed).toHaveLength(1);
-	expect(report.report.dedupe.removed[0]).toMatch(/duplicate of exact-a/);
+	expect(report.report.dedupe.removed).toHaveLength(0);
+	const pair = report.report.dedupe.exactDuplicates.find((d) => d.kind === "sop" && d.a === "exact-a" && d.b === "exact-b");
+	expect(pair).toBeTruthy();
+	expect(pair.match).toBe("exact");
+	const metaPath = join(memDir, "test", "memory-meta.json");
+	const meta = existsSync(metaPath) ? JSON.parse(readFileSync(metaPath, "utf8")) : {};
+	expect(meta.sops?.["exact-a"]?.archived ?? false).toBe(false);
+	expect(meta.sops?.["exact-b"]?.archived ?? false).toBe(false);
+});
+
+test("同名同内容的重复 section 自动无损合并，同名不同内容只报冲突", async () => {
+	writeFileSync(join(memDir, "test", "facts.md"), "## 重复主题\n同一段内容\n\n## 重复主题\n同一段内容\n\n## 冲突主题\n甲版本\n\n## 冲突主题\n乙版本\n\n", "utf8");
+	writeFileSync(join(memDir, "test", "memory-meta.json"), JSON.stringify({ facts: {}, sops: {} }), "utf8");
+	const report = await tool("memory_maintain").execute({ namespace: "test" });
+	expect(report.report.dedupe.merged.length).toBeGreaterThanOrEqual(1);
+	expect(report.report.dedupe.conflicts.some((c) => c.name === "冲突主题")).toBe(true);
+	const factsText = readFileSync(join(memDir, "test", "facts.md"), "utf8");
+	// 同名同内容段合并后只剩一个；同名不同内容保持并列，等人工裁决。
+	expect(factsText.split("## 重复主题").length - 1).toBe(1);
+	expect(factsText.split("## 冲突主题").length - 1).toBe(2);
 });
 
 test("merge candidates are content-based: unrelated names no longer pair up", async () => {

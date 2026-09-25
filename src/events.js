@@ -6,7 +6,7 @@
 
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { bumpTurnCounter, nsRoot, resolveNamespace, setEntryMeta, getEntryMeta, slugify } from "./store.js";
+import { bumpTurnCounter, nsRoot, resolveNamespace, setEntryMeta, getEntryMeta, slugify, entryExists } from "./store.js";
 import { computeContentRevision, readReflectionState, writeReflectionState, collectReflectionSignals, decideReflection, isSettledRevision, reflectionBuckets } from "./reflection.js";
 import { runMaintain } from "./maintain.js";
 import { writePending } from "./memory-ops.js";
@@ -53,7 +53,7 @@ function buildReflectionText(buckets, signals, cfg) {
  */
 export function wireEvents(ctx, cfg, io) {
 	const maintenance = createMaintenanceRunner(ctx, cfg, {
-		readState: readReflectionState, writeState: writeReflectionState, slugify,
+		readState: readReflectionState, writeState: writeReflectionState, slugify, entryExists,
 		maintain: root => runMaintain(root, cfg.l1MaxChars, cfg.maintainOpts),
 		tools: namespace => io.maintenanceTools(namespace),
 	});
@@ -169,7 +169,9 @@ const scheduleImmediate = (fn) => {
 		let root;
 		let totalTurns = 0;
 		try {
-			root = io.resolveRoot();
+			// [0.6.9] 事件侧命名空间也取会话自己的工作区（session.header.cwd），
+			// 与文件工具同源；服务进程启动目录只是无会话时的兜底。
+			root = io.resolveRoot(session?.header?.cwd);
 			totalTurns = isInteractive ? bumpTurnCounter(root) : 0;
 		} catch (err) {
 			warnOnce("resolve", "命名空间解析/turn 计数", err);
@@ -261,7 +263,7 @@ try {
 		if (periodic || totalTurns - prev.lastReflectionTurn >= cfg.reflectCooldownTurns) {
 			reflectionState.set(sessionId, { lastReflectionTurn: totalTurns });
 			if (periodic || readReflectionState(root).agentStatus === "deferred" || reflectionBuckets(collectReflectionSignals(root), cfg).length) {
-				const namespace = resolveNamespace(cfg); // freeze namespace with this root
+				const namespace = resolveNamespace(cfg, undefined, session?.header?.cwd); // freeze namespace with this root
 				scheduleImmediate(() => {
 					if (disposed) return;
 					const parent = ctx.get("agents")?.get?.(sessionId);

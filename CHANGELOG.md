@@ -1,6 +1,10 @@
 # Changelog
 
-All notable changes to `dsh-layered-memory` are documented here.
+All notable changes to `@dsh-external/dsh-layered-memory` are documented here.
+
+## [0.7.0] - 2026-09-25
+
+包名对齐 DeepSeek Harness 社区插件命名约定，`dsh-layered-memory` 更名为 `@dsh-external/dsh-layered-memory`，bundle patch 的 `name` 同步更新。条目 id 保持 `dsh-layered-memory`，既有 patch 配置照常匹配；profile 依赖键改用新包名后重新安装。
 
 ## [0.6.9] - 2026-09-25
 

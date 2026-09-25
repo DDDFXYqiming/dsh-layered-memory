@@ -2,4 +2,4 @@
 # 用户可在 profile cordis.patch.yml 中按 id 覆盖 config（裸条目，勿重复 insert）。
 - insert:
     - id: dsh-layered-memory
-      name: 'dsh-layered-memory'
+      name: '@dsh-external/dsh-layered-memory'

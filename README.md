@@ -1,85 +1,85 @@
-简体中文 | [English](README.en.md)
+[简体中文](README.zh.md) | English
 
 # dsh-layered-memory
 
-给 DeepSeek Harness（DSH）装一层跨会话记忆。
+Cross-session memory for DeepSeek Harness (DSH).
 
-DSH 的会话一结束，上下文就清空了。下次回到同一个项目，环境是怎么配的、上次那个报错最后怎么绕过去的，都得重新讲一遍。这个插件把这些信息写成文件留在磁盘上，之后的会话按需取回。
+A DSH session loses its context the moment it ends. Come back to the same project tomorrow and you explain the environment again, and rediscover how you worked around that error last time. This plugin writes that kind of information to files on disk and pulls it back when a later session needs it.
 
-记忆分三层，索引、环境事实、任务经验。工具说明里的 L1、L2、L3 指的就是这三层。
+Memory has three layers: an index, environment facts, and task experience. The L1 / L2 / L3 labels in the tool list below refer to those three.
 
-## 用起来是什么样
+## What it looks like in use
 
-装好之后直接对 Agent 说。
+Once installed, you just tell the agent.
 
-> 这个项目的构建命令是 ```pnpm build && pnpm test~~，测试要跑四十秒，记住。
+> The build command for this project is ```pnpm build && pnpm test~~, and the tests take about forty seconds. Remember that.
 
-它会把这条写进记忆库。第二天新开一个会话，你只说一句"帮我跑一遍测试"，命令它已经知道，不用重新交代。
+It writes the line into the memory store. Open a fresh session the next day and say "run the tests for me", and the command is already known.
 
-反过来也一样。忘了某个服务的启动参数，让它去记忆里找，比翻聊天记录快。
+It works the other way too. If you forget the flags a service needs, ask the agent to look them up in memory instead of scrolling back through old chats.
 
-## 安装
+## Install
 
 ```powershell
 dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
 ```
 
-装好之后 `<home>/.dsh/memory` 下会自动建好目录和模板文件。
+The plugin creates its directories and template files under `<home>/.dsh/memory`.
 
-## 用法
+## Usage
 
-读写记忆的时机由 Agent 判断，插件提供了一个 `memory` skill 和 14 个工具。progressive 模式下这些工具先不出现，Agent 调用一次 `memory_activate` 之后才会挂上。
+The agent decides when to read and write memory. The plugin registers one `memory` skill and 14 tools. Under progressive mode those tools stay hidden until the agent calls `memory_activate` once.
 
-| 工具 | 用途 |
+| Tool | Purpose |
 |---|---|
-| `memory_list` | 列出全部记忆（L2 facts + L3 sops + pending + L1 字符数/预算） |
-| `memory_read` | 读取指定记忆（index / fact 主题 / sop 文件名），返回溯源 meta 与 related 关联指针；超大条目自动给 outline + 首尾片段，可 `full` 取全文或 `from_line`/`to_line` 续读 |
-| `memory_search` | BM25 全文检索（含已归档条目；`all_namespaces` 跨库） |
-| `memory_write` | 写入记忆（fact/sop，evidence 必填；撞名自动快照旧版本；evidence 逐行引用编码并自动脱敏疑似密钥；正文拒密钥明文） |
-| `memory_index` | 重建 L1 索引自动段（保留 [RULES] 手动段） |
-| `memory_pending` | 查看重试序列蒸馏候选（同工具先失败后成功） |
-| `memory_accept` | 接受 pending 候选入正式记忆 |
-| `memory_update` | 更新记忆（supersede 保留历史快照，正文与溯源元数据成对保存；新实测可传 `sourceSession`/`sourceSeqs`，仅整理措辞则沿用原来源） |
-| `memory_archive` | 归档记忆（从 L1 与 `memory_read` 隐藏，文件原地不搬，检索仍可命中，归档前自动快照）；`unarchive: true` 恢复可见性 |
-| `memory_rollback` | 回滚到 `.history/` 中最近快照（正文与溯源元数据成对恢复） |
-| `memory_expand` | 展开 sourceSession/sourceSeqs 对应的原始事件 |
-| `memory_stats` | 统计 L2/L3/pending/archived 与占用 |
-| `memory_maintain` | 同名重复合并、一致与近重复候选、索引核对、统计、合并候选、冷条目复核 |
-| `memory_promote` | 跨命名空间提升（项目局部经验升为全局） |
+| `memory_list` | List all memory (L2 facts + L3 sops + pending + L1 chars/budget) |
+| `memory_read` | Read one entry (index / fact topic / sop filename) with provenance meta and `related` links; oversized entries return an outline plus head/tail excerpts, with `full` and `from_line`/`to_line` for the rest |
+| `memory_search` | BM25 full-text search over facts, sops and archived entries |
+| `memory_write` | Write a memory (fact/sop, evidence required, name collision snapshots the old version; evidence is quoted line by line and suspected secrets in it are redacted; plain-text secrets in the body are refused) |
+| `memory_index` | Rebuild the L1 index auto-segment, keeping the `[RULES]` manual segment |
+| `memory_pending` | List distilled candidates (fail-then-retry sequences) |
+| `memory_accept` | Promote a pending candidate into a real entry |
+| `memory_update` | Update an entry, keeping a history snapshot (body and provenance meta snapshotted together); new measurements can pass `sourceSession`/`sourceSeqs`, wording-only edits inherit the original source |
+| `memory_archive` | Archive an entry (hidden from L1 and `memory_read`, file stays in place, still searchable, current version snapshotted first); `unarchive: true` restores visibility |
+| `memory_rollback` | Roll back to the most recent `.history/` snapshot (body and provenance meta restored together) |
+| `memory_expand` | Expand the original events behind sourceSession / sourceSeqs |
+| `memory_stats` | Counts for L2 / L3 / pending / archived and total size |
+| `memory_maintain` | Merge same-name duplicate sections, exact/near-duplicate candidates, index audit, stats, merge candidates, cold-entry review |
+| `memory_promote` | Promote project-local experience to the global namespace |
 
-## 配置
+## Configuration
 
 ```yaml
-# profile cordis.patch.yml 里的裸条目，覆盖 bundle 行，不要重复 insert
+# a bare entry in the profile cordis.patch.yml, overriding the bundle row; do not duplicate the insert
 - id: dsh-layered-memory
   config:
-    memoryDir: ''              # 默认 <home>/.dsh/memory
-    l1MaxChars: 12288         # L1 索引的字符预算；超预算时注入视图按分类入口折叠条目，规则段完整保留
+    memoryDir: ''              # defaults to <home>/.dsh/memory
+    l1MaxChars: 12288         # character budget for the L1 index; over budget folds entries into category entries while rules stay intact
     progressive: true
-    defaultNamespace: ''       # 固定默认命名空间，留空则由 autoNamespace 决定
-    autoNamespace: true        # 默认取会话工作区的目录名加 git 分支名（exec.agent.session.header.cwd），家目录归 default
-    autoPending: false         # 默认关闭：候选绝大多数是工具用法噪声，长期无人消费
-    maintainEveryTurns: 20     # 每 N 轮自动维护一次，计数跨会话累计
-    reflectionEnabled: true    # 反思提醒总开关，false 只停主动投递
-    reflectPendingThreshold: 5 # 仅 autoPending 开启时生效，0 表示关闭该判据
-    reflectSopsThreshold: 40   # 活跃 L3 SOP 达到该值时报整理提醒，0 表示关闭该判据
-    reflectCooldownTurns: 10   # 两次反思注入之间的最小轮数
-    nearDupeThreshold: 0.85    # 近重复候选的词元集合 Jaccard 阈值（只报告，不自动归档）
-    mergeCandidateThreshold: 0.45 # 合并候选报告阈值
-    minTokensForFuzzy: 12      # 低于该词元数的内容只走精确内容比较（不折叠大小写与空白）
-    heatHalfLifeDays: 14       # 访问热度半衰期（天）
-    recencyWindowDays: 7       # 新条目无访问时的 recency 保护窗口（天）
-    coldReviewDays: 90         # 冷条目复核窗口，默认 90 天
-    namespaceCacheTtlMs: 60000 # autoNamespace 的 git 分支探测缓存 TTL（毫秒）
+    defaultNamespace: ''       # fixed namespace; empty lets autoNamespace decide
+    autoNamespace: true        # session workspace dir name plus git branch (exec.agent.session.header.cwd); home falls back to default
+    autoPending: false         # off by default, candidates are mostly tool-usage noise
+    maintainEveryTurns: 20     # run auto-maintenance every N turns, counted across sessions
+    reflectionEnabled: true    # master switch for reflection notices
+    reflectPendingThreshold: 5 # only with autoPending on; 0 disables this rule
+    reflectSopsThreshold: 40   # notice when active L3 sops reach this count; 0 disables the rule
+    reflectCooldownTurns: 10   # minimum turns between two reflection notices
+    nearDupeThreshold: 0.85    # token-set Jaccard threshold for near-duplicate candidates (reported only, never auto-archived)
+    mergeCandidateThreshold: 0.45 # merge-candidate report threshold
+    minTokensForFuzzy: 12      # shorter content only uses exact content comparison (case and inner whitespace preserved)
+    heatHalfLifeDays: 14       # access-heat half-life in days
+    recencyWindowDays: 7       # recency protection window for fresh entries
+    coldReviewDays: 90         # cold-entry review window in days
+    namespaceCacheTtlMs: 60000 # TTL for the autoNamespace git probe cache, in ms
 ```
 
-## 存储
+## Storage
 
-记忆就是一堆 markdown 文件，没有数据库。默认放在 `<home>/.dsh/memory`。
+Memory is a pile of markdown files, with no database behind it. The default location is `<home>/.dsh/memory`.
 
 ```
 <home>/.dsh/memory/
-├── <namespace>/                非 default 命名空间
+├── <namespace>/                non-default namespace
 │   ├── memory_management_sop.md
 │   ├── index.txt
 │   ├── facts.md
@@ -91,17 +91,17 @@ dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
 │   ├── turn-state.json
 │   ├── file_access_stats.json
 │   └── reflection-state.json
-└── namespace 为 default 时，以上内容兼容地放在此根目录
+└── with namespace default, the same files live at this root
 ```
 
-可以直接备份、进版本库或手改。正文拒绝疑似密钥的明文，证据与关联里的疑似密钥写入时自动脱敏。
+You can back it up, commit it, or edit it by hand. The body refuses text that looks like a plaintext secret; suspected secrets in evidence and related links are redacted on write.
 
-## 更多
+## More
 
-- [设计与调度原理](docs/design.md)
-- [开发与测试](docs/development.md)
-- [更新历史](CHANGELOG.md)
+- [Design and scheduling](docs/design.md) (Chinese)
+- [Development and testing](docs/development.md) (Chinese)
+- [Changelog](CHANGELOG.md)
 
-## 许可
+## License
 
 MIT

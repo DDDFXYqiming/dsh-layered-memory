@@ -94,7 +94,7 @@ dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
 └── namespace 为 default 时，以上内容兼容地放在此根目录
 ```
 
-可以直接备份、进版本库或手改。写入侧会拒绝疑似密钥的明文。
+可以直接备份、进版本库或手改。正文拒绝疑似密钥的明文，证据与关联里的疑似密钥写入时自动脱敏。
 
 ## 更多
 

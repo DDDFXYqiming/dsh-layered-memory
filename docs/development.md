@@ -16,7 +16,7 @@ pnpm 11 有两个行为需要留意，仓库里已经配好。
 ```bash
 pnpm install
 pnpm build        # 对全部 src/*.js 与 lib/index.js 做 node --check，语法门禁
-pnpm test         # vitest 全量回归
+pnpm test         # 全量回归（语法门禁 + vitest + node --test）
 pnpm test:smoke   # dsh --profile headless --dump-config
 ```
 

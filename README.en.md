@@ -94,7 +94,7 @@ Memory is a pile of markdown files, with no database behind it. The default loca
 └── with namespace default, the same files live at this root
 ```
 
-You can back it up, commit it, or edit it by hand. The write path refuses text that looks like a plaintext secret.
+You can back it up, commit it, or edit it by hand. The body refuses text that looks like a plaintext secret; suspected secrets in evidence and related links are redacted on write.
 
 ## More
 

@@ -1041,7 +1041,7 @@ export function buildTools(ctx, cfg) {
 
 	const rollbackTool = defineTool({
 		name: "memory_rollback",
-		description: "回滚一条记忆到 .history/ 中最近一次快照（supersede 时自动保留）。可选 namespace。",
+		description: "回滚一条记忆到 .history/ 中最近一次快照（supersede/归档时自动保留）。正文与溯源元数据（证据、来源、关联）成对恢复，旧快照缺元数据时返回 meta_restored: false 并保持现状。恢复可见性用 memory_archive 的 unarchive，与回滚历史版本是两件事。可选 namespace。",
 		parameters: {
 			topic: {
 				type: "string",

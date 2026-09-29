@@ -2,6 +2,13 @@
 
 All notable changes to `@dsh-external/dsh-layered-memory` are documented here.
 
+## [0.7.1] - 2026-09-29
+
+修复（关联指针规范化 + 遗留文件隔离）
+
+- **related 写入侧规范化**：关联指针的持久化形态是条目 key（fact 的 section 名 / sop 的文件裸名），此前按原样字符串入库，`sops/xxx.md` 这类路径写法会让关联解析永远落空（读取侧按裸 key 匹配）。write/update/accept 共用的 `writeMemory` 单点在入库前剥掉 `sops/`（或 `sops\`）前缀与 `.md` 后缀；其余形式原样保留，不做存在性校验——跨命名空间与尚未创建的条目都是合法关联目标。
+- **遗留 `memory_stats.json` 自动隔离**：该文件是早期版本的访问统计落点，现版本统计在 `file_access_stats.json`，旧文件已无读写路径，留在库里只会误导人工翻库。`ensureNamespaceLayout`（启动与所有工具路径共用的初始化入口）发现它时改名为 `memory_stats.json.legacy`（保底可读，不删除）；隔离目标已存在时删除新出现的遗留件；隔离失败静默跳过，绝不阻断记忆库初始化。
+
 ## [0.7.0] - 2026-09-25
 
 包名对齐 DeepSeek Harness 社区插件命名约定，`dsh-layered-memory` 更名为 `@dsh-external/dsh-layered-memory`，bundle patch 的 `name` 同步更新。条目 id 保持 `dsh-layered-memory`，既有 patch 配置照常匹配；profile 依赖键改用新包名后重新安装。

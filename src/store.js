@@ -1,7 +1,7 @@
 // 存储原语：命名空间、目录布局、facts/sops/pending 读写、meta 溯源、访问热度（带衰减）。
 // 本模块不依赖索引逻辑（l1index），保持单向依赖。
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, openSync, writeFileSync, closeSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, openSync, writeFileSync, closeSync, renameSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join, basename } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -127,6 +127,19 @@ export function ensureNamespaceLayout(root) {
 		const p = join(root, file);
 		if (!existsSync(p)) atomicWriteFileSync(p, content);
 	}
+	// [0.7.1] 遗留文件隔离：memory_stats.json 是早期版本的访问统计落点，现版本
+	// 统计在 file_access_stats.json（ACCESS_FILE），旧文件全代码库零引用，留在库里
+	// 只会误导人工翻库。发现时改名 .legacy 隔离（保底可读，不删除）；目标已存在
+	// 说明隔离过又出现新遗留，直接删新件。隔离失败静默跳过——遗留清理绝不能
+	// 阻断记忆库初始化（本函数在所有工具路径与启动路径上，抛出等于全库不可用）。
+	try {
+		const legacyStats = join(root, "memory_stats.json");
+		if (existsSync(legacyStats)) {
+			const quarantine = join(root, "memory_stats.json.legacy");
+			if (existsSync(quarantine)) rmSync(legacyStats, { force: true });
+			else renameSync(legacyStats, quarantine);
+		}
+	} catch { /* 隔离失败不影响初始化 */ }
 }
 
 export function slugify(topic) {

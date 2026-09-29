@@ -64,6 +64,18 @@ export function redactSecretLines(text) {
 }
 
 /**
+ * [0.7.1] related key 规范化：关联指针是条目 key（fact 的 section 名 / sop 的
+ * 文件裸名），不是路径。实测出现过 `sops/xxx.md` 形式入库，解析侧按裸 key 匹配，
+ * 关联永远显示「目标不存在」。写入侧统一剥掉 `sops/`（或 `sops\`）前缀与 `.md`
+ * 后缀；其余形式原样保留——不做存在性校验，跨命名空间/尚未创建的条目都是合法目标。
+ */
+export function normalizeRelatedKey(value) {
+	return String(value ?? "").trim()
+		.replace(/^sops[/\\]/i, "")
+		.replace(/\.md$/i, "");
+}
+
+/**
  * [0.6.9] evidence 逐行引用编码：每一行都以 "> " 引用（空行用 ">"），
  * 持久化后不可能再被 facts.md 解析成 "## " 新 section。首行保留
  * "> 证据: " 前缀以兼容既有正文字体与人工阅读习惯。
@@ -150,8 +162,9 @@ export function writeMemory(root, {
 		throw new Error("memory_write: evidence 必填（行动验证公理：无行动，不记忆）");
 	}
 	// [0.6.9] related 逐项过滤疑似密钥（引用名不该是凭证明文的旁路）。
+	// [0.7.1] 入库前先规范化为裸 key（剥 sops/ 前缀与 .md 后缀）。
 	const relatedList = Array.isArray(related)
-		? related.map((r) => String(r).trim()).filter(Boolean).filter((r) => !detectSecret(r))
+		? related.map((r) => normalizeRelatedKey(r)).filter(Boolean).filter((r) => !detectSecret(r))
 		: undefined;
 	const wrapped = `${body}\n\n${quoteEvidence(evidenceText)}\n`;
 

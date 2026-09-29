@@ -262,6 +262,26 @@ test("I4 memory_activate：首次激活 activated=true/already=false；重复激
 
 // ── N13/N4/N6：快照失败响亮上报、整数配置响亮校验、L1 预算单源 ──
 
+test("加载 skill 后同一批调用仍可执行已经向模型公开的 memory_activate", async () => {
+	if (typeof disposer === "function") disposer();
+	if (memDir) rmSync(memDir, { recursive: true, force: true });
+	setup({ progressive: true });
+	const denied = new Set();
+	const scoped = new Map();
+	const agent = { id: "activation-race", ctx: { tools: {
+		register(def) { scoped.set(def.name, def); return () => scoped.delete(def.name); },
+		restrict({ deny }) { for (const name of deny) denied.add(name); return () => denied.clear(); },
+	} } };
+	const execute = (name) => {
+		if (denied.has(name)) throw new Error(`unknown tool: ${name}`);
+		return (scoped.get(name) ?? tool(name)).execute({}, { agent });
+	};
+	fire("tools/result", { name: "skill", arguments: { name: "memory" }, agent }, { isError: false });
+	const result = await execute("memory_activate");
+	expect(result).toMatchObject({ activated: true, already: true });
+	expect(result.tools).toContain("memory_read");
+});
+
 test("N13 快照失败显式上报：snapshotEntry 给出错误原因，writeMemory 汇入 advisories", async () => {
 	await write({ topic: "snapfail", entry_type: "fact", content: "第一版" });
 	// .history 目录换成文件：快照写必失败（ENOTDIR/EEXIST 类）

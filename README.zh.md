@@ -28,7 +28,7 @@ dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
 
 ## 用法
 
-读写记忆的时机由 Agent 判断，插件提供了一个 `memory` skill 和 14 个工具。progressive 模式下这些工具先不出现，Agent 调用一次 `memory_activate` 之后才会挂上。
+读写记忆的时机由 Agent 判断，插件提供了一个 `memory` skill 和 14 个工具。progressive 模式下这些工具先不出现，加载 `memory` skill 或调用 `memory_activate` 后激活。激活入口保持可调用，重复调用返回 `already: true`，兼容同一批工具调用先加载技能、再确认激活的情况。
 
 | 工具 | 用途 |
 |---|---|

@@ -188,10 +188,8 @@ function apply(ctx, config = {}) {
 		const ds = [];
 		try {
 			for (const def of allTools) ds.push(agent.ctx.tools.register(def));
-			try {
-				const hide = agent.ctx.tools.restrict({ deny: ["memory_activate"] });
-				if (hide) ds.push(hide);
-			} catch { /* restrict 不可用时保留激活工具 */ }
+			// 保留幂等激活入口。同一批 PTC 调用可能先加载 skill，再调用已经
+			// 向模型公开的 memory_activate；中途限制它会导致 UNKNOWN_TOOL。
 			agentStates.set(agent, ds);
 			return { activated: true, already: false, tools: allTools.map((d) => d.name) };
 		} catch (error) {

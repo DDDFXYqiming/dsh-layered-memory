@@ -10,17 +10,14 @@ Standard coding agents lose their entire context the moment a session closes. Re
 
 ## Architectural Design: The Three Tiers
 
-```
-┌────────────────────────────────────────────────────────┐
-│  Tier 1: Index (L1)                                    │
-│  Compact index dictionary + persistent [RULES] blocks   │
-├────────────────────────────────────────────────────────┤
-│  Tier 2: Facts (L2)                                    │
-│  Deterministic environment constants, ports & flags    │
-├────────────────────────────────────────────────────────┤
-│  Tier 3: Experience / SOPs (L3)                        │
-│  Task procedures, troubleshooting steps, and evidence  │
-└────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Architecture["Three-Tier Memory Architecture"]
+        L1["<b>Tier 1: Index (L1)</b><br/>Compact index dictionary + persistent [RULES] blocks<br/><i>(Token budget auto-folding)</i>"]
+        L2["<b>Tier 2: Facts (L2)</b><br/>Deterministic environment constants, ports & flags"]
+        L3["<b>Tier 3: Experience / SOPs (L3)</b><br/>Task procedures, troubleshooting steps, and evidence<br/><i>(Tagged with session provenance metadata)</i>"]
+        L1 --> L2 --> L3
+    end
 ```
 
 * **L1 Compact Index**: A lightweight table of contents loaded into active context with token budget auto-folding to prevent context bloat.

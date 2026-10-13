@@ -1,1461 +1,333 @@
-// 全部记忆工具定义。工厂函数 buildTools(ctx, cfg) 返回工具定义数组。
-// [v0.5] 新增 memory_search（BM25 全文检索）/ memory_promote（跨命名空间提升）；
-// memory_write/update 支持 related 关联链接；memory_read 回显关联指针。
-
-import { existsSync, readFileSync, readdirSync, copyFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, copyFileSync, rmSync, mkdirSync } from "node:fs";
 import { join, basename } from "node:path";
+import { defineTool } from "@deepseek-ai/dsh-tools";
 import { atomicWriteFileSync } from "./atomic-write.js";
-import { defineTool as defineToolRaw } from "@deepseek-ai/dsh-tools";
 import {
-	PENDING_DIR,
-	ARCHIVE_DIR,
-	HISTORY_DIR,
-	safeNs,
-	nsRoot,
-	resolveNamespace,
-	ensureNamespaceLayout,
-	slugify,
-	factSections,
-	sopNames,
-	pendingNames,
-	readMeta,
-	getEntryMeta,
-	setEntryMeta,
-	isArchived,
-	isSafeMemName,
-	readFact,
-	readSop,
-	upsertFact,
-	archiveEntryBody,
-	unarchiveEntryBody,
-	snapshotEntry,
-	backfillMeta,
-	bumpAccess,
-	computeNamespaceStats,
-	hashText,
+	PENDING_DIR, ARCHIVE_DIR, safeNs, nsRoot, resolveNamespace, ensureNamespaceLayout, slugify,
+	readEntry, readEntries, listEntryHistory, restoreEntry, archiveEntry,
+	withNsWriteLock, withNsWriteLocks, bumpAccess, computeNamespaceStats, pendingNames,
+	readNamespaceIdentity, migrateNamespace, hashText,
 } from "./store.js";
-import { readIndex, syncIndex, indexChars } from "./l1index.js";
-import { writeMemory, readPending, parsePending, assertSafeTopic } from "./memory-ops.js";
-import { runMaintain, NEAR_DUPE_THRESHOLD, MERGE_CANDIDATE_THRESHOLD, COLD_REVIEW_DAYS } from "./maintain.js";
+import { readIndex, readRules, syncIndex, indexChars, buildCombinedPromptIndex, L1_MAX_CHARS_DEFAULT } from "./l1index.js";
+import { writeMemory, readPending, parsePending } from "./memory-ops.js";
+import { runMaintain } from "./maintain.js";
 import { listNamespaces, searchNamespaces } from "./search.js";
 
-const EMPTY_META = { sourceSession: "", sourceSeqs: [], evidence: "", archived: false, createdAt: "", updatedAt: "" };
-
-/**
- * 递归剥离 undefined 值的键，并把非有限数消毒为 null。宿主对工具结果有两条
- * 硬校验：可无损 JSON 往返（显式 undefined 键会被 JSON.stringify 丢弃、
- * Infinity/NaN 会被静默转成 null，二者都使往返值不相等 → 整个结果判死）与
- * output schema 声明一致性。纯文本记忆系统的可用性优先：在出口统一消毒，
- * 任何工具返回值都不再可能因单个字段翻车被整包拒收。
- * [0.6.1 M1] 新增非有限数消毒——Infinity age_days 曾在老库上让 memory_maintain 整包失败。
- */
-function pruneUndefined(value) {
-	if (Array.isArray(value)) return value.map(pruneUndefined);
-	if (value !== null && typeof value === "object") {
-		const out = {};
-		for (const [k, v] of Object.entries(value)) if (v !== undefined) out[k] = pruneUndefined(v);
-		return out;
-	}
-	if (typeof value === "number" && !Number.isFinite(value)) return null;
+const str = { type: "string" }, bool = { type: "boolean" }, num = { type: "integer" };
+const req = schema => ({ ...schema, required: true });
+const obj = properties => ({ type: "object", additionalProperties: false, properties });
+const arr = items => ({ type: "array", items });
+const nullable = schema => ({ oneOf: [schema, { type: "null" }] });
+const record = { type: "object", additionalProperties: true };
+const memoryKind = { type: "string", enum: ["fact", "sop"] };
+const readKind = { type: "string", enum: ["fact", "sop", "archive", "pending", "index", "rules", "policy"] };
+const entrySchema = kind => obj({ namespace: req(str), kind: req(kind), key: req(str) });
+const entryRef = entrySchema(memoryKind), readableRef = entrySchema(readKind);
+const namespaceArg = { ...str, description: "省略时使用当前工作区命名空间；default为全局" };
+const refArg = { ...req(entryRef), description: "直接使用memory_list/search/read返回的entry" };
+const sourceArgs = {
+	sourceSession: { ...str, description: "已有证据所属会话；须与sourceSeqs成对提供" },
+	sourceSeqs: { ...arr(num), description: "精确的来源事件序号，与sourceSession成对提供" },
+	evidence_call_ids: { ...arr(str), description: "本会话中用于验证内容的工具call id（含PTC子调用id）" },
+};
+const mutationOutput = {
+	entry: req(entryRef), changed: req(bool), sourceTouched: req(bool), revision: req(str),
+	action: req(str), history: nullable(str), index: record,
+};
+const jsonRender = (_args, value) => [{ type: "text", text: JSON.stringify(value, null, 2) }];
+function tool(name, description, parameters, properties, execute, readOnly = false, render = jsonRender) {
+	return defineTool({ name, description, parameters, output: { schema: { type: "object", additionalProperties: true, properties }, render },
+		execute, ...(readOnly ? { isConcurrencySafe: () => true } : {}),
+		presentCall: () => ({ card: "generic", title: name, kind: readOnly ? "read" : "execute" }) });
+}
+function ref(value) { return { namespace: safeNs(value.namespace), kind: value.kind, key: value.key }; }
+function mustRead(root, entry) {
+	const value = readEntry(root, entry.kind, entry.key);
+	if (!value) throw new Error(`记忆不存在：${entry.namespace}/${entry.kind}/${entry.key}`);
 	return value;
 }
-
-// ── [0.6.1 M2] 输出契约公共片段 ──
-// v0.5.1 矫枉过正：output.schema 全塌缩为裸开放对象，宿主 PTC 的 ToolOutputMap
-// 由此派生 → 程序化消费方拿不到任何类型化字段。现按「声明稳定字段 +
-// additionalProperties:true 保持开放」补齐：已知字段有类型投影，未来新增字段
-// 仍不会因漂移被拒收。
-const ENTRY_TYPE = { type: "string", enum: ["fact", "sop"] };
-const STR_ARR = { type: "array", items: { type: "string" } };
-const NUM_ARR = { type: "array", items: { type: "number" } };
-const NULLABLE_NUM = { oneOf: [{ type: "number" }, { type: "null" }] };
-const NULLABLE_INT = { oneOf: [{ type: "integer" }, { type: "null" }] };
-/** syncIndex 的规范返回（memory_write/index/maintain 复用）。 */
-const INDEX_RESULT = {
-	type: "object",
-	additionalProperties: true,
-	properties: {
-		index_chars: { type: "integer", required: true },
-		max_chars: { type: "number", required: true },
-		over_limit: { type: "boolean", required: true },
-		facts_listed: { type: "integer", required: true },
-		sops_listed: { type: "integer", required: true },
-		rewritten: { type: "boolean", required: true },
-	},
-};
-/** computeNamespaceStats 的规范返回。 */
-const STATS_RESULT = {
-	type: "object",
-	additionalProperties: true,
-	properties: {
-		facts: { type: "integer", required: true },
-		sops: { type: "integer", required: true },
-		pending: { type: "integer", required: true },
-		archived: { type: "integer", required: true },
-		size_bytes: { type: "integer", required: true },
-		updatedAt: { type: "string", required: true },
-	},
-};
-/** memory_read 的溯源 meta（normalizeMeta 保证字段恒在）。 */
-const READ_META = {
-	type: "object",
-	additionalProperties: true,
-	properties: {
-		sourceSession: { type: "string", required: true },
-		sourceSeqs: { ...NUM_ARR, required: true },
-		evidence: { type: "string", required: true },
-		archived: { type: "boolean", required: true },
-		createdAt: { type: "string", required: true },
-		updatedAt: { type: "string", required: true },
-		related: STR_ARR,
-		related_states: {
-			type: "array",
-			items: {
-				type: "object",
-				additionalProperties: true,
-				properties: { name: { type: "string", required: true }, state: { type: "string", required: true } },
-			},
-		},
-	},
-};
-/** meta.sourceSeqs 归一为数字数组（老库可能存垃圾值；输出契约要求 number[]）。 */
-const numSeqs = (v) => (Array.isArray(v) ? v.map(Number).filter(Number.isFinite) : []);
-
-/** 出口消毒版 defineTool：execute 结果先过 pruneUndefined 再交还宿主。 */
-const defineTool = (def) => defineToolRaw({
-	...def,
-	async execute(...args) {
-		return pruneUndefined(await def.execute(...args));
-	},
-});
-
-/**
- * [0.6.9] 会话工作区：DSH 的文件工具按 exec.agent.session.header.cwd 确定工作区，
- * 记忆命名空间取同一来源（此前取服务进程启动目录，多工作区宿主下会选错库）。
- * 无会话上下文（裸装配/测试）时回退 undefined，由 detectNamespace 落到 process.cwd()。
- */
-function sessionCwd(exec) {
-	return exec?.agent?.session?.header?.cwd ?? exec?.session?.header?.cwd ?? undefined;
-}
-
-// ── [0.6.9] memory_read 分段读取 ─────────────────────────────────────────────
-// 短条目一次完整返回；超大条目支持行范围/全文开关，返回 truncated/revision/next，
-// 模型能续读而不是一次把 80KB SOP 灌进会话历史。
-const READ_INLINE_LIMIT = 16_000; // 超过此字符数才需要分段（正常记忆远短于它）
-
-/** 把正文按行范围切片，返回 { content, truncated, next }。1-based 行号。 */
-function sliceLines(text, fromLine, toLine) {
-	const lines = String(text ?? "").split("\n");
-	const from = Math.max(1, Math.floor(Number(fromLine) || 1));
-	const to = Math.min(lines.length, Math.floor(Number(toLine) || lines.length));
-	const content = lines.slice(from - 1, to).join("\n");
-	const truncated = to < lines.length;
-	return { content, truncated, next: truncated ? to + 1 : null };
-}
-
-/**
- * memory_read 出口统一切片：行范围 > full > 阈值自动分段。
- * 返回恒有 revision（内容 hash 前 8 位）与 truncated；truncated=true 时给 next 行号。
- * 自动分段给"outline（标题+行号）+ 首尾片段"而不是简单截尾：关键前置条件常在中段，
- * 模型能用 from_line 精确续读，不会因截断丢掉它。
- */
-function applyReadSlicing(result, args) {
-	const full = String(result.content ?? "");
-	const revision = hashText(full).slice(0, 8);
-	if (result.not_found) return { ...result, revision, truncated: false };
-	const hasRange = args.from_line !== undefined || args.to_line !== undefined;
-	if (hasRange) {
-		const s = sliceLines(full, args.from_line, args.to_line);
-		return { ...result, content: s.content, revision, truncated: s.truncated, next: s.next };
+function source(args, exec, preserve = false) {
+	if ((args.sourceSession !== undefined) !== (args.sourceSeqs !== undefined)) throw new Error("sourceSession与sourceSeqs必须成对提供");
+	if (args.sourceSession !== undefined) {
+		if (!args.sourceSession.trim() || !args.sourceSeqs.length) throw new Error("显式来源需要会话id及至少一个事件seq");
+		return { sourceSession: args.sourceSession, sourceSeqs: args.sourceSeqs, preserveSource: false };
 	}
-	if (args.full || full.length <= READ_INLINE_LIMIT) {
-		return { ...result, revision, truncated: false, next: null };
+	if (preserve) return { preserveSource: true };
+	return { sourceSession: exec.agent.session.id, sourceSeqs: [], sourceCallId: exec.callId, ...(args.evidence_call_ids ? { evidenceCallIds: args.evidence_call_ids } : {}), preserveSource: false };
+}
+function safeFile(key) {
+	if (!key || basename(key) !== key || key === "." || key === ".." || /[\/]/.test(key)) throw new Error("请提供目录内的文件名");
+	return key;
+}
+
+// All pages are contiguous whole lines. A single oversized line is returned whole.
+export function pageContent(text, args = {}) {
+	const lines = text.split("\n"), total = lines.length;
+	const from = args.full ? 1 : args.from_line ?? 1;
+	const requestedTo = args.full ? total : args.to_line ?? total;
+	if (from < 1 || from > total || requestedTo < from) throw new RangeError(`有效行范围为1..${total}`);
+	const last = Math.min(requestedTo, total), cap = args.full ? Infinity : args.max_chars ?? 16000;
+	if (cap < 1) throw new RangeError("max_chars必须大于0");
+	let to = from - 1, used = 0;
+	for (let line = from; line <= last; line++) {
+		const cost = lines[line - 1].length + (to >= from ? 1 : 0);
+		if (to >= from && used + cost > cap) break;
+		used += cost; to = line;
 	}
-	const lines = full.split("\n");
-	const outline = lines
-		.map((l, i) => (/^#{1,4}\s/.test(l.trim()) ? `${i + 1}: ${l.trim()}` : null))
-		.filter(Boolean)
-		.slice(0, 40);
-	const headPart = full.slice(0, 4000);
-	const tailPart = full.slice(-2000);
-	const headLines = headPart.split("\n").length;
-	const content = [
-		`[条目共 ${full.length} 字符 / ${lines.length} 行，已返回 outline + 首尾片段。全文取用 full=true；中段续读用 from_line=${headLines + 1} 起]`,
-		outline.length ? `标题结构：\n${outline.join("\n")}` : "",
-		`--- 开头 ---\n${headPart}`,
-		`--- 结尾 ---\n${tailPart}`,
-	].filter(Boolean).join("\n\n");
-	return { ...result, content, revision, truncated: true, next: headLines + 1 };
+	return { content: lines.slice(from - 1, to).join("\n"), complete: from === 1 && to === total,
+		from_line: from, to_line: to, total_lines: total, next_line: to < total ? to + 1 : null, oversized_line: used > cap };
 }
-
-function normalizeMeta(m) {
-	return {
-		sourceSession: m?.sourceSession || "",
-		sourceSeqs: numSeqs(m?.sourceSeqs),
-		evidence: m?.evidence || "",
-		archived: Boolean(m?.archived),
-		createdAt: m?.createdAt || "",
-		updatedAt: m?.updatedAt || "",
-		...(Array.isArray(m?.related) && m.related.length ? { related: m.related } : {}),
-	};
-}
-
-/** 解析关联指针的存在状态，供 memory_read 回显（[v0.5.2] 修复：此前是死代码，related 原样字符串数组被 render 读取导致显示 undefined）。 */
-function resolveRelated(root, related) {
-	if (!Array.isArray(related) || related.length === 0) return [];
-	return related.map((name) => {
-		const key = String(name).trim();
-		let state = "missing";
-		if (existsSync(join(root, "sops", `${slugify(key)}.md`)) || readFact(root, key) !== null) {
-			state = isArchived(root, "sop", slugify(key)) || isArchived(root, "fact", key) ? "archived" : "active";
-		}
-		return { name: key, state };
-	});
-}
-
-/**
- * [v0.5.2] pending 摘要：从候选正文提取“最有信息量”的行，替代之前
- * “取最后一行的前 120 字符”（末行通常是空行 → 列表看起来只有文件名）。
- * 优先级：kind=retry-sequence 的“错误尾部”行 > “成功结果尾部”行 > “本回合有 N 个…”统计行 > 首个非空正文行。
- */
 export function pendingSummary(content) {
-	if (!content) return "";
-	const lines = content.split(/\r?\n/);
-	const pick = (prefix) => {
-		for (const line of lines) {
-			const t = line.trim();
-			if (t.startsWith(prefix)) return t.slice(prefix.length).trim();
-		}
-		return "";
-	};
-	const kind = pick("- kind:");
-	const err = pick("- 错误尾部:");
-	const ok = pick("- 成功结果尾部:");
-	const count = pick("- 本回合有") || "";
-	const fallback = lines.find((l) => {
-		const t = l.trim();
-		return t && !t.startsWith("#") && !t.startsWith("-") && t.length > 10;
-	}) || "";
-	const body = kind ? `[${kind}] ` : "";
-	const detail = err || ok || (count ? `本回合有 ${count}` : "") || fallback;
-	return `${body}${detail || "（无摘要）"}`.slice(0, 160);
+	return content.split(/\r?\n/).map(line => line.trim()).find(line => line && !line.startsWith("#") && !line.startsWith("- source"))?.slice(0, 180) ?? "";
 }
 
 export function buildTools(ctx, cfg) {
-	// [0.6.9] 统一命名空间入口：显式参数 > defaultNamespace > 会话工作区自动推断。
-	const nsOf = (args, exec) => resolveNamespace(cfg, args.namespace, sessionCwd(exec));
-	const readTool = defineTool({
-		name: "memory_read",
-		description: "读取记忆内容：支持 L1 索引全文（name=index）、L2 事实条目（name=<topic>，匹配 facts.md 的 ## section）、L3 SOP（name=<sop文件名>，匹配 sops/<name>.md）。可选 namespace 隔离项目。短条目一次完整返回；超大条目默认给 outline + 首尾片段（truncated=true），可 full=true 取全文或 from_line/to_line 续读。返回内容与来源路径及溯源信息（含 related 关联指针）。",
-		parameters: {
-			name: {
-				type: "string",
-				required: true,
-				description: "记忆名称：index / facts 的 section 主题 / sop 文件名（不带 .md）"
-			},
-			namespace: {
-				type: "string",
-				description: "命名空间（默认取 workspace/git 分支或配置 defaultNamespace）"
-			},
-			full: {
-				type: "boolean",
-				description: "超大条目也完整返回（默认 false：超过约 1.6 万字符时给 outline + 首尾片段）"
-			},
-			from_line: {
-				type: "integer",
-				description: "从第几行开始读（1-based，配合 to_line 续读分段）"
-			},
-			to_line: {
-				type: "integer",
-				description: "读到第几行（1-based，省略则到末尾）"
+	const nsOf = (args, exec) => resolveNamespace(cfg, args.namespace, exec.agent.session.header.cwd);
+	const rootOf = entry => nsRoot(cfg.memoryDir, entry.namespace);
+	const cap = cfg.l1MaxChars ?? L1_MAX_CHARS_DEFAULT;
+	const rootsFor = (args, exec) => args.all_namespaces ? listNamespaces(cfg.memoryDir) : args.namespace ? [safeNs(args.namespace)] : [...new Set([nsOf(args, exec), "default"])];
+	const result = (entry, action, stored, sourceTouched = false) => ({ entry, action, changed: stored.changed ?? true, sourceTouched, revision: mustRead(rootOf(entry), entry).revision, history: stored.history || null, ...(stored.index ? { index: stored.index } : {}) });
+	const defs = [];
+	defs.push(tool("memory_read", "按entry读取活跃或归档记忆。返回连续整行及revision；只有完整正文才complete=true。kind=index/rules/policy可读取完整索引、规则、L0。", {
+		entry: req(readableRef), full: bool, from_line: num, to_line: num,
+		max_chars: { ...num, description: "正整数，整行分页目标；单行超限时仍返回完整该行" }, if_revision: str,
+	}, {
+		entry: req(readableRef), title: req(str), content: req(str), meta: req(record), revision: req(str),
+		complete: req(bool), not_found: req(bool), from_line: req(num), to_line: req(num), total_lines: req(num), next_line: req(nullable(num)), oversized_line: req(bool),
+	}, async args => {
+		const entry = ref(args.entry), root = rootOf(entry);
+		let value;
+		if (entry.kind === "fact" || entry.kind === "sop") value = readEntry(root, entry.kind, entry.key);
+		else {
+			const fixed = { index: "index.txt", rules: "index.txt", policy: "memory_management_sop.md" };
+			const path = fixed[entry.kind] ? join(root, fixed[entry.kind]) : join(root, entry.kind === "archive" ? ARCHIVE_DIR : PENDING_DIR, safeFile(entry.key));
+			if (existsSync(path)) {
+				const content = entry.kind === "rules" ? readRules(root) : readFileSync(path, "utf8");
+				value = { title: entry.key, content, meta: { archived: entry.kind === "archive" }, revision: hashText(content) };
 			}
-		},
-		output: {
-			schema: {
-			type: "object",
-			additionalProperties: true,
-			properties: {
-				name: { type: "string", required: true },
-				source: { type: "string", required: true },
-				content: { type: "string", required: true },
-				namespace: { type: "string", required: true },
-				meta: { ...READ_META, required: true },
-				not_found: { type: "boolean" },
-				truncated: { type: "boolean" },
-				revision: { type: "string" },
-				next: NULLABLE_INT,
-			},
-		},
-			render: (_args, value) => [{
-				type: "text",
-				text: value.not_found
-					? `记忆「${value.name}」未找到（可用 memory_list 查看全部，或用 memory_search 全文检索）`
-					: `记忆「${value.name}」（来源: ${value.source}, namespace: ${value.namespace}${value.meta?.archived ? ", 已归档" : ""}${value.truncated ? ", 已截断" : ""}）：\n\n${value.content}${value.truncated && value.next ? `\n\n（续读：from_line=${value.next}；或 full=true 取全文）` : ""}${formatRelated(value.meta?.related_states)}`
-			}]
-		},
-		isConcurrencySafe: () => true, // [0.6.1 I9] 读为主；bumpAccess 是容忍漂移的旁路计数
-		async execute(args, exec) {
-			const key = String(args.name).trim();
-			const ns = nsOf(args, exec);
-			const root = nsRoot(cfg.memoryDir, ns);
+		}
+		if (!value) return { entry, title: entry.key, content: "", meta: {}, revision: "", complete: false, not_found: true, from_line: 0, to_line: 0, total_lines: 0, next_line: null, oversized_line: false };
+		if (args.if_revision && args.if_revision !== value.revision) throw new Error("条目已变化，请从第1行重新读取");
+		if (entry.kind === "fact" || entry.kind === "sop") bumpAccess(root, `${entry.kind}:${entry.key}`, { halfLifeDays: cfg.heatHalfLifeDays });
+		return { entry, title: value.title, meta: value.meta, revision: value.revision, not_found: false, ...pageContent(value.content, args) };
+	}, true));
+
+	defs.push(tool("memory_list", "列出当前空间与全局空间的活跃条目，返回可直接读取的entry；include_archived显示归档。", {
+		namespace: namespaceArg, all_namespaces: bool, include_archived: bool,
+	}, { namespaces: req(arr(str)), entries: req(arr(obj({ entry: req(entryRef), title: req(str), archived: req(bool), revision: req(str) }))) }, async (args, exec) => {
+		const namespaces = rootsFor(args, exec), entries = [];
+		for (const namespace of namespaces) {
+			for (const value of readEntries(nsRoot(cfg.memoryDir, namespace))) {
+				if (value.meta.archived && !args.include_archived) continue;
+				entries.push({ entry: { namespace, kind: value.kind, key: value.key }, title: value.title, archived: Boolean(value.meta.archived), revision: value.revision });
+			}
+		}
+		return { namespaces, entries };
+	}, true));
+
+	defs.push(tool("memory_search", "全文检索当前空间与default全局空间，默认只查活跃正文。需要历史内容时显式include_archived；每个结果entry均可memory_read。", {
+		query: req(str), namespace: namespaceArg, all_namespaces: bool, include_archived: bool, limit: { ...num, description: "返回1至50条结果，默认8" },
+	}, { namespaces: req(arr(str)), results: req(arr(obj({ entry: req(readableRef), title: req(str), archived: req(bool), score: req({ type: "number" }), snippet: req(str) }))) }, async (args, exec) => {
+		const namespaces = rootsFor(args, exec), limit = args.limit ?? 8;
+		if (limit < 1 || limit > 50) throw new RangeError("limit必须在1至50之间");
+		return { namespaces, results: searchNamespaces(cfg.memoryDir, namespaces, args.query, { limit, includeArchived: args.include_archived ?? false }) };
+	}, true));
+
+	defs.push(tool("memory_write", "创建新的fact或SOP。已有条目使用memory_update；必须提供本次验证证据。", {
+		namespace: namespaceArg, kind: req(memoryKind), topic: req(str), content: req(str), evidence: req(str), related: arr(entryRef), ...sourceArgs,
+	}, mutationOutput, async (args, exec) => {
+		const namespace = nsOf(args, exec), root = nsRoot(cfg.memoryDir, namespace);
+		return withNsWriteLock(root, () => {
 			ensureNamespaceLayout(root);
-			if (!isSafeMemName(key)) {
-				throw new Error(`memory_read: 非法名称（不允许路径穿越/绝对路径）: ${key}`);
-			}
-			const lower = key.toLowerCase();
-			if (lower === "index" || lower === "l1" || lower === "索引") {
-				bumpAccess(root, "index");
-				return applyReadSlicing({
-					name: key,
-					source: "index.txt",
-					content: readIndex(root),
-					namespace: ns,
-					meta: { ...EMPTY_META },
-				}, args);
-			}
-			const candidates = [key, slugify(key)];
-			for (const c of candidates) {
-				const sopPath = join(root, "sops", `${c}.md`);
-				if (existsSync(sopPath)) {
-					const m = getEntryMeta(root, "sop", c) || {};
-					if (m.archived) {
-						return { name: key, source: "", content: "", namespace: ns, meta: { ...EMPTY_META, archived: true }, not_found: true, truncated: false };
-					}
-					bumpAccess(root, `sop:${c}`);
-					return applyReadSlicing({
-						name: key,
-						source: `sops/${c}.md`,
-						// [v0.5.2] content 首行若恰好是“# 标题”（写入侧模板也会加一次）则去重，避免 read 时标题重复
-						content: stripLeadingTitle(readFileSync(sopPath, "utf8"), c),
-						namespace: ns,
-						meta: { ...normalizeMeta(m), ...(Array.isArray(m?.related) && m.related.length ? { related_states: resolveRelated(root, m.related) } : {}) },
-					}, args);
-				}
-			}
-			const fact = readFact(root, key);
-			if (fact !== null) {
-				const m = getEntryMeta(root, "fact", key) || {};
-				if (m.archived) {
-					return { name: key, source: "", content: "", namespace: ns, meta: { ...EMPTY_META, archived: true }, not_found: true, truncated: false };
-				}
-				bumpAccess(root, `fact:${key}`);
-				return applyReadSlicing({
-					name: key,
-					source: "facts.md",
-					content: fact,
-					namespace: ns,
-					meta: { ...normalizeMeta(m), ...(Array.isArray(m?.related) && m.related.length ? { related_states: resolveRelated(root, m.related) } : {}) },
-				}, args);
-			}
-			if (key.includes("sops/")) {
-				const p = join(root, key);
-				if (existsSync(p)) {
-					const slug = basename(p).replace(/\.md$/, "");
-					if (isArchived(root, "sop", slug)) {
-						return { name: key, source: "", content: "", namespace: ns, meta: { ...EMPTY_META, archived: true }, not_found: true, truncated: false };
-					}
-					return applyReadSlicing({ name: key, source: key, content: readFileSync(p, "utf8"), namespace: ns, meta: { ...EMPTY_META } }, args);
-				}
-			}
-			return { name: key, source: "", content: "", namespace: ns, meta: { ...EMPTY_META }, not_found: true, truncated: false };
-		},
-		presentCall(args) {
-			return { card: "generic", title: `读取记忆 ${args.name}`, kind: "read" };
-		}
-	});
+			const key = args.kind === "fact" ? args.topic.trim() : slugify(args.topic);
+			const entry = { namespace, kind: args.kind, key };
+			if (readEntry(root, entry.kind, entry.key)) throw new Error("条目已存在，请使用memory_update及此entry");
+			const stored = writeMemory(root, { mode: "create", topic: args.topic, entryType: args.kind, content: args.content, evidence: args.evidence, namespace, ...source(args, exec), ...(args.related ? { related: args.related } : {}), maxChars: cap });
+			return result(entry, "created", stored, args.sourceSession === undefined);
+		});
+	}));
 
-	const listTool = defineTool({
-		name: "memory_list",
-		description: "列出记忆：L2 facts 条目 + L3 SOP 文件 + pending 候选数 + L1 索引行数。可选 namespace。",
-		parameters: {
-			namespace: {
-				type: "string",
-				description: "命名空间（默认取 workspace/git 分支或配置 defaultNamespace）"
-			}
-		},
-		output: {
-			schema: {
-			type: "object",
-			additionalProperties: true,
-			properties: {
-				namespace: { type: "string", required: true },
-				index_chars: { type: "integer", required: true },
-				max_chars: { type: "number", required: true },
-				facts: { ...STR_ARR, required: true },
-				sops: { ...STR_ARR, required: true },
-				pending: { ...STR_ARR, required: true },
-			},
-		},
-			render: (_args, value) => [{
-				type: "text",
-				text: `记忆库[${value.namespace}]（L1 索引 ${value.index_chars} 字符 / 预算 ${value.max_chars}）\nL2 事实: ${value.facts.join("、") || "（空）"}\nL3 SOP: ${value.sops.join("、") || "（空）"}\nPending: ${value.pending.join("、") || "（空）"}`
-			}]
-		},
-		isConcurrencySafe: () => true, // [0.6.1 I9] 纯读，参与并行组
-		async execute(args, exec) {
-			const ns = nsOf(args, exec);
-			const root = nsRoot(cfg.memoryDir, ns);
+	defs.push(tool("memory_update", "仅更新已有entry并保存旧版本，保持原展示标题及key。仅整理措辞时省略evidence保留原来源；新增事实须给新evidence。", {
+		entry: refArg, content: req(str), evidence: str, related: arr(entryRef), if_revision: str, ...sourceArgs,
+	}, mutationOutput, async (args, exec) => {
+		const entry = ref(args.entry), root = rootOf(entry);
+		return withNsWriteLock(root, () => {
+			const before = mustRead(root, entry);
+			if (args.if_revision && before.revision !== args.if_revision) throw new Error("条目已变化，请重新读取后更新");
+			const newEvidence = args.evidence !== undefined || args.sourceSession !== undefined || args.evidence_call_ids !== undefined;
+			const stored = writeMemory(root, { mode: "update", key: entry.key, entryType: entry.kind, content: args.content,
+				evidence: args.evidence ?? before.meta.evidence, namespace: entry.namespace, ...source(args, exec, !newEvidence), ...(args.related !== undefined ? { related: args.related } : {}), maxChars: cap, snapshot: true });
+			return result(entry, "updated", stored, newEvidence && args.sourceSession === undefined);
+		});
+	}));
+	defs.push(tool("memory_archive", "归档或恢复可见性；归档正文仍可memory_read。replacement可指向已保存的替代entry。", {
+		entry: refArg, unarchive: bool, replacement: entryRef, if_revision: str,
+	}, mutationOutput, async args => {
+		const entry = ref(args.entry), root = rootOf(entry), replacement = args.replacement ? ref(args.replacement) : null;
+		return withNsWriteLocks(replacement ? [root, rootOf(replacement)] : [root], () => {
+			const before = mustRead(root, entry);
+			if (args.if_revision && before.revision !== args.if_revision) throw new Error("条目已变化，请重新读取后归档");
+			if (replacement && (JSON.stringify(replacement) === JSON.stringify(entry) || mustRead(rootOf(replacement), replacement).meta.archived)) throw new Error("替代条目必须是另一个活跃entry");
+			const stored = archiveEntry(root, entry.kind, entry.key, { unarchive: args.unarchive ?? false, ...(replacement ? { replacement } : {}) });
+			stored.index = syncIndex(root, cap);
+			return result(entry, args.unarchive ? "unarchived" : "archived", stored);
+		});
+	}));
+
+	defs.push(tool("memory_history", "列出指定entry的精确历史快照。用返回的id作为memory_rollback的snapshot_id。", { entry: refArg }, {
+		entry: req(entryRef), snapshots: req(arr(record)),
+	}, async args => {
+		const entry = ref(args.entry);
+		return { entry, snapshots: listEntryHistory(rootOf(entry), entry.kind, entry.key) };
+	}, true));
+
+	defs.push(tool("memory_rollback", "恢复指定snapshot_id；省略时恢复最近快照。恢复前保存当前正文与元数据，可再从history撤销恢复。", {
+		entry: refArg, snapshot_id: str,
+	}, { ...mutationOutput, restored_from: req(str), meta_restored: req(bool) }, async args => {
+		const entry = ref(args.entry), root = rootOf(entry);
+		return withNsWriteLock(root, () => {
+			const restored = restoreEntry(root, entry.kind, entry.key, args.snapshot_id);
+			if (!restored.restored) throw new Error("未找到属于此entry的历史快照");
+			return { ...result(entry, "restored", { ...restored, index: syncIndex(root, cap) }), restored_from: restored.source, meta_restored: restored.meta_restored };
+		});
+	}));
+
+	defs.push(tool("memory_index", "重建指定空间的完整L1磁盘索引；提示视图另外受字符预算限制。", { namespace: namespaceArg }, {
+		namespace: req(str), index: req(record), changed: req(bool), sourceTouched: req(bool),
+	}, async (args, exec) => {
+		const namespace = nsOf(args, exec), root = nsRoot(cfg.memoryDir, namespace);
+		return withNsWriteLock(root, () => {
 			ensureNamespaceLayout(root);
-			const facts = factSections(root).filter((f) => !isArchived(root, "fact", f));
-			const sops = sopNames(root).filter((s) => !isArchived(root, "sop", s));
-			const pending = pendingNames(root);
-			return { namespace: ns, index_chars: indexChars(readIndex(root)), max_chars: cfg.l1MaxChars, facts, sops, pending };
-		},
-		presentCall() {
-			return { card: "generic", title: "列出记忆", kind: "read" };
-		}
-	});
+			const index = syncIndex(root, cap);
+			return { namespace, index, changed: index.rewritten, sourceTouched: false };
+		});
+	}));
 
-	const writeTool = defineTool({
-		name: "memory_write",
-		description: "写入跨会话记忆（行动验证公理：evidence 必填，只写【成功验证过】的信息）。entry_type=fact 存 L2 环境事实；entry_type=sop 存 L3 任务经验。可选 namespace 隔离项目；可选 sourceSession/sourceSeqs 记录溯源（缺省时由插件按当前会话自动补）；可选 related 关联其他记忆条目（空数组=清空旧关联）。覆盖同名条目会自动把旧版本快照到 .history/（不再静默覆盖）。evidence 自动逐行引用编码、疑似密钥自动脱敏；写入侧硬拒：正文疑似密钥明文、fact 正文里的 \"## \" 标题行、保留名（readme/license/index/l1/索引）、SOP 名字折叠碰撞。写入后 L1 全量重建（不隐藏条目），超字符预算只在返回值里提示。",
-		parameters: {
-			topic: {
-				type: "string",
-				required: true,
-				description: "记忆主题（fact 的 section 名 / sop 的文件名，简短自解释）"
-			},
-			entry_type: {
-				type: "string",
-				enum: ["fact", "sop"],
-				required: true,
-				description: "fact=环境事实(L2) / sop=任务经验(L3)"
-			},
-			content: {
-				type: "string",
-				required: true,
-				description: "记忆内容：fact 用要点列表；sop 用「关键前置 + 典型坑 + 稳定步骤」精简格式，尽可能短"
-			},
-			evidence: {
-				type: "string",
-				required: true,
-				description: "验证证据：本次成功验证该信息的工具调用/实测结果（行动验证公理：无行动，不记忆）。没有验证证据就不要调用本工具"
-			},
-			related: {
-				type: "array",
-				items: { type: "string" },
-				description: "关联的其他记忆条目名（可选，建立记忆间链接）"
-			},
-			namespace: {
-				type: "string",
-				description: "命名空间（默认取 workspace/git 分支或配置 defaultNamespace）"
-			},
-			sourceSession: {
-				type: "string",
-				description: "来源 session id（溯源用，通常由插件自动填充）"
-			},
-			sourceSeqs: {
-				type: "array",
-				items: { type: "integer" },
-				description: "来源事件 seq 列表（溯源用）"
-			}
-		},
-		output: {
-			schema: {
-			type: "object",
-			additionalProperties: true,
-			properties: {
-				entry_type: { ...ENTRY_TYPE, required: true },
-				topic: { type: "string", required: true },
-				path: { type: "string", required: true },
-				namespace: { type: "string", required: true },
-				action: { type: "string", enum: ["created", "updated", "merged"], required: true },
-				history: { type: "string" },
-				index: { ...INDEX_RESULT, required: true },
-				advisories: { ...STR_ARR, required: true },
-			},
-		},
-			render: (_args, value) => [{
-				type: "text",
-				text: [`✅ 已${value.action}记忆「${value.topic}」（${value.entry_type === "fact" ? "L2 事实" : "L3 SOP"}）→ ${value.path} [${value.namespace}]`,
-					value.history ? `旧版本已快照：${value.history}（可 memory_rollback）` : "",
-					value.index?.over_limit ? `⚠️ L1 索引 ${value.index.index_chars} 字符超预算 ${value.index.max_chars}：条目不会被隐藏，请合并/归档或精简 [RULES]` : "",
-					...(Array.isArray(value.advisories) ? value.advisories.map((a) => `· 判据：${a}`) : []),
-				].filter(Boolean).join("\n")
-			}]
-		},
-		async execute(args, exec) {
-			const topic = String(args.topic).trim();
-			const type = args.entry_type === "fact" ? "fact" : "sop";
-			const content = String(args.content).trim();
-			const evidence = String(args.evidence ?? "").trim();
-			if (!topic || !content) throw new Error("memory_write: topic 与 content 必填");
-			if (!evidence) {
-				throw new Error("memory_write: evidence 必填（行动验证公理：无行动，不记忆）。请提供本次成功验证该信息的工具调用/实测证据，或取消写入。");
-			}
-			const ns = nsOf(args, exec);
-			const root = nsRoot(cfg.memoryDir, ns);
+	defs.push(tool("memory_maintain", "扫描重复、冲突、pending及冷条目，整理索引和元数据一致性。actionable列出需要语义复核的实际待办。", { namespace: namespaceArg }, {
+		namespace: req(str), report: req(record),
+	}, async (args, exec) => {
+		const namespace = nsOf(args, exec), root = nsRoot(cfg.memoryDir, namespace);
+		return withNsWriteLock(root, () => {
 			ensureNamespaceLayout(root);
-			const r = writeMemory(root, {
-				topic,
-				entryType: type,
-				content,
-				evidence,
-				sourceSession: args.sourceSession || null,
-				sourceSeqs: args.sourceSeqs || [],
-				namespace: ns,
-				// [0.6.9] 未提供 related ≠ 空数组：未提供继承旧关联，空数组明确清空。
-				related: Array.isArray(args.related) ? args.related : undefined,
-				maxChars: cfg.l1MaxChars,
-				snapshot: true,
-			});
-			return { entry_type: type, topic, path: r.path, namespace: ns, action: r.action, history: r.history, index: r.index, advisories: r.advisories };
-		},
-		presentCall(args) {
-			return { card: "generic", title: `写入记忆 ${args.topic}`, kind: "execute" };
-		}
-	});
+			return { namespace, report: runMaintain(root, cap, { ...cfg.maintainOpts, nearDupeThreshold: cfg.nearDupeThreshold, mergeCandidateThreshold: cfg.mergeCandidateThreshold, minTokensForFuzzy: cfg.minTokensForFuzzy, coldReviewDays: cfg.coldReviewDays }) };
+		});
+	}));
 
-	const indexTool = defineTool({
-		name: "memory_index",
-		description: "重建 L1 索引的自动段（活跃 L2 facts + L3 sops，过滤已归档），保留 [RULES] 手动段。在手动改动记忆文件后使用。可选 namespace。",
-		parameters: {
-			namespace: {
-				type: "string",
-				description: "命名空间"
-			}
-		},
-		output: {
-			schema: {
-			type: "object",
-			additionalProperties: true,
-			properties: {
-				namespace: { type: "string", required: true },
-				index_chars: { type: "integer", required: true },
-				max_chars: { type: "number", required: true },
-				over_limit: { type: "boolean", required: true },
-				rewritten: { type: "boolean", required: true },
-				facts: { ...STR_ARR, required: true },
-				sops: { ...STR_ARR, required: true },
-				backfilled: { ...STR_ARR, required: true },
-			},
-		},
-			render: (_args, value) => [{
-				type: "text",
-				text: `索引已重建[${value.namespace}]（${value.index_chars} 字符 / 预算 ${value.max_chars}${value.over_limit ? "，⚠️ 超预算：条目不会被隐藏，请合并或归档" : ""}${value.rewritten ? "" : "，内容无变化未重写"}${value.backfilled?.length ? `；meta 补登记 ${value.backfilled.length} 条` : ""}）：\nL2: ${value.facts.join("、") || "（空）"}\nL3: ${value.sops.join("、") || "（空）"}`
-			}]
-		},
-		async execute(args, exec) {
-			const ns = nsOf(args, exec);
-			const root = nsRoot(cfg.memoryDir, ns);
-			ensureNamespaceLayout(root);
-			const backfilled = backfillMeta(root, { namespace: ns });
-			const r = syncIndex(root, cfg.l1MaxChars);
-			return { namespace: ns, backfilled, index_chars: r.index_chars, max_chars: r.max_chars, over_limit: r.over_limit, rewritten: r.rewritten, facts: factSections(root).filter((f) => !isArchived(root, "fact", f)), sops: sopNames(root).filter((s) => !isArchived(root, "sop", s)) };
-		},
-		presentCall() {
-			return { card: "generic", title: "重建记忆索引", kind: "execute" };
-		}
-	});
+	defs.push(tool("memory_stats", "查看所有空间的条目、历史、pending及最近维护状态。namespace可限定单个空间。", { namespace: namespaceArg }, {
+		runtime: req(record), namespaces: req(arr(record)),
+	}, async args => {
+		const namespaces = args.namespace ? [safeNs(args.namespace)] : listNamespaces(cfg.memoryDir);
+		return { runtime: cfg.runtimeInfo, namespaces: namespaces.map(namespace => {
+			const root = nsRoot(cfg.memoryDir, namespace), history = join(root, ".history");
+			const readState = name => existsSync(join(root, name)) ? JSON.parse(readFileSync(join(root, name), "utf8")) : null;
+			const views = buildCombinedPromptIndex(cfg.memoryDir, namespace, { projectMaxChars: cap, globalMaxChars: cfg.globalL1MaxChars }).sections;
+			return { ...readNamespaceIdentity(cfg.memoryDir, namespace), ...computeNamespaceStats(root), index_chars: indexChars(readIndex(root)),
+				history_files: existsSync(history) ? readdirSync(history).filter(name => name.endsWith(".md") || name.endsWith(".json") && !name.endsWith(".meta.json") && JSON.parse(readFileSync(join(history, name), "utf8")).format === "memory-snapshot-v2").length : 0,
+				prompt_views: views.map(({ namespace, totalChars, shownChars, maxChars, overLimit }) => ({ namespace, total_chars: totalChars, shown_chars: shownChars, max_chars: maxChars, truncated: overLimit })),
+				maintenance: readState("maintenance-report.json"), maintenance_runs: readState("maintenance-runs.json"), reflection: readState("reflection-state.json") };
+		}) };
+	}, true));
 
-	const statsTool = defineTool({
-		name: "memory_stats",
-		description: "查看记忆库统计：各命名空间条目数、pending 数、归档数、总大小。可选 namespace。",
-		parameters: {
-			namespace: {
-				type: "string",
-				description: "命名空间"
-			}
-		},
-		output: {
-			schema: {
-			type: "object",
-			additionalProperties: true,
-			properties: {
-				namespace: { type: "string", required: true },
-				stats: { ...STATS_RESULT, required: true },
-			},
-		},
-			render: (_args, value) => [{
-				type: "text",
-				text: `统计[${value.namespace}]：L2=${value.stats.facts} L3=${value.stats.sops} pending=${value.stats.pending} archived=${value.stats.archived} size=${value.stats.size_bytes}B`
-			}]
-		},
-		isConcurrencySafe: () => true, // [0.6.1 I9] 纯读，参与并行组
-		async execute(args, exec) {
-			const ns = nsOf(args, exec);
-			const root = nsRoot(cfg.memoryDir, ns);
-			ensureNamespaceLayout(root);
-			return { namespace: ns, stats: computeNamespaceStats(root) };
-		},
-		presentCall() {
-			return { card: "generic", title: "查看记忆统计", kind: "read" };
-		}
-	});
-
-	const maintainTool = defineTool({
-		name: "memory_maintain",
-		// [0.6.1 I6] 阈值数字从生效配置动态拼接（注册期一次性求值，不违反 render/presentCall
-		// 纯函数约束——description 不是回调）；顺带修正 v0.6 起已废除的「按热度压缩 L1」陈旧表述。
-		description: `执行记忆库维护：同名同内容的重复 section 自动无损合并；跨条目内容一致（含归一化后一致）只报告为候选、绝不自动隐藏不同主题的条目；内容级近重复（Jaccard 阈值 ${cfg.maintainOpts?.nearDupeThreshold ?? NEAR_DUPE_THRESHOLD}）只产出候选，需确认后再合并；L1 索引核对（存在性全量列出、不裁剪）、生成统计、产出内容高度重叠的合并候选（阈值 ${cfg.maintainOpts?.mergeCandidateThreshold ?? MERGE_CANDIDATE_THRESHOLD}，需人工/模型确认）、冷条目复核（创建超过 ${cfg.maintainOpts?.coldReviewDays ?? COLD_REVIEW_DAYS} 天且热度趋零）。可选 namespace。`,
-		parameters: {
-			namespace: {
-				type: "string",
-				description: "命名空间"
-			}
-		},
-		output: {
-			schema: {
-			type: "object",
-			additionalProperties: true,
-			properties: {
-				namespace: { type: "string", required: true },
-				report: {
-					type: "object",
-					additionalProperties: true,
-					required: true,
-					properties: {
-						runAt: { type: "string", required: true },
-						dedupe: {
-							type: "object",
-							additionalProperties: true,
-							required: true,
-							properties: {
-								removed: { ...STR_ARR, required: true },
-								merged: { ...STR_ARR, required: true },
-								nearDuplicates: {
-									type: "array",
-									items: {
-										type: "object",
-										additionalProperties: true,
-										properties: {
-											kind: { type: "string", required: true },
-											a: { type: "string", required: true },
-											b: { type: "string", required: true },
-											similarity: { type: "number", required: true },
-										},
-									},
-								},
-							},
-						},
-						index: {
-							type: "object",
-							additionalProperties: true,
-							required: true,
-							properties: {
-								...INDEX_RESULT.properties,
-								index_chars_actual: { type: "integer", required: true },
-							},
-						},
-						stats: { ...STATS_RESULT, required: true },
-						mergeCandidates: {
-							type: "array",
-							required: true,
-							items: {
-								type: "object",
-								additionalProperties: true,
-								properties: {
-									a: { type: "string", required: true },
-									b: { type: "string", required: true },
-									similarity: { type: "number", required: true },
-									nameOverlap: { type: "number", required: true },
-								},
-							},
-						},
-						cold: {
-							type: "object",
-							additionalProperties: true,
-							required: true,
-							properties: {
-								threshold_days: { type: "number", required: true },
-								count: { type: "integer", required: true },
-								entries: {
-									type: "array",
-									required: true,
-									items: {
-										type: "object",
-										additionalProperties: true,
-										properties: {
-											kind: { type: "string", required: true },
-											name: { type: "string", required: true },
-											heat: { ...NULLABLE_NUM, required: true },
-											age_days: { ...NULLABLE_INT, required: true },
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-			render: (_args, value) => [{
-				type: "text",
-				text: [`维护完成[${value.namespace}]：同名重复合并 ${value.report.dedupe?.merged?.length || 0} 条；L1 索引 ${value.report.index?.index_chars || 0} 字符 / 预算 ${value.report.index?.max_chars || 0}（L2=${value.report.index?.facts_listed || 0}、L3=${value.report.index?.sops_listed || 0} 全量列出，不裁剪）`,
-					`一致重复候选 ${value.report.dedupe?.exactDuplicates?.length || 0} 组、近重复候选 ${value.report.dedupe?.nearDuplicates?.length || 0} 组、同名冲突 ${value.report.dedupe?.conflicts?.length || 0} 组（只报告，未隐藏任何条目）；合并候选 ${value.report.mergeCandidates?.length || 0} 组；冷条目（>${value.report.cold?.threshold_days || 90} 天零访问）${value.report.cold?.count || 0} 条，建议复核是否已过时`,
-					value.report.index?.over_limit ? "⚠️ L1 超预算：请合并/归档或精简 [RULES]" : "",
-				].filter(Boolean).join("\n")
-			}]
-		},
-		async execute(args, exec) {
-			const ns = nsOf(args, exec);
-			const root = nsRoot(cfg.memoryDir, ns);
-			ensureNamespaceLayout(root);
-			const report = runMaintain(root, cfg.l1MaxChars, cfg.maintainOpts);
-			return { namespace: ns, report };
-		},
-		presentCall() {
-			return { card: "generic", title: "执行记忆维护", kind: "execute" };
-		}
-	});
-
-	const pendingTool = defineTool({
-		name: "memory_pending",
-		description: "列出自动蒸馏候选（pending/）：同工具先失败后成功的重试序列自动生成（典型坑点信号），尚未进入正式记忆。用 memory_accept 确认入记忆，或忽略。可选 namespace。",
-		parameters: {
-			namespace: {
-				type: "string",
-				description: "命名空间"
-			}
-		},
-		output: {
-			schema: {
-			type: "object",
-			additionalProperties: true,
-			properties: {
-				namespace: { type: "string", required: true },
-				pending: {
-					type: "array",
-					required: true,
-					items: {
-						type: "object",
-						additionalProperties: true,
-						properties: {
-							name: { type: "string", required: true },
-							content: { type: "string", required: true },
-						},
-					},
-				},
-			},
-		},
-			render: (_args, value) => [{
-				type: "text",
-				text: `Pending[${value.namespace}]：\n` + (value.pending.map((p) => `- ${p.name}: ${pendingSummary(p.content)}`).join("\n") || "（空）")
-			}]
-		},
-		isConcurrencySafe: () => true, // [0.6.1 I9] 纯读，参与并行组
-		async execute(args, exec) {
-			const ns = nsOf(args, exec);
-			const root = nsRoot(cfg.memoryDir, ns);
-			ensureNamespaceLayout(root);
-			const pending = pendingNames(root).map((f) => ({ name: f, content: readPending(root, f) || "" }));
-			return { namespace: ns, pending };
-		},
-		presentCall() {
-			return { card: "generic", title: "查看记忆候选", kind: "read" };
-		}
-	});
-
-	const acceptTool = defineTool({
-		name: "memory_accept",
-		description: "接受一条 pending 候选，写入正式记忆（fact/sop）。需要 topic 与 entry_type；evidence 必填或从 pending 中继承。可选 namespace。",
-		parameters: {
-			name: {
-				type: "string",
-				required: true,
-				description: "pending 文件名（memory_pending 返回的 name）"
-			},
-			topic: {
-				type: "string",
-				description: "记忆主题（缺省时需从 pending 推断/由用户提供）"
-			},
-			entry_type: {
-				type: "string",
-				enum: ["fact", "sop"],
-				description: "fact 或 sop（缺省时需从 pending 推断/由用户提供）"
-			},
-			evidence: {
-				type: "string",
-				description: "验证证据（若 pending 无证据则必填）"
-			},
-			related: {
-				type: "array",
-				items: { type: "string" },
-				description: "关联的其他记忆条目名（可选）"
-			},
-			namespace: {
-				type: "string",
-				description: "命名空间"
-			}
-		},
-		output: {
-			schema: {
-			type: "object",
-			additionalProperties: true,
-			properties: {
-				accepted: { type: "boolean", required: true },
-				topic: { type: "string", required: true },
-				entry_type: { ...ENTRY_TYPE, required: true },
-				namespace: { type: "string", required: true },
-			},
-		},
-			render: (_args, value) => [{
-				type: "text",
-				text: value.accepted ? `✅ 已接受 pending → 记忆「${value.topic}」（${value.entry_type}）[${value.namespace}]` : `未接受：${value.reason || "未知原因"}`
-			}]
-		},
-		async execute(args, exec) {
-			const ns = nsOf(args, exec);
-			const root = nsRoot(cfg.memoryDir, ns);
-			ensureNamespaceLayout(root);
-			const name = String(args.name).trim();
-			if (!isSafeMemName(name)) throw new Error("memory_accept: 非法 pending 文件名");
-			const text = readPending(root, name);
-			if (!text) throw new Error(`memory_accept: pending 不存在: ${name}`);
-			const parsed = parsePending(text);
-			const topic = String(args.topic || "").trim() || "";
-			// [0.6.1 M4] topic 即将进 writeMemory（事实层 section 名）：与控制字符判据同点在写入前失败，
-			// 不让 pending 读取与归档副作用先发生。
-			if (topic) assertSafeTopic(topic, "memory_accept");
-			const entryType = args.entry_type === "fact" ? "fact" : args.entry_type === "sop" ? "sop" : "";
-			const evidence = String(args.evidence || "").trim() || "";
-			if (!topic) throw new Error("memory_accept: 需要 topic（pending 未包含可推断主题）");
-			if (!entryType) throw new Error("memory_accept: 需要 entry_type=fact|sop（pending 未包含可推断类型）");
-			if (!evidence) throw new Error("memory_accept: 需要 evidence（行动验证公理：无行动，不记忆）");
-			const content = text.replace(/^# Pending Memory Candidate\r?\n[\s\S]*?\r?\n\r?\n/, "").trim();
-			if (!content) throw new Error("memory_accept: pending 内容为空，无法接受");
-			// [0.6.1 N11] autoPending 候选正文恒含「## 重试序列」行，接受为 fact 必被 ghost-section
-			// 硬校验拒绝（组合死路）。accept 路径统一把 "## " 降级为 "### "（标题信息保留），
-			// 正式写入路径的硬校验本身不动。entry_type=sop 无此约束，保持原样。
-			const body = entryType === "fact" ? content.replace(/^## /gm, "### ") : content;
-			writeMemory(root, {
-				topic,
-				entryType,
-				content: body,
-				evidence,
-				sourceSession: parsed.sourceSession || null,
-				sourceSeqs: parsed.sourceSeqs || [],
-				namespace: ns,
-				related: Array.isArray(args.related) ? args.related : undefined,
-				maxChars: cfg.l1MaxChars,
-				snapshot: true,
-			});
-			// 接受成功后删除 pending（先归档副本到 archive/，再移除原文件）
-			try {
-				const p = join(root, PENDING_DIR, name);
-				if (existsSync(p)) {
-					copyFileSync(p, join(root, ARCHIVE_DIR, name));
-					rmSync(p, { force: true });
-				}
-			} catch { /* 清理失败不阻断 */ }
-			return { accepted: true, topic, entry_type: entryType, namespace: ns };
-		},
-		presentCall(args) {
-			return { card: "generic", title: `接受记忆候选 ${args.name}`, kind: "execute" };
-		}
-	});
-
-	const updateTool = defineTool({
-		name: "memory_update",
-		description: "更新已有记忆。supersede=true 时先把旧版本快照到 .history/ 再覆盖（保留历史，正文与溯源元数据成对保存）；false 则直接覆盖但仍记录 updatedAt。可选 evidence（新实测证据）与 sourceSession/sourceSeqs（新来源；仅整理措辞时不传，自动继承原来源）。可选 related 替换关联链接（空数组清空）。可选 namespace。",
-		parameters: {
-			topic: {
-				type: "string",
-				required: true,
-				description: "记忆主题"
-			},
-			entry_type: {
-				type: "string",
-				enum: ["fact", "sop"],
-				required: true,
-				description: "fact 或 sop"
-			},
-			content: {
-				type: "string",
-				required: true,
-				description: "新的记忆内容"
-			},
-			evidence: {
-				type: "string",
-				description: "本次更新的验证证据（旧条目无可继承证据时必填）"
-			},
-			sourceSession: {
-				type: "string",
-				description: "本次修正实测的新来源 session id（仅整理措辞时不传，继承原来源）"
-			},
-			sourceSeqs: {
-				type: "array",
-				items: { type: "integer" },
-				description: "本次修正实测的新来源事件 seq 列表（与 sourceSession 配套）"
-			},
-			related: {
-				type: "array",
-				items: { type: "string" },
-				description: "关联的其他记忆条目名（提供时替换现有关联；空数组清空）"
-			},
-			supersede: {
-				type: "boolean",
-				description: "是否保留旧版本快照（默认 true）"
-			},
-			namespace: {
-				type: "string",
-				description: "命名空间"
-			}
-		},
-		output: {
-			schema: {
-			type: "object",
-			additionalProperties: true,
-			properties: {
-				topic: { type: "string", required: true },
-				entry_type: { ...ENTRY_TYPE, required: true },
-				action: { type: "string", enum: ["superseded", "updated"], required: true },
-				namespace: { type: "string", required: true },
-				history: { type: "string" },
-				advisories: { ...STR_ARR, required: true },
-			},
-		},
-			render: (_args, value) => [{
-				type: "text",
-				text: [`✅ 已${value.action}「${value.topic}」[${value.namespace}]${value.history ? `，旧版本保留在 ${value.history}` : ""}`,
-					...(Array.isArray(value.advisories) ? value.advisories.map((a) => `· 判据：${a}`) : []),
-				].join("\n")
-			}]
-		},
-		async execute(args, exec) {
-			const ns = nsOf(args, exec);
-			const root = nsRoot(cfg.memoryDir, ns);
-			ensureNamespaceLayout(root);
-			const topic = String(args.topic).trim();
-			const type = args.entry_type === "fact" ? "fact" : "sop";
-			const content = String(args.content).trim();
-			if (!topic || !content) throw new Error("memory_update: topic 与 content 必填");
-			const supersede = args.supersede !== false;
-			const key = type === "fact" ? topic : slugify(topic);
-			const prev = getEntryMeta(root, type, key) || {};
-			const evidence = String(args.evidence || "").trim() || prev.evidence || "";
-			if (!evidence) throw new Error("memory_update: 需要 evidence（行动验证公理：新旧条目均无证据，不写）");
-			const advisories = [];
-			// [0.6.9] 正文与溯源的版本契约：新实测结论可传新来源；未传来源时明确继承
-			// 原指针（仅整理措辞的合法情形），但把"证据已换、来源仍旧"的错位亮出来。
-			const hasNewSource = Boolean(args.sourceSession) || (Array.isArray(args.sourceSeqs) && args.sourceSeqs.length);
-			if (String(args.evidence || "").trim() && !hasNewSource && prev.sourceSession) {
-				advisories.push("已提供新 evidence 但沿用原来源指针（sourceSession/sourceSeqs）：若本次是新实测，请传入新来源，避免证据与来源版本错位");
-			}
-			const r = writeMemory(root, {
-				topic,
-				entryType: type,
-				content,
-				evidence,
-				sourceSession: args.sourceSession || prev.sourceSession || null,
-				sourceSeqs: Array.isArray(args.sourceSeqs) && args.sourceSeqs.length ? args.sourceSeqs : (prev.sourceSeqs || []),
-				namespace: ns,
-				related: Array.isArray(args.related) ? args.related : undefined,
-				maxChars: cfg.l1MaxChars,
-				snapshot: supersede,
-			});
-			return { topic, entry_type: type, action: supersede ? "superseded" : "updated", namespace: ns, history: r.history, advisories: [...advisories, ...(r.advisories || [])] };
-		},
-		presentCall(args) {
-			return { card: "generic", title: `更新记忆 ${args.topic}`, kind: "execute" };
-		}
-	});
-
-	const archiveTool = defineTool({
-		name: "memory_archive",
-		description: "归档/恢复一条记忆。归档：从 L1 索引隐藏，文件与历史保留（不物理删除），并先给当前版本建快照（正文+元数据成对，可 memory_rollback 恢复）。unarchive=true：恢复可见性（解除隐藏、剥掉归档横幅），与 rollback（恢复历史版本）是两件事。replacement 提供替代条目名（合并场景的\"源条目 → 替代条目\"记录）。可选 namespace。",
-		parameters: {
-			topic: {
-				type: "string",
-				required: true,
-				description: "记忆主题"
-			},
-			entry_type: {
-				type: "string",
-				enum: ["fact", "sop"],
-				required: true,
-				description: "fact 或 sop"
-			},
-			unarchive: {
-				type: "boolean",
-				description: "true=恢复可见性（不改内容）；默认 false=归档"
-			},
-			replacement: {
-				type: "string",
-				description: "替代条目名（把源内容合并进哪条后才归档的\"哪条\"，写入 meta 的 replacedBy 便于回溯）"
-			},
-			namespace: {
-				type: "string",
-				description: "命名空间"
-			}
-		},
-		output: {
-			schema: {
-			type: "object",
-			additionalProperties: true,
-			properties: {
-				topic: { type: "string", required: true },
-				entry_type: { ...ENTRY_TYPE, required: true },
-				namespace: { type: "string", required: true },
-				archived: { type: "boolean", required: true },
-				unarchived: { type: "boolean" },
-				history: { type: "string" },
-			},
-		},
-			render: (_args, value) => [{
-				type: "text",
-				text: value.unarchived
-					? `✅ 已恢复可见性「${value.topic}」[${value.namespace}]（内容未改动；要恢复历史版本用 memory_rollback）`
-					: value.archived
-						? `📦 已归档「${value.topic}」[${value.namespace}]${value.history ? `（归档前快照 ${value.history}，可用 memory_rollback 恢复）` : ""}（memory_search 仍可检索到）`
-						: `未找到「${value.topic}」`
-			}]
-		},
-		async execute(args, exec) {
-			const ns = nsOf(args, exec);
-			const root = nsRoot(cfg.memoryDir, ns);
-			ensureNamespaceLayout(root);
-			const topic = String(args.topic).trim();
-			assertSafeTopic(topic, "memory_archive"); // [0.6.1 M4] 判据单源，与写入侧一致
-			const type = args.entry_type === "fact" ? "fact" : "sop";
-			const key = type === "fact" ? topic : slugify(topic);
-			const exists = type === "fact" ? readFact(root, key) !== null : readSop(root, key) !== null;
-			if (!exists) return { topic, entry_type: type, namespace: ns, archived: false };
-			// [0.6.9] unarchive = 恢复可见性（与 rollback=恢复历史版本分开）：
-			// 解除隐藏 + 剥掉正文归档横幅，内容一个字不动。
-			if (args.unarchive === true) {
-				setEntryMeta(root, type, key, { archived: false, unarchivedAt: new Date().toISOString() });
-				unarchiveEntryBody(root, type, key);
-				syncIndex(root, cfg.l1MaxChars);
-				return { topic, entry_type: type, namespace: ns, archived: false, unarchived: true };
-			}
-			// [0.6.9] 归档前给当前版本建快照（正文 + 元数据 sidecar）：此前只在 supersede
-			// 时留快照，"V1 → 更新 V2 → 归档 V2 → rollback" 只会得到 V1，回不到归档前状态。
-			const snap = snapshotEntry(root, type, key);
-			setEntryMeta(root, type, key, {
-				archived: true,
-				archivedAt: new Date().toISOString(),
-				...(snap.path ? { archivedFrom: snap.path } : {}),
-				...(args.replacement ? { replacedBy: String(args.replacement) } : {}),
-			});
-			// [0.6.4] 横幅写进正文：归档只隐藏 L1，正文仍留在文件里（体检实测 25 条这样的正文
-			// 会被读文件的人当成现行事实）。取消归档时由写入路径自动剥离。
-			archiveEntryBody(root, type, key);
-			syncIndex(root, cfg.l1MaxChars);
-			return { topic, entry_type: type, namespace: ns, archived: true, history: snap.path || undefined };
-		},
-		presentCall(args) {
-			return { card: "generic", title: `归档记忆 ${args.topic}`, kind: "execute" };
-		}
-	});
-
-	const rollbackTool = defineTool({
-		name: "memory_rollback",
-		description: "回滚一条记忆到 .history/ 中最近一次快照（supersede/归档时自动保留）。正文与溯源元数据（证据、来源、关联）成对恢复，旧快照缺元数据时返回 meta_restored: false 并保持现状。恢复可见性用 memory_archive 的 unarchive，与回滚历史版本是两件事。可选 namespace。",
-		parameters: {
-			topic: {
-				type: "string",
-				required: true,
-				description: "记忆主题"
-			},
-			entry_type: {
-				type: "string",
-				enum: ["fact", "sop"],
-				required: true,
-				description: "fact 或 sop"
-			},
-			namespace: {
-				type: "string",
-				description: "命名空间"
-			}
-		},
-		output: {
-			schema: {
-			type: "object",
-			additionalProperties: true,
-			properties: {
-				topic: { type: "string", required: true },
-				entry_type: { ...ENTRY_TYPE, required: true },
-				namespace: { type: "string", required: true },
-				restored: { type: "boolean", required: true },
-				source: { type: "string" },
-				meta_restored: { type: "boolean" },
-			},
-		},
-			render: (_args, value) => [{
-				type: "text",
-				text: value.restored
-					? `♻️ 已回滚「${value.topic}」[${value.namespace}] ← ${value.source}${value.meta_restored ? "（正文与溯源元数据成对恢复）" : "（该快照无元数据 sidecar，证据/来源保持现状）"}`
-					: `未找到可回滚的历史「${value.topic}」`
-			}]
-		},
-		async execute(args, exec) {
-			const ns = nsOf(args, exec);
-			const root = nsRoot(cfg.memoryDir, ns);
-			ensureNamespaceLayout(root);
-			const topic = String(args.topic).trim();
-			// [0.6.1 M4] 此前 rollback 是全链路唯一没做 topic 控制字符校验的写入口：
-			// "x\n## evil" 经 slugify 仍可命中 "x evil" 的历史快照前缀，回滚即向
-			// facts.md 注入幽灵 section 并被 syncIndex 带进 L1（每轮系统上下文）。
-			assertSafeTopic(topic, "memory_rollback");
-			const type = args.entry_type === "fact" ? "fact" : "sop";
-			const key = type === "fact" ? topic : slugify(topic);
-			const prefix = type === "fact" ? `fact-${slugify(topic)}-` : `sop-${slugify(topic)}-`;
-			let files = [];
-			try {
-				files = readdirSync(join(root, HISTORY_DIR))
-					.filter((f) => f.startsWith(prefix) && f.endsWith(".md"))
-					.sort();
-			} catch { files = []; }
-			if (!files.length) return { topic, entry_type: type, namespace: ns, restored: false };
-			const latest = files[files.length - 1];
-			const src = join(root, HISTORY_DIR, latest);
-			const content = readFileSync(src, "utf8");
-			// [0.6.9] 正文与元数据成对恢复：优先读同名 .meta.json sidecar（快照当时的
-			// evidence/sourceSession/sourceSeqs/related）。老快照没有 sidecar 时明确标记
-			// meta_restored:false，元数据保持现状，不再出现"正文旧版、证据新版"的错位。
-			let metaPatchRestored = {};
-			let metaRestored = false;
-			try {
-				const sidecar = JSON.parse(readFileSync(join(root, HISTORY_DIR, latest.replace(/\.md$/, ".meta.json")), "utf8"));
-				if (sidecar && !sidecar.missing) {
-					metaPatchRestored = {
-						evidence: String(sidecar.evidence || ""),
-						sourceSession: sidecar.sourceSession || null,
-						sourceSeqs: Array.isArray(sidecar.sourceSeqs) ? sidecar.sourceSeqs.map(Number).filter(Number.isFinite) : [],
-						...(Array.isArray(sidecar.related) ? { related: sidecar.related } : {}),
-						...(sidecar.createdAt ? { createdAt: sidecar.createdAt } : {}),
-					};
-					metaRestored = true;
-				}
-			} catch { /* 无 sidecar（老快照）：元数据保持现状 */ }
-			if (type === "fact") {
-				const clean = content.replace(/^# .+\n\n/, "").trim();
-				// [0.6.1 M4] 纵深防御：与 writeMemory 的 fact 正文判据一致——历史快照理论上
-				// 不可能含 "## " 行（v0.6 前遗留除外），命中即拒绝恢复并指路人查。
-				if (/^##\s+/m.test(clean)) {
-					throw new Error(`memory_rollback: 快照 ${latest} 正文含 "## " 标题行，拒绝恢复（会造出幽灵 section；请人工核对 .history/ 后处理）`);
-				}
-				upsertFact(root, topic, clean);
-				setEntryMeta(root, "fact", topic, { archived: false, restoredFrom: latest, ...metaPatchRestored });
-			} else {
-				atomicWriteFileSync(join(root, "sops", `${key}.md`), content);
-				setEntryMeta(root, "sop", key, { archived: false, restoredFrom: latest, ...metaPatchRestored });
-			}
-			syncIndex(root, cfg.l1MaxChars);
-			return { topic, entry_type: type, namespace: ns, restored: true, source: latest, meta_restored: metaRestored };
-		},
-		presentCall(args) {
-			return { card: "generic", title: `回滚记忆 ${args.topic}`, kind: "execute" };
-		}
-	});
-
-	const expandTool = defineTool({
-		name: "memory_expand",
-		description: "展开一条记忆的溯源：通过 sourceSession/sourceSeqs 从 DSH session log 读取原始事件。可选 namespace。",
-		parameters: {
-			topic: {
-				type: "string",
-				required: true,
-				description: "记忆主题"
-			},
-			entry_type: {
-				type: "string",
-				enum: ["fact", "sop"],
-				required: true,
-				description: "fact 或 sop"
-			},
-			namespace: {
-				type: "string",
-				description: "命名空间"
-			}
-		},
-		output: {
-			schema: {
-			type: "object",
-			additionalProperties: true,
-			properties: {
-				topic: { type: "string", required: true },
-				entry_type: { ...ENTRY_TYPE, required: true },
-				available: { type: "boolean", required: true },
-				sourceSession: { type: "string", required: true },
-				sourceSeqs: { ...NUM_ARR, required: true },
-				message: { type: "string" },
-				events: {
-					type: "array",
-					items: {
-						type: "object",
-						additionalProperties: true,
-						properties: {
-							seq: { type: "number", required: true },
-							type: { type: "string", required: true },
-							time: { type: "number", required: true },
-							text: { type: "string", required: true },
-							truncated: { type: "boolean" },
-						},
-					},
-				},
-				truncated: { type: "boolean" },
-			},
-		},
-			render: (_args, value) => [{
-				type: "text",
-				text: value.available
-					? `📎 溯源「${value.topic}」[${value.entry_type}] session=${value.sourceSession} seqs=${JSON.stringify(value.sourceSeqs)}\n${value.events.map((e) => `#${e.seq} [${e.type}] ${e.text || ""}`).join("\n") || "（无事件）"}`
-					: `溯源不可用：${value.message || "无 sourceSession/sourceSeqs"}`
-			}]
-		},
-		async execute(args, exec) {
-			const ns = nsOf(args, exec);
-			const root = nsRoot(cfg.memoryDir, ns);
-			ensureNamespaceLayout(root);
-			const topic = String(args.topic).trim();
-			assertSafeTopic(topic, "memory_expand"); // [0.6.1 M4] 判据单源（读侧同样收口，非法名快速失败）
-			const type = args.entry_type === "fact" ? "fact" : "sop";
-			const key = type === "fact" ? topic : slugify(topic);
-			const meta = getEntryMeta(root, type, key);
-			if (!meta?.sourceSession || !meta.sourceSeqs?.length) {
-				return { topic, entry_type: type, available: false, message: "该记忆没有 sourceSession/sourceSeqs 溯源信息", sourceSession: meta?.sourceSession || "", sourceSeqs: numSeqs(meta?.sourceSeqs) };
-			}
-			const sq = ctx.get("sessionQuery");
-			if (!sq || typeof sq.readSession !== "function") {
-				return { topic, entry_type: type, available: false, message: "sessionQuery 服务不可用", sourceSession: meta.sourceSession || "", sourceSeqs: numSeqs(meta.sourceSeqs) };
-			}
-			// [0.6.1 N8] exec.signal 协作：readSession 是本文件唯一可能长耗时的 await（大会话日志），
-			// 前后各查一次 aborted 提前退出。其余工具为毫秒级同步文件操作（同 tick 原子完成，
-			// 取消无法更快）或 runMaintain 长同步循环（JS 不可抢占），豁免理由记录于 CHANGELOG。
-			if (exec?.signal?.aborted) throw new Error("memory_expand: 调用方已取消（signal aborted）");
-			try {
-				const snap = await sq.readSession(meta.sourceSession);
-				if (exec?.signal?.aborted) throw new Error("memory_expand: 调用方已取消（signal aborted）");
-				const seqSet = new Set(meta.sourceSeqs.map(Number));
-				// [0.6.9] 事件文本不再一刀切截 2000 字符（那会把真正的证据内容截掉）：
-				// 单事件保留到 4000 字符，总预算 12000 字符，超出按事件截断并显式标注。
-				const EVENT_TEXT_LIMIT = 4000;
-				const TOTAL_TEXT_LIMIT = 12000;
-				const events = [];
-				let used = 0;
-				let budgetCut = false;
-				for (const e of snap.events) {
-					if (!seqSet.has(Number(e.seq))) continue;
-					let text = typeof e.text === "string" ? e.text : JSON.stringify(e);
-					let evTruncated = false;
-					if (text.length > EVENT_TEXT_LIMIT) { text = text.slice(0, EVENT_TEXT_LIMIT); evTruncated = true; }
-					if (used + text.length > TOTAL_TEXT_LIMIT) {
-						text = text.slice(0, Math.max(0, TOTAL_TEXT_LIMIT - used));
-						evTruncated = true;
-						budgetCut = true;
-					}
-					used += text.length;
-					events.push({ seq: Number(e.seq), type: String(e.type || ""), time: Number(e.time || 0), text, ...(evTruncated ? { truncated: true } : {}) });
-					if (budgetCut) break;
-				}
-				return { topic, entry_type: type, available: true, sourceSession: meta.sourceSession || "", sourceSeqs: numSeqs(meta.sourceSeqs), events, truncated: budgetCut };
-			} catch (error) {
-				return { topic, entry_type: type, available: false, message: `展开失败: ${error?.message || error}`, sourceSession: meta.sourceSession || "", sourceSeqs: numSeqs(meta.sourceSeqs) };
-			}
-		},
-		presentCall(args) {
-			return { card: "generic", title: `展开溯源 ${args.topic}`, kind: "read" };
-		}
-	});
-
-	const searchTool = defineTool({
-		name: "memory_search",
-		description: "全文检索记忆库（BM25，无模型）：覆盖 L2 facts、L3 sops、归档条目。L1 索引被裁剪/隐藏的条目也能找回。支持跨命名空间（all_namespaces=true）。可选 namespace。",
-		parameters: {
-			query: {
-				type: "string",
-				required: true,
-				description: "检索关键词（中英文均可，中文按 bigram 切分）"
-			},
-			namespace: {
-				type: "string",
-				description: "命名空间（默认取 workspace/git 分支或配置 defaultNamespace）"
-			},
-			all_namespaces: {
-				type: "boolean",
-				description: "跨全部命名空间检索（默认 false）"
-			},
-			include_archived: {
-				type: "boolean",
-				description: "是否包含归档条目（默认 true）"
-			},
-			limit: {
-				type: "integer",
-				description: "返回条数上限（默认 8）"
-			}
-		},
-		output: {
-			schema: {
-			type: "object",
-			additionalProperties: true,
-			properties: {
-				query: { type: "string", required: true },
-				namespaces_searched: { ...STR_ARR, required: true },
-				results: {
-					type: "array",
-					required: true,
-					items: {
-						type: "object",
-						additionalProperties: true,
-						properties: {
-							namespace: { type: "string", required: true },
-							kind: { type: "string", required: true },
-							name: { type: "string", required: true },
-							archived: { type: "boolean", required: true },
-							score: { type: "number", required: true },
-							snippet: { type: "string", required: true },
-						},
-					},
-				},
-			},
-		},
-			render: (_args, value) => [{
-				type: "text",
-				text: value.results.length === 0
-					? `检索「${value.query}」无结果（范围: ${value.namespaces_searched.join(", ")}）`
-					: `检索「${value.query}」（范围: ${value.namespaces_searched.join(", ")}）：\n` + value.results.map((r, i) =>
-						`${i + 1}. [${r.namespace}] ${r.kind}:${r.name}${r.archived ? "（已归档）" : ""} score=${r.score}\n   ${r.snippet}`).join("\n")
-			}]
-		},
-		isConcurrencySafe: () => true, // [0.6.1 I9] 纯读，参与并行组
-		async execute(args, exec) {
-			const query = String(args.query ?? "").trim();
-			if (!query) throw new Error("memory_search: query 必填");
-			const includeArchived = args.include_archived !== false;
-			const limit = Math.max(1, Math.min(50, Number(args.limit) || 8));
-			let namespaces;
-			if (args.all_namespaces) {
-				namespaces = listNamespaces(cfg.memoryDir);
-			} else {
-				namespaces = [nsOf(args, exec)];
-			}
-			const results = searchNamespaces(cfg.memoryDir, namespaces, query, { limit, includeArchived });
-			return { query, namespaces_searched: namespaces, results };
-		},
-		presentCall(args) {
-			return { card: "generic", title: `检索记忆 ${args.query}`, kind: "read" };
-		}
-	});
-
-	const promoteTool = defineTool({
-		name: "memory_promote",
-		description: "把一条命名空间内的记忆提升到另一命名空间（默认提升到全局 default）：复制内容与溯源到目标空间，源条目默认归档保留。用于把项目局部经验升格为跨项目通用经验。",
-		parameters: {
-			topic: {
-				type: "string",
-				required: true,
-				description: "记忆主题"
-			},
-			entry_type: {
-				type: "string",
-				enum: ["fact", "sop"],
-				required: true,
-				description: "fact 或 sop"
-			},
-			from_namespace: {
-				type: "string",
-				description: "来源命名空间（默认当前命名空间）"
-			},
-			to_namespace: {
-				type: "string",
-				description: "目标命名空间（默认 default，即全局）"
-			},
-			archive_source: {
-				type: "boolean",
-				description: "是否归档源条目（默认 true，保留 citation 可回溯）"
-			},
-			evidence: {
-				type: "string",
-				description: "验证证据（缺省时继承源条目的 evidence；两者都为空则拒绝提升——行动验证公理不允许占位串）"
-			}
-		},
-		output: {
-			schema: {
-			type: "object",
-			additionalProperties: true,
-			properties: {
-				promoted: { type: "boolean", required: true },
-				topic: { type: "string", required: true },
-				entry_type: { ...ENTRY_TYPE, required: true },
-				from: { type: "string", required: true },
-				to: { type: "string", required: true },
-				source_archived: { type: "boolean" },
-			},
-		},
-			render: (_args, value) => [{
-				type: "text",
-				text: value.promoted
-					? `✅ 已提升「${value.topic}」（${value.entry_type}）[${value.from}] → [${value.to}]${value.source_archived ? "，源条目已归档" : ""}`
-					: `未找到可提升的「${value.topic}」[${value.from}]`
-			}]
-		},
-		async execute(args, exec) {
-			const topic = String(args.topic).trim();
-			assertSafeTopic(topic, "memory_promote"); // [0.6.1 M4] 判据单源（writeMemory 前失败，不产生跨空间副作用）
-			const type = args.entry_type === "fact" ? "fact" : "sop";
-			const fromNs = resolveNamespace(cfg, args.from_namespace, sessionCwd(exec));
-			const toNs = safeNs(args.to_namespace || "default");
-			if (fromNs === toNs) throw new Error("memory_promote: 来源与目标命名空间相同");
-			const fromRoot = nsRoot(cfg.memoryDir, fromNs);
-			const toRoot = nsRoot(cfg.memoryDir, toNs);
-			ensureNamespaceLayout(toRoot);
-			const key = type === "fact" ? topic : slugify(topic);
-			const content = type === "fact" ? readFact(fromRoot, key) : readSop(fromRoot, key);
-			if (content === null) return { promoted: false, topic, entry_type: type, from: fromNs, to: toNs };
-			const meta = getEntryMeta(fromRoot, type, key) || {};
-			// [v0.6] 证据不可伪造：源条目无证据时必须显式提供，不再用 "promoted from namespace:X" 占位串过关。
-			const evidenceText = String(args.evidence || "").trim() || String(meta.evidence || "").trim();
-			if (!evidenceText) {
-				throw new Error("memory_promote: 源条目无 evidence，且未提供 evidence 参数（行动验证公理：无行动，不记忆）。请先用 memory_update 补齐证据再提升。");
-			}
-			writeMemory(toRoot, {
-				topic,
-				entryType: type,
-				content,
-				evidence: evidenceText,
-				sourceSession: meta.sourceSession || null,
-				sourceSeqs: numSeqs(meta.sourceSeqs),
-				namespace: toNs,
-				related: Array.isArray(meta.related) ? meta.related : [],
-				maxChars: cfg.l1MaxChars,
-				snapshot: true,
-			});
-			const archiveSource = args.archive_source !== false;
-			if (archiveSource) {
-				setEntryMeta(fromRoot, type, key, { archived: true, promotedTo: `${toNs}:${topic}`, archivedAt: new Date().toISOString() });
-				syncIndex(fromRoot, cfg.l1MaxChars);
-			}
-			return { promoted: true, topic, entry_type: type, from: fromNs, to: toNs, source_archived: archiveSource };
-		},
-		presentCall(args) {
-			return { card: "generic", title: `提升记忆 ${args.topic}`, kind: "execute" };
-		}
-	});
-
-	return [readTool, listTool, writeTool, indexTool, statsTool, maintainTool, pendingTool, acceptTool, updateTool, archiveTool, rollbackTool, expandTool, searchTool, promoteTool];
-}
-
-/**
- * [v0.5.2] 去掉 L3 文件首部的重复“# 标题”：写入模板自动加一次标题，若 content
- * 自带同名一级标题则 read 时会出现重复标题行（可能不止一个）。循环删除与
- * topic/slug 同名的首行标题，顺带吃掉紧随的空行；正文里的其他一级标题不动。
- */
-function stripLeadingTitle(content, slug) {
-	if (!content) return content;
-	const expected = `# ${String(slug).trim()}`;
-	const expectedSlug = `# ${slugify(String(slug))}`;
-	const normalized = (s) => s.toLowerCase().replace(/^#\s+/, "").replace(/-/g, " ").trim();
-	const target = normalized(expected);
-	let lines = content.split(/\r?\n/);
-	while (lines.length > 0) {
-		const first = lines[0].trim();
-		const isDup = first === expected || first === expectedSlug ||
-			(/^#\s+/.test(first) && normalized(first) === target);
-		if (!isDup) break;
-		lines = lines.slice(1);
-		while (lines.length > 0 && lines[0].trim() === "") lines = lines.slice(1);
+	defs.push(tool("memory_pending", "列出候选摘要和可读entry。使用memory_read读取候选，再接受整理后的内容或discard。", { namespace: namespaceArg }, {
+		namespace: req(str), pending: req(arr(obj({ name: req(str), entry: req(readableRef), summary: req(str) }))),
+	}, async (args, exec) => {
+		const namespace = nsOf(args, exec), root = nsRoot(cfg.memoryDir, namespace);
+		return { namespace, pending: pendingNames(root).map(name => ({ name, entry: { namespace, kind: "pending", key: name }, summary: pendingSummary(readPending(root, name)) })) };
+	}, true));
+	function closePending(root, name, disposition, details) {
+		const key = `${Date.now()}-${disposition}-${safeFile(name)}`;
+		mkdirSync(join(root, ARCHIVE_DIR), { recursive: true });
+		copyFileSync(join(root, PENDING_DIR, name), join(root, ARCHIVE_DIR, key));
+		atomicWriteFileSync(join(root, ARCHIVE_DIR, `${key}.json`), JSON.stringify({ disposition, ...details, closedAt: new Date().toISOString() }, null, 2));
+		rmSync(join(root, PENDING_DIR, name));
+		return key;
 	}
-	return lines.join("\n");
-}
+	defs.push(tool("memory_accept", "把候选整理成新的fact/SOP。content必须是精炼后的可复用正文，evidence说明验证；原候选留档。", {
+		namespace: namespaceArg, name: req(str), kind: req(memoryKind), topic: req(str), content: req(str), evidence: req(str), related: arr(entryRef), ...sourceArgs,
+	}, { ...mutationOutput, candidate_archive: req(readableRef) }, async (args, exec) => {
+		const namespace = nsOf(args, exec), root = nsRoot(cfg.memoryDir, namespace);
+		return withNsWriteLock(root, () => {
+			const pending = readPending(root, safeFile(args.name));
+			if (!pending) throw new Error("候选不存在或格式无效");
+			const key = args.kind === "fact" ? args.topic.trim() : slugify(args.topic), entry = { namespace, kind: args.kind, key };
+			const stored = writeMemory(root, { mode: "create", topic: args.topic, entryType: args.kind, content: args.content, evidence: args.evidence,
+				namespace, ...source(args, exec), ...(args.related ? { related: args.related } : {}), maxChars: cap });
+			const archiveKey = closePending(root, args.name, "accepted", { entry, originalSource: parsePending(pending) });
+			return { ...result(entry, "accepted", stored, args.sourceSession === undefined), candidate_archive: { namespace, kind: "archive", key: archiveKey } };
+		});
+	}));
 
-function formatRelated(related) {
-	if (!Array.isArray(related) || related.length === 0) return "";
-	const parts = related.map((r) => {
-		// [v0.5.2] 兼容两种形态：resolveRelated 产出的 {name,state} 对象，或历史字符串数组
-		if (typeof r === "string") return `  · ${r}（未知状态）`;
-		return `  · ${r.name}（${r.state === "active" ? "活跃" : r.state === "archived" ? "已归档" : "未找到"}）`;
-	});
-	return `\n\n关联记忆:\n${parts.join("\n")}`;
+	defs.push(tool("memory_discard", "关闭无需入库的候选并留可恢复的原文及处置原因。", {
+		namespace: namespaceArg, name: req(str), reason: req(str),
+	}, { discarded: req(bool), archive: req(readableRef) }, async (args, exec) => {
+		const namespace = nsOf(args, exec), root = nsRoot(cfg.memoryDir, namespace);
+		return withNsWriteLock(root, () => {
+			if (!readPending(root, safeFile(args.name))) throw new Error("候选不存在或格式无效");
+			const key = closePending(root, args.name, "discarded", { reason: args.reason });
+			return { discarded: true, archive: { namespace, kind: "archive", key } };
+		});
+	}));
+
+	defs.push(tool("memory_promote", "把entry复制到目标空间（默认default全局），保留纯正文与原来源。目标同名已存在时报错；可归档源条目并链接新entry。", {
+		entry: refArg, to_namespace: str, archive_source: bool,
+	}, { ...mutationOutput, source: req(entryRef), source_archived: req(bool) }, async args => {
+		const original = ref(args.entry), namespace = safeNs(args.to_namespace ?? "default");
+		if (namespace === original.namespace) throw new Error("目标空间必须与来源不同");
+		const fromRoot = rootOf(original), toRoot = nsRoot(cfg.memoryDir, namespace);
+		return withNsWriteLocks([fromRoot, toRoot], () => {
+			const originalValue = mustRead(fromRoot, original);
+			ensureNamespaceLayout(toRoot);
+			const entry = { ...original, namespace };
+			const stored = writeMemory(toRoot, { mode: "create", key: entry.key, topic: originalValue.title, entryType: entry.kind, content: originalValue.content,
+				evidence: originalValue.meta.evidence, sourceSession: originalValue.meta.sourceSession, sourceSeqs: originalValue.meta.sourceSeqs,
+				namespace, related: [...(originalValue.meta.related || []), original], maxChars: cap });
+			const sourceArchived = args.archive_source ?? true;
+			if (sourceArchived) { archiveEntry(fromRoot, original.kind, original.key, { replacement: entry }); syncIndex(fromRoot, cap); }
+			return { ...result(entry, "promoted", stored), source: original, source_archived: sourceArchived };
+		});
+	}));
+
+	defs.push(tool("memory_namespace", "列出命名空间与工作区映射，或迁移到新空间并保留原目录。目标必须为空。", {
+		action: req({ type: "string", enum: ["list", "migrate"] }), from_namespace: str, to_namespace: str, workspace: str,
+	}, { namespaces: arr(record), migration: record }, async args => {
+		if (args.action === "list") return { namespaces: listNamespaces(cfg.memoryDir).map(namespace => readNamespaceIdentity(cfg.memoryDir, namespace)) };
+		if (!args.from_namespace || !args.to_namespace) throw new Error("迁移需要from_namespace和to_namespace");
+		const workspace = args.workspace && cfg.workspaceRootFor ? cfg.workspaceRootFor(args.workspace) : args.workspace;
+		return { migration: migrateNamespace(cfg.memoryDir, args.from_namespace, args.to_namespace, workspace ? { workspace } : {}) };
+	}));
+	const expandCursor = obj({ event_offset: req(num), from_line: req(num) });
+	defs.push(tool("memory_expand", "按精确sourceSeqs读取来源事件，支持普通工具与PTC子调用。用next继续读取完整证据，不序列化整份会话或模型内部元数据。", {
+		entry: refArg, event_offset: { ...num, description: "从第几个来源事件开始，0起" }, from_line: num,
+		max_events: { ...num, description: "本页1至20个事件，默认4" }, max_chars: { ...num, description: "本页正整数字符预算，默认12000" },
+	}, {
+		entry: req(entryRef), available: req(bool), sourceSession: nullable(str), sourceSeqs: req(arr(num)),
+		events: req(arr(record)), next: req(nullable(expandCursor)), complete: req(bool), message: str,
+	}, async (args, exec) => {
+		const entry = ref(args.entry), value = mustRead(rootOf(entry), entry);
+		const { sourceSession, sourceSeqs = [] } = value.meta;
+		if (!sourceSession || !sourceSeqs.length) return { entry, available: false, sourceSession: sourceSession || null, sourceSeqs, events: [], next: null, complete: false, message: "该条目没有可回放的精确来源事件" };
+		const query = ctx.get("sessionQuery");
+		if (!query) return { entry, available: false, sourceSession, sourceSeqs, events: [], next: null, complete: false, message: "此宿主未提供sessionQuery服务" };
+		const { extractSessionEventText } = await import("@deepseek-ai/dsh-session-query");
+		const offset = args.event_offset ?? 0, maxEvents = args.max_events ?? 4, budget = args.max_chars ?? 12000;
+		if (offset < 0 || offset >= sourceSeqs.length) throw new RangeError("event_offset超出来源事件列表");
+		if (maxEvents < 1 || maxEvents > 20) throw new RangeError("max_events必须在1至20之间");
+		if (budget < 1) throw new RangeError("max_chars必须大于0");
+		const events = []; let used = 0, next = null;
+		for (let i = offset; i < sourceSeqs.length && events.length < maxEvents; i++) {
+			exec.signal?.throwIfAborted();
+			const { target } = await query.readEvent({ sessionId: sourceSession, seq: sourceSeqs[i], before: 0, after: 0 }, exec.signal);
+			const ptc = target.type === "tool/ptc-dispatch" || target.type === "tool/code-dispatch";
+			const text = ptc ? target.data.content.filter(block => block.type === "text").map(block => block.text).join("\n") : extractSessionEventText(target);
+			const page = pageContent(text, { from_line: i === offset ? args.from_line ?? 1 : 1, max_chars: Math.max(1, budget - used) });
+			events.push({ seq: target.seq, type: target.type, time: target.time, ...(ptc ? { tool: target.data.name, call_id: target.data.subCallId, is_error: target.data.isError } : {}), ...page });
+			used += page.content.length;
+			if (page.next_line !== null) { next = { event_offset: i, from_line: page.next_line }; break; }
+			if (i + 1 < sourceSeqs.length) next = { event_offset: i + 1, from_line: 1 }; else next = null;
+			if (used >= budget) break;
+		}
+		return { entry, available: true, sourceSession, sourceSeqs, events, next, complete: offset === 0 && (args.from_line ?? 1) === 1 && next === null };
+	}, true));
+
+	return defs;
 }

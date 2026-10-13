@@ -114,10 +114,15 @@ export function resolveNamespace(cfg, explicit, cwd) {
 /** 初始化命名空间目录结构（幂等，不覆盖已有内容；种子文件缺失时写入模板）。 */
 export function ensureNamespaceLayout(root) {
 	mkdirSync(root, { recursive: true });
-	mkdirSync(join(root, "sops"), { recursive: true });
-	mkdirSync(join(root, PENDING_DIR), { recursive: true });
-	mkdirSync(join(root, ARCHIVE_DIR), { recursive: true });
-	mkdirSync(join(root, HISTORY_DIR), { recursive: true });
+	// 子目录创建失败（如命名空间目录只读）不得阻断初始化——工具仍应可用。
+	for (const dir of ["sops", PENDING_DIR, ARCHIVE_DIR, HISTORY_DIR]) {
+		try {
+			mkdirSync(join(root, dir), { recursive: true });
+		} catch (err) {
+			if (err && (err.code === "EACCES" || err.code === "EPERM")) continue;
+			throw err;
+		}
+	}
 	const seeds = [
 		["memory_management_sop.md", L0_TEMPLATE],
 		["index.txt", INDEX_TEMPLATE],
@@ -125,7 +130,12 @@ export function ensureNamespaceLayout(root) {
 	];
 	for (const [file, content] of seeds) {
 		const p = join(root, file);
-		if (!existsSync(p)) atomicWriteFileSync(p, content);
+		try {
+			if (!existsSync(p)) atomicWriteFileSync(p, content);
+		} catch (err) {
+			if (err && (err.code === "EACCES" || err.code === "EPERM")) continue;
+			throw err;
+		}
 	}
 	// [0.7.1] 遗留文件隔离：memory_stats.json 是早期版本的访问统计落点，现版本
 	// 统计在 file_access_stats.json（ACCESS_FILE），旧文件全代码库零引用，留在库里

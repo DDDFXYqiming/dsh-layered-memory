@@ -1,271 +1,180 @@
-// 插件入口接线：配置、L1 注入、runtime skill、工具注册（渐进暴露）、事件。
-
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import Schema from "@deepseek-ai/schemastery";
-import { ensureNamespaceLayout, nsRoot, resolveNamespace, defaultMemDir, backfillMeta, HEAT_HALF_LIFE_DAYS, RECENCY_WINDOW_MS, NAMESPACE_CACHE_TTL_MS_DEFAULT } from "./store.js";
+import { ensureNamespaceLayout, nsRoot, resolveNamespace, defaultMemDir, backfillMeta, HEAT_HALF_LIFE_DAYS, RECENCY_WINDOW_MS } from "./store.js";
 import { NEAR_DUPE_THRESHOLD, MERGE_CANDIDATE_THRESHOLD, MIN_TOKENS_FOR_FUZZY, COLD_REVIEW_DAYS } from "./maintain.js";
-import { readIndex, L1_MAX_CHARS_DEFAULT, buildPromptIndex } from "./l1index.js";
+import { L1_MAX_CHARS_DEFAULT, buildCombinedPromptIndex } from "./l1index.js";
 import { buildTools } from "./tools.js";
 import { wireEvents } from "./events.js";
+import { readActivation } from "./activation-history.js";
 import { SKILL_NAME, SKILL_DESCRIPTION, SKILL_WHEN_TO_USE, SKILL_CONTENT } from "./skill-content.js";
 
-// [0.6.1 N14] inject 只表达「必需服务」。官方语义（user/develop/framework/service.zh.md）：
-// 必需依赖缺席时插件根本不加载（等待就绪）；可选依赖应省略 inject、在使用点用 ctx.get()
-// 查询。cordis 4.0.2 的 ctx.get 源码注释明确 "Read a service from the store without the
-// inject requirement"——旧注释（spec-audit 2026-08-14，基于旧版实测「未 inject 恒 undefined」）
-// 已过时。取舍：skills/tools/agents/systemPrompt 是工具注册、渐进暴露、反思注入与 L1 注入的
-// 核心能力，保留为必需；sessionQuery 仅 memory_expand 使用且已有「服务不可用」规范值降级路径
-// （tools.js），按可选处理移出 inject——裁剪该服务的 profile 上插件整体可用，expand 优雅降级，
-// 而不是全插件 PENDING。
 const inject = ["skills", "tools", "agents", "systemPrompt"];
-
-/** Schemastery 配置 schema（官方 config 约定：加载期校验 + 默认值填充）。可调常量的默认值取自各自归属模块的导出常量，保持单一来源。 */
+const accessSchema = () => Schema.union([Schema.const("read"), Schema.const("write")]);
 export const Config = Schema.object({
 	memoryDir: Schema.string().default(""),
-	// [spec-audit 2026-08-14] 纯 boolean：非法配置在加载期响亮失败（config.md §Fail loudly）
 	progressive: Schema.boolean().default(true),
-	// v0.3 命名空间
+	memoryAccess: accessSchema().default("write"),
+	subagentMemoryAccess: accessSchema().default("read"),
 	defaultNamespace: Schema.string().default(""),
 	autoNamespace: Schema.boolean().default(true),
-	// v0.3 自动蒸馏（v0.5 起只捕获「先失败后成功」的重试序列）
-	// [v0.6] 默认关闭：实测 6 天累积 108 条候选、消费≈0，且内容多为工具用法噪声（TS 引号错、
-	// 未知工具名等），对未来任务零复用价值。需要时显式开启，或直接用 memory_write 主动沉淀。
 	autoPending: Schema.boolean().default(false),
-	// [0.6.6] 反思提醒总开关（专项审查 F6：此前没有真正的开关——maintainEveryTurns=0
-	// 只关周期维护，autoPending=false 只关自动候选及其通知分支，reflectSopsThreshold=0
-	// 反而是恒真）。关闭它停止提醒或独立模型整理，不影响 L1 注入、检索、读取、
-	// 主动写入、周期程序维护与手动 memory_maintain。
 	reflectionEnabled: Schema.boolean().default(true),
-	// [0.6.7] auto 派发独立维护子任务；首版 opt-in，notify 保持现有安装兼容。
 	reflectionMode: Schema.union([Schema.const("auto"), Schema.const("notify")]).default("notify"),
 	maintenanceProvider: Schema.string().default("spawn"),
+	maintenanceLlmProvider: Schema.string().default(""),
+	maintenanceModel: Schema.string().default(""),
+	maintenanceReasoningEffort: Schema.string().default(""),
+	maintenanceMaxTokens: Schema.natural().min(1).default(4096),
 	maintenanceCooldownMinutes: Schema.natural().min(1).default(30),
 	maintenanceTimeoutSeconds: Schema.natural().min(10).default(300),
 	maintenanceMaxCalls: Schema.natural().min(1).default(32),
 	maintenanceMaxWrites: Schema.natural().min(1).default(6),
-	// v0.4 自动维护（v0.5 起计数持久化，跨会话累计触发）
-	// [0.6.1 N4] 轮数/条数阈值属整数语义：natural()（>=0 整数）让 -1/2.5 这类
-	// 无效配置在插件加载期响亮失败（config.zh.md「配置错误要响亮」），与 l1MaxChars 等
-	// 已有约束字段标准一致。maintainEveryTurns=0 保留「关闭」语义。
 	maintainEveryTurns: Schema.natural().default(20),
-	// v0.5 反思注入阈值：pending 候选数达到该值时提示宿主整理
 	reflectPendingThreshold: Schema.natural().default(5),
-	// v0.5 反思注入阈值：L3 SOP 条数达到该值时提示宿主整合
 	reflectSopsThreshold: Schema.natural().default(40),
-	// [spec-fix 2026-09] 原散落的启发式/容量阈值提为配置
-	// [v0.6] L1 唯一预算：字符数（旧 maxIndexLines 行数预算废弃——行数合规而 token 失控，
-	// 且一行一条目导致 30 行只能装 16 条、把 88 条事实挤成"永久隐身"）。
 	l1MaxChars: Schema.number().min(1024).default(L1_MAX_CHARS_DEFAULT),
+	globalL1MaxChars: Schema.natural().min(512).default(2048),
 	reflectCooldownTurns: Schema.natural().default(10),
 	nearDupeThreshold: Schema.number().min(0).max(1).default(NEAR_DUPE_THRESHOLD),
 	mergeCandidateThreshold: Schema.number().min(0).max(1).default(MERGE_CANDIDATE_THRESHOLD),
 	minTokensForFuzzy: Schema.number().min(1).default(MIN_TOKENS_FOR_FUZZY),
 	heatHalfLifeDays: Schema.number().min(1).default(HEAT_HALF_LIFE_DAYS),
-	recencyWindowDays: Schema.number().min(1).default(RECENCY_WINDOW_MS / (24 * 60 * 60 * 1000)),
-	// [0.6.1 M3] autoNamespace 的 git 分支探测进程内缓存 TTL（0 = 关闭缓存）。默认路径在
-	// 每轮 prompt 装配与每次工具执行上，无缓存时逐轮同步 spawn git 阻塞事件循环。
-	namespaceCacheTtlMs: Schema.natural().default(NAMESPACE_CACHE_TTL_MS_DEFAULT),
-	// [0.6.1 N5] 冷条目复核窗口（天）入 Config；limit/候选条数/检索钳位为展示常量保留。
+	recencyWindowDays: Schema.number().min(1).default(RECENCY_WINDOW_MS / 86400000),
 	coldReviewDays: Schema.number().min(1).default(COLD_REVIEW_DAYS),
 });
 
+const READ_TOOLS = new Set(["memory_read", "memory_list", "memory_search", "memory_stats", "memory_pending", "memory_expand", "memory_history"]);
+const COMMON_TOOLS = new Set(["memory_read", "memory_list", "memory_search", "memory_stats", "memory_write", "memory_update"]);
+const skillGesture = message => message?.source?.kind === "user" && message.content.some(block => block.type === "text" && /(^|\s)\/memory(?=\s|$)/.test(block.text));
+
 function apply(ctx, config = {}) {
-	// 默认值唯一来源 = Config schema；profile 层的空串按未提供处理。
-	const provided = {};
-	for (const [key, value] of Object.entries(config)) {
-		if (value !== "") provided[key] = value;
-	}
-	const cfg = Config(provided);
+	const cfg = Config(Object.fromEntries(Object.entries(config).filter(([, value]) => value !== "")));
 	if (!cfg.memoryDir) cfg.memoryDir = defaultMemDir();
-	cfg.heat = {
-		halfLifeDays: cfg.heatHalfLifeDays,
-		recencyWindowMs: cfg.recencyWindowDays * 24 * 60 * 60 * 1000,
-	};
-	cfg.maintainOpts = {
-		nearDupeThreshold: cfg.nearDupeThreshold,
-		mergeCandidateThreshold: cfg.mergeCandidateThreshold,
-		minTokensForFuzzy: cfg.minTokensForFuzzy,
-		heat: cfg.heat,
-		coldReviewDays: cfg.coldReviewDays,
-	};
-
+	const version = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+	const runtimeInfo = { version, loadedAt: new Date().toISOString(), source: fileURLToPath(import.meta.url), memoryDir: cfg.memoryDir, mode: cfg.reflectionMode };
+	cfg.runtimeInfo = runtimeInfo;
+	if (Boolean(cfg.maintenanceLlmProvider) !== Boolean(cfg.maintenanceModel)) throw new Error("maintenanceLlmProvider and maintenanceModel must be set together");
+	cfg.heat = { halfLifeDays: cfg.heatHalfLifeDays, recencyWindowMs: cfg.recencyWindowDays * 86400000 };
+	cfg.maintainOpts = { nearDupeThreshold: cfg.nearDupeThreshold, mergeCandidateThreshold: cfg.mergeCandidateThreshold, minTokensForFuzzy: cfg.minTokensForFuzzy, heat: cfg.heat, coldReviewDays: cfg.coldReviewDays };
+	const workspaceRoots = new Map();
+	cfg.workspaceRootFor = cwd => workspaceRoots.get(cwd) || cwd;
+	async function prepareWorkspace(agent) {
+		const cwd = agent.session.header.cwd;
+		if (!cfg.autoNamespace || cfg.defaultNamespace || !cwd || workspaceRoots.has(cwd)) return;
+		const workspace = await ctx.get("workspaces")?.resolveByPath(cwd);
+		workspaceRoots.set(cwd, workspace?.path || cwd);
+	}
 	const disposers = [];
-	const agentStates = new Map();
-	// [0.6.1 M3] 每个 root 只做一次布局 ensure：L1 注入的 text() 热路径与 turn/end
-	// 不再每轮重复 5×mkdirSync + 种子 existsSync；各工具 execute 仍显式 ensure，
-	// 懒创建新命名空间不受影响。
-	const ensuredRoots = new Set();
-
-	// [0.6.9] cwd 入参：命名空间按会话工作区解析（prompt 注入取 assembly 的
-	// context.agent.session.header.cwd，工具取 exec.agent.session.header.cwd）；
-	// 不传时回退服务进程启动目录（加载期初始化、无会话装配的兜底）。
-	const resolveRoot = (cwd) => {
-		const ns = resolveNamespace(cfg, undefined, cwd);
-		const root = nsRoot(cfg.memoryDir, ns);
-		if (!ensuredRoots.has(root)) {
-			try {
-				ensureNamespaceLayout(root);
-				ensuredRoots.add(root);
-			} catch { /* ensure 失败（只读目录等）不缓存，下次求值重试；注入面另有 text() 兜底 */ }
+	const states = new Map();
+	const ensured = new Set();
+	function resolveRoot(cwd) {
+		const namespace = resolveNamespace(cfg, undefined, cwd);
+		const root = nsRoot(cfg.memoryDir, namespace);
+		if (!ensured.has(root)) {
+			ensureNamespaceLayout(root, { namespace, ...(!cfg.defaultNamespace && cfg.autoNamespace && namespace !== "default" ? { workspace: cfg.workspaceRootFor(cwd || process.cwd()) } : {}) });
+			backfillMeta(root, { namespace });
+			ensured.add(root);
 		}
 		return root;
-	};
-
-	// 只初始化当前实际命名空间；不要把未使用的 memoryDir 根目录伪装成第二个 namespace。
-	// 加载期 ensure 失败仍响亮抛出（配置错误 fail loud）。
-	const initialRoot = nsRoot(cfg.memoryDir, resolveNamespace(cfg));
-	ensureNamespaceLayout(initialRoot);
-	ensuredRoots.add(initialRoot);
-
-	// [0.6.4] 元数据补登记：facts.md / sops 里存在但 memory-meta.json 无记录的条目
-	// （旧版本迁移、examples 种子、跨机导入）补一条快照型 meta，恢复 updatedAt 追踪；
-	// 不抄正文证据（那是别处的验证），只标 backfilled。
-	try {
-		const backfilled = backfillMeta(initialRoot, { namespace: resolveNamespace(cfg) });
-		if (backfilled.length) ctx.logger?.info?.(`[dsh-layered-memory] meta 补登记 ${backfilled.length} 条（快照型，标记 backfilled）`);
-	} catch (error) {
-		ctx.logger?.warn?.(`[dsh-layered-memory] meta 补登记失败: ${String(error?.message || error)}`);
 	}
-
-	// ── 记忆注入（L1 存在性索引每轮可见）──
-	// [v0.5.3] 注入面防护：index.txt 由 memory_write 的 topic/content 拼接而成，
-	// 属用户可写数据。注入 system prompt 前做控制字符剥离 + 长度熔断，
-	// 并用 sentinel 标记为不可信段，防止 topic 里的指令字串污染系统上下文。
-	// [0.6.8] 熔断改为结构化预算（buildPromptIndex）：超预算时规则段与头部完整保留、
-	// 条目按分类入口折叠并显式标注；此前的前缀截断会先丢掉尾部 [RULES] 且不留痕迹。
-	const L1_MAX_CHARS = cfg.l1MaxChars;
-	function sanitizeIndexForPrompt(idx) {
-		let s = String(idx ?? "").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
-		s = buildPromptIndex(s, L1_MAX_CHARS);
-		const trimmed = s.trim();
-		if (!trimmed) return "";
-		return `<memory_index source="user-writable">\n${trimmed}\n</memory_index>`;
-	}
-	// [0.6.1 N14] systemPrompt 经 inject 声明为必需：apply 执行时服务必已就绪，原
-	// if (sysPrompt) 降级分支永不可达，删除（fail loud 优于静默失去 L1 注入能力）。
-	{
-		const sysPrompt = ctx.get("systemPrompt");
-		disposers.push(sysPrompt.context({
-			name: "memory:index",
-			order: 10,
-			text: (context) => {
-				try {
-					// [0.6.9] 会话感知：注入哪个库由当前 agent 的会话工作区决定。
-					return sanitizeIndexForPrompt(readIndex(resolveRoot(context?.agent?.session?.header?.cwd)));
-				} catch {
-					return "";
-				}
-			}
-		}));
-	}
-
-	// ── 运行时 skill（内容内联于 src/skill-content.js；插件非 skill，不用 SKILL.md 文件）──
-	let activate = () => ({ activated: false, already: false, tools: [] });
-	const skillDisposer = ctx.skills.register({
-		name: SKILL_NAME,
-		description: SKILL_DESCRIPTION,
-		whenToUse: SKILL_WHEN_TO_USE,
-		source: "runtime",
-		content: SKILL_CONTENT,
+	resolveRoot();
+	const systemPrompt = ctx.get("systemPrompt");
+	disposers.push(systemPrompt.variable("layered_memory_index", context => {
+		const cwd = context.agent?.session.header.cwd;
+		resolveRoot(cwd);
+		const namespace = resolveNamespace(cfg, undefined, cwd);
+		const { text } = buildCombinedPromptIndex(cfg.memoryDir, namespace, { projectMaxChars: cfg.l1MaxChars, globalMaxChars: cfg.globalL1MaxChars });
+		return text ? `<memory_index source="user-writable">\n${text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")}\n</memory_index>` : "";
+	}));
+	disposers.push(systemPrompt.context({ name: "memory:index", order: 10, text: "{{layered_memory_index}}" }));
+	disposers.push(ctx.skills.register({ name: SKILL_NAME, description: SKILL_DESCRIPTION, whenToUse: SKILL_WHEN_TO_USE, source: "runtime", content: SKILL_CONTENT }));
+	let maintenance;
+	const allowedAccess = agent => cfg.memoryAccess === "read" || (agent?.session.header.parentSession !== undefined && cfg.subagentMemoryAccess === "read") ? "read" : "write";
+	const allTools = buildTools(ctx, cfg).map(def => READ_TOOLS.has(def.name) ? def : {
+		...def,
+		execute(args, exec) {
+			if (allowedAccess(exec.agent) !== "write" || states.get(exec.agent)?.access === "read") throw new Error(`${def.name}: this agent has read-only memory access`);
+			return def.execute(args, exec);
+		},
 	});
-	if (typeof skillDisposer === "function") disposers.push(skillDisposer);
-
-	// ── 工具注册（渐进暴露：progressive 时经 memory_activate 激活）──
-	const allTools = buildTools(ctx, cfg);
-	let maintenanceRunner;
-
-	const disposeAll = (fns) => {
-		for (const fn of [...fns].reverse()) {
-			try { fn(); } catch { /* 忽略 */ }
+	function detach(agent) {
+		const state = states.get(agent);
+		if (!state) return;
+		for (const dispose of [...state.disposers.values()].reverse()) dispose();
+		states.delete(agent);
+	}
+	function activate(agent, mode = "common", access = states.get(agent)?.access || allowedAccess(agent)) {
+		if (maintenance?.owns(agent)) throw new Error("maintenance agents use memory_maintenance_activate");
+		if (access === "write" && allowedAccess(agent) !== "write") throw new Error("memory_activate: this agent has read-only memory access");
+		let state = states.get(agent);
+		if (!state) { state = { disposers: new Map(), access }; states.set(agent, state); }
+		// An explicit read activation also removes previously granted mutation tools.
+		if (access === "read") {
+			for (const [name, dispose] of state.disposers) if (!READ_TOOLS.has(name)) { dispose(); state.disposers.delete(name); }
 		}
-	};
-	activate = (agent) => {
-		// [0.6.1 I4] 重复激活给出可判定的规范值：此前 {activated:false, tools:[]} 与
-		// 「未激活」同形，PTC 消费方无法区分「早已激活」；现用 already 标记幂等命中。
-		if (agentStates.has(agent)) return { activated: true, already: true, tools: allTools.map((d) => d.name) };
-		const ds = [];
-		try {
-			for (const def of allTools) ds.push(agent.ctx.tools.register(def));
-			// 保留幂等激活入口。同一批 PTC 调用可能先加载 skill，再调用已经
-			// 向模型公开的 memory_activate；中途限制它会导致 UNKNOWN_TOOL。
-			agentStates.set(agent, ds);
-			return { activated: true, already: false, tools: allTools.map((d) => d.name) };
-		} catch (error) {
-			disposeAll(ds);
-			throw error;
-		}
-	};
-	const detach = (agent) => {
-		const ds = agentStates.get(agent);
-		if (ds) {
-			disposeAll(ds);
-			agentStates.delete(agent);
-		}
-	};
-
+		state.access = access;
+		const selected = allTools.filter(def => (mode === "manage" || COMMON_TOOLS.has(def.name)) && (access === "write" || READ_TOOLS.has(def.name)));
+		const already = selected.every(def => state.disposers.has(def.name));
+		for (const def of selected) if (!state.disposers.has(def.name)) state.disposers.set(def.name, agent.ctx.tools.register(def));
+		return { activated: true, already, tools: [...state.disposers.keys()], access, mode };
+	}
 	disposers.push(wireEvents(ctx, cfg, {
 		resolveRoot,
-		onMaintenanceRunner(runner) { maintenanceRunner = runner; },
+		onMaintenanceRunner(runner) { maintenance = runner; },
 		maintenanceTools(namespace) { return buildTools(ctx, { ...cfg, defaultNamespace: namespace, autoNamespace: false }); },
 		onSkillResult(exec, result) {
-			// 激活 memory skill 的既有逻辑
-			if (!result?.isError
-				&& exec?.name === "skill"
-				&& exec?.agent
-				&& exec?.arguments
-				&& exec.arguments.name === "memory") {
-				if (!maintenanceRunner?.owns(exec.agent)) activate(exec.agent);
-			}
+			if (!result.isError && exec.name === "skill" && exec.arguments.name === "memory" && exec.agent && !maintenance.owns(exec.agent)) activate(exec.agent);
 		},
 	}));
-
-	// [0.6.1 N14] agents 经 inject 声明为必需，缺席则插件不加载；`Boolean(agents)`
-	// 降级分支永不可达（死代码），删除。progressive 回归纯配置语义。
-	const progressive = cfg.progressive;
-	if (cfg.reflectionMode === "auto") ctx.tools.register(defineActivateTool(true)); // 独立入口：子任务无法误激活不受限的普通工具。
-	if (progressive) {
-		ctx.tools.register(defineActivateTool());
-		disposers.push(ctx.on("agent/disposed", ({ agent }) => detach(agent)));
-	} else {
-		for (const def of allTools) ctx.tools.register(def);
-	}
-
-	ctx.logger?.info?.(`[dsh-layered-memory] v0.6 ready; memoryDir=${cfg.memoryDir}; l1MaxChars=${cfg.l1MaxChars}; autoPending=${cfg.autoPending}`);
-
-	function defineActivateTool(maintenanceOnly = false) {
-		return defineTool({
-			name: maintenanceOnly ? "memory_maintenance_activate" : "memory_activate",
-			description: maintenanceOnly ? "独立维护子任务专用入口；需要插件派发的 maintenance_id，普通任务不要调用。" : "加载 memory skill 后，为当前 Agent 激活记忆工具（memory_read / memory_list / memory_write / memory_search / memory_index / memory_stats / memory_maintain / memory_pending / memory_accept / memory_update / memory_archive / memory_rollback / memory_expand / memory_promote）。skill 加载成功后通常会自动激活；仅当工具未出现时调用一次。",
-			parameters: maintenanceOnly ? { maintenance_id: { type: "string", required: true, description: "插件派发的维护运行标识" } } : {},
-			output: {
-				schema: {
-					type: "object",
-					additionalProperties: false,
-					properties: {
-						activated: { type: "boolean", required: true },
-						already: { type: "boolean", required: true },
-						tools: { type: "array", items: { type: "string" }, required: true }
-					}
-				},
-				render: (_args, value) => [{ type: "text", text: value.already ? `记忆工具早已激活（无需重复调用）: ${value.tools.join(", ")}` : `记忆工具已激活: ${value.tools.join(", ")}` }]
-			},
-			execute: (args, exec) => {
-				if (!exec.agent) throw new Error("memory_activate: 需要 Agent 会话");
-				if (maintenanceOnly) return Promise.resolve(maintenanceRunner.activate(exec.agent, args.maintenance_id));
-				// 已绑定的维护子任务不能通过省略标识激活不受限工具。
-				if (maintenanceRunner?.owns(exec.agent)) throw new Error("memory_activate: maintenance_id required in a maintenance task");
-				return Promise.resolve(activate(exec.agent));
-			},
-			presentCall: () => ({ card: "generic", title: "激活记忆工具", kind: "execute" })
-		});
-	}
-
+	const restored = new WeakSet();
+	disposers.push(ctx.on("system-prompt/assemble", async (_assembly, context, next) => {
+		const agent = context.agent;
+		const query = ctx.get("sessionQuery");
+		if (agent && cfg.progressive && query && !restored.has(agent)) {
+			restored.add(agent);
+			const prior = await readActivation(query, agent.session.id);
+			if (prior && !states.has(agent) && !maintenance.owns(agent)) {
+				activate(agent, prior.mode, allowedAccess(agent) === "read" ? "read" : prior.access || "write");
+				return systemPrompt.assemble(context);
+			}
+		}
+		return next();
+	}));
+	disposers.push(ctx.on("agent/created", async ({ agent }) => { await prepareWorkspace(agent); }));
+	disposers.push(ctx.on("agent/inbox/inserted", ({ agent, message }) => { if (skillGesture(message) && !maintenance.owns(agent)) activate(agent); }));
+	disposers.push(ctx.on("agent/pre-step", async ({ agent, messages }, next) => {
+		await prepareWorkspace(agent);
+		const decision = await next();
+		if (decision.kind !== "reject" && messages.some(skillGesture) && !maintenance.owns(agent)) activate(agent);
+		return decision;
+	}));
+	disposers.push(ctx.on("agent/disposed", ({ agent }) => detach(agent)));
+	ctx.tools.register(defineTool({
+		name: "memory_activate",
+		description: "激活当前会话的记忆工具。common 为查阅和写入，manage 增加候选、归档、历史、溯源、迁移与维护工具。access=read 仅查阅；子代理默认只读。",
+		parameters: { mode: { type: "string", enum: ["common", "manage"] }, access: { type: "string", enum: ["read", "write"] } },
+		output: { schema: { type: "object", additionalProperties: true, properties: { activated: { type: "boolean", required: true }, already: { type: "boolean", required: true }, tools: { type: "array", items: { type: "string" }, required: true } } }, render: (_args, value) => [{ type: "text", text: `${value.access}/${value.mode}: ${value.tools.join(", ")}` }] },
+		execute: async (args, exec) => {
+			if (!exec.agent) throw new Error("memory_activate requires an agent session");
+			await prepareWorkspace(exec.agent);
+			return activate(exec.agent, args.mode || "common", args.access || states.get(exec.agent)?.access || allowedAccess(exec.agent));
+		},
+		presentCall: () => ({ card: "generic", title: "激活记忆工具", kind: "execute" }),
+	}));
+	if (cfg.reflectionMode === "auto") ctx.tools.register(defineTool({
+		name: "memory_maintenance_activate",
+		description: "独立维护子任务使用派发的 maintenance_id 激活受限工具。",
+		parameters: { maintenance_id: { type: "string", required: true } },
+		output: { schema: { type: "object", additionalProperties: true, properties: { activated: { type: "boolean", required: true }, already: { type: "boolean", required: true }, tools: { type: "array", items: { type: "string" }, required: true } } }, render: (_args, value) => [{ type: "text", text: value.tools.join(", ") }] },
+		execute: async (args, exec) => maintenance.activate(exec.agent, args.maintenance_id),
+	}));
+	if (!cfg.progressive) for (const def of allTools) ctx.tools.register(def);
+	console.info(`[dsh-layered-memory] v${version} loaded=${runtimeInfo.loadedAt} source=${runtimeInfo.source} memoryDir=${cfg.memoryDir} mode=${cfg.reflectionMode} autoPending=${cfg.autoPending} access=${cfg.memoryAccess}/${cfg.subagentMemoryAccess}`);
 	ctx.effect(() => () => {
-		for (const agent of [...agentStates.keys()]) detach(agent);
-		disposeAll(disposers);
+		for (const agent of states.keys()) detach(agent);
+		for (const dispose of disposers.reverse()) dispose();
 	}, "layered-memory: teardown");
 }
-
 export { apply, inject };

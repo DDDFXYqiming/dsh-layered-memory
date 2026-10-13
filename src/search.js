@@ -1,81 +1,43 @@
-// memory_search：BM25 全文检索（facts + sops + archive），支持跨命名空间。
-// [v0.5 新增] 根治"L1 被裁剪的条目找不回"——隐藏/归档条目都可被主动检索。
-
 import { readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { BM25Index, tokenize } from "./similarity.js";
 import { collectDocs } from "./maintain.js";
-import { stripArchiveBanner } from "./store.js";
+import { nsRoot, safeNs } from "./store.js";
 
-/**
- * 摘要：优先展示命中位置附近的内容。
- * [0.6.8] 此前固定取正文开头 160 字符——命中信息在正文后段时，
- * 模型拿到了结果却看不到它为什么相关。
- */
-export function snippetAround(text, query, width = 160) {
-	const flat = String(text ?? "").replace(/\s+/g, " ").trim();
+export function snippetAround(text, query, width = 180) {
+	const flat = text.replace(/\s+/g, " ").trim();
 	if (flat.length <= width) return flat;
 	const lower = flat.toLowerCase();
-	let hit = -1;
-	for (const term of new Set(tokenize(query))) {
-		const t = term.toLowerCase();
-		if (t.length < 2) continue;
-		const i = lower.indexOf(t);
-		if (i >= 0 && (hit < 0 || i < hit)) hit = i;
-	}
-	if (hit < 0) return flat.slice(0, width);
-	const start = Math.max(0, hit - Math.floor(width / 3));
+	const hits = [...new Set(tokenize(query))].filter(term => term.length >= 2).map(term => lower.indexOf(term)).filter(pos => pos >= 0);
+	const start = hits.length ? Math.max(0, Math.min(...hits) - Math.floor(width / 3)) : 0;
 	const end = Math.min(flat.length, start + width);
-	return `${start > 0 ? "…" : ""}${flat.slice(start, end)}${end < flat.length ? "…" : ""}`;
+	return `${start ? "…" : ""}${flat.slice(start, end)}${end < flat.length ? "…" : ""}`;
 }
 
-/** 列出全部命名空间根目录（default = memoryDir 本身，其余为子目录）。 */
-export function listNamespaces(memDir) {
-	const out = new Set(["default"]);
-	try {
-		for (const d of readdirSync(memDir, { withFileTypes: true })) {
-			if (!d.isDirectory()) continue;
-			if (d.name === "sops" || d.name === "pending" || d.name === "archive" || d.name === ".history") continue;
-			if (existsSync(join(memDir, d.name, "facts.md")) || existsSync(join(memDir, d.name, "index.txt"))) {
-				out.add(d.name);
-			}
-		}
-	} catch { /* memoryDir 不存在 */ }
-	return [...out];
+export function listNamespaces(memoryDir) {
+	if (!existsSync(memoryDir)) return [];
+	const names = existsSync(join(memoryDir, "facts.md")) || existsSync(join(memoryDir, "index.txt")) ? ["default"] : [];
+	for (const dir of readdirSync(memoryDir, { withFileTypes: true })) {
+		if (!dir.isDirectory() || dir.name !== safeNs(dir.name)) continue;
+		const root = join(memoryDir, dir.name);
+		if (existsSync(join(root, "facts.md")) || existsSync(join(root, "index.txt"))) names.push(dir.name);
+	}
+	return [...new Set(names)].sort();
 }
 
-/**
- * 在给定命名空间集合内执行 BM25 检索。
- * @returns [{ namespace, kind, name, archived, score, snippet }]
- */
-export function searchNamespaces(memDir, namespaces, query, { limit = 8, includeArchived = true } = {}) {
-	const index = new BM25Index();
-	const metaByDocId = new Map();
-	for (const ns of namespaces) {
-		const root = ns === "default" ? memDir : join(memDir, ns);
+export function searchNamespaces(memoryDir, namespaces, query, { limit = 8, includeArchived = false } = {}) {
+	const index = new BM25Index(), docs = new Map();
+	for (const namespace of new Set(namespaces.map(safeNs))) {
+		const root = nsRoot(memoryDir, namespace);
 		if (!existsSync(root)) continue;
 		for (const doc of collectDocs(root, { includeArchived })) {
-			const id = `${ns}::${doc.kind}::${doc.name}`;
-			// [0.6.5] 归档横幅只服务于"用文件或 read 看正文的人"，对检索是噪声：
-			// 它占了 160 字符摘录预算的约 60 字符，还往 BM25 索引里塞"已归档/历史快照"这类
-			// 与内容无关的 token。归档状态由 archived 字段表达，这里统一剥掉。
-			const text = stripArchiveBanner(doc.text || "");
-			index.addDoc(id, `${doc.name}\n${text}`);
-			metaByDocId.set(id, { namespace: ns, kind: doc.kind, name: doc.name, archived: Boolean(doc.archived), text });
+			const id = JSON.stringify([namespace, doc.kind, doc.name]);
+			index.addDoc(id, `${doc.title}\n${doc.name}\n${doc.text}`);
+			docs.set(id, { ...doc, entry: { namespace, kind: doc.kind, key: doc.name } });
 		}
 	}
-	const hits = index.search(query, Math.max(1, limit) * 2);
-	return hits
-		.map(({ id, score }) => {
-			const m = metaByDocId.get(id);
-			return {
-				namespace: m.namespace,
-				kind: m.kind,
-				name: m.name,
-				archived: m.archived,
-				score: Number(score.toFixed(4)),
-				snippet: snippetAround(m.text, query),
-			};
-		})
-		.slice(0, Math.max(1, limit));
+	return index.search(query, limit).map(({ id, score }) => {
+		const doc = docs.get(id);
+		return { entry: doc.entry, title: doc.title, archived: doc.archived, score: Number(score.toFixed(4)), snippet: snippetAround(doc.text, query) };
+	});
 }

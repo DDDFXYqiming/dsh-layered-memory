@@ -1,63 +1,42 @@
-// L0/L1/L2 模板与索引标记常量。文本内容被索引重建逻辑按锚点匹配，
-// 修改措辞前先检查 lib 侧的锚点字符串。
-
 export const AUTO_BEGIN = "<!-- AUTO-BEGIN -->";
 export const AUTO_END = "<!-- AUTO-END -->";
 
-export const L0_TEMPLATE = `# Memory Management SOP (L0)
-## 核心公理
-1. 行动验证原则：任何写入 L1/L2/L3 的信息必须源自【成功的工具调用结果】（实测/验证/确认）。严禁模型固有知识、推理猜测、未验证假设。口号：无行动，不记忆。
-2. 神圣不可删改性：已验证的事实可以压缩文字、迁移层级，但严禁丢弃。supersede/archive 必须保留历史。
-3. 禁止易变状态：时间戳、PID、临时 Session ID、一次性路径等高频变化数据不存。
-4. 最小充分指针：上层只留能定位下层的短标识，多一词即冗余。
-
-## 分层
-- L1 index.txt：AUTO 段由插件全量重建（每层一行、" | " 打包所有活跃条目名），预算是字符数（l1MaxChars）而非行数——被隐藏的条目等于永久隐身，因此存在性不裁剪。超预算时注入视图按分类入口折叠条目并显式标注压缩，规则段完整保留；完整列表始终在 index.txt，可用 memory_list / memory_search 取回。要真正降低总量，仍靠合并/归档条目或精简 [RULES]。
-- L2 facts.md：环境特异性事实（路径/凭证引用/配置/实测参数）。按 ## SECTION 组织；正文禁止出现 "## " 行（会被解析成新 section）。
-- L3 sops/*.md：特定任务经验（关键前置 + 典型坑 + 稳定步骤），尽可能短。
-- pending/*.md：自动蒸馏候选区（默认关闭，需 autoPending:true 才产），未确认不进入正式记忆。
-- 通用常识 / 易变状态 / 日志记录：严禁存储。
-
-## L1 词数 ROI 判据（写索引/名字前自查）
-ROI = (不放这个词的犯错概率 × 代价) / 每轮词数成本。
-- 该留：**反直觉触发词**——用户说出这个词时，不提示就想不到要查哪条记忆（如「坐标空间坑(屏幕绝对vs窗口本地)」）。
-- 该删：名字翻译（名字自解释时括号是废词）、内容描述、实现细节、不提醒也想得到的通用能力。
-- 改名常常优于加描述：条目名自解释就不用在 L1 加注。
-- 禁值存储：L1/topic 不放 IP、端口、凭证、commit 号、日期——这些属于 L2 正文或干脆不存。
-
-## 写入决策树
-"这条信息该放哪层？"
-- 环境特异性事实（路径/配置/凭证引用/实测参数）→ L2 facts.md
-- 复杂任务经验（坑点/前置条件/稳定步骤，多次重试才成功且未来可用）→ L3 sop
-- 通用操作规律（跨任务红线）→ L1 [RULES]（一句压缩）
-- 其余（常识/易变/未验证）→ 不存
-`;
-
+export const WRITE_POLICY = "仅在获得已验证、未来可复用的新信息或已有记忆确需纠正时写入；先检索已有条目，已有条目用 memory_update，只有新信息才用 memory_write。";
 export const LEGACY_WRITE_POLICY = "任务完成且【行动验证成功】时主动 memory_write 沉淀（无需等用户提醒；无验证信息则不写）";
-export const WRITE_POLICY = "仅在获得已验证、未来可复用的新信息或已有记忆确需纠正时主动 memory_write；普通任务完成、例行检查成功、重复确认已有事实不构成写入理由。已有条目能覆盖时不新增；无值得保存的信息就直接结束，无需额外调用记忆工具。";
 
-/** 精确迁移旧版头部指令；保留 AUTO 段、用户规则与其他手写内容。 */
-export function migrateIndexPolicy(text) {
-	const s = String(text ?? "");
-	const auto = s.indexOf(AUTO_BEGIN);
-	const rules = s.indexOf("[RULES]");
-	const boundary = auto >= 0 ? auto : rules >= 0 ? rules : s.length;
-	return s.slice(0, boundary).replace(LEGACY_WRITE_POLICY, WRITE_POLICY) + s.slice(boundary);
-}
+export const L0_TEMPLATE = `# 记忆管理
 
-export const INDEX_TEMPLATE = `# [Memory Index - L1]
-分层记忆: L0规则(memory_management_sop.md) | L1索引(this) | L2事实(facts.md) | L3技能(sops/)
-需要细节时用 memory_read / memory_list 取 L2/L3；新增经验用 memory_write（须带证据）
+记忆分为环境事实 fact 和任务经验 sop。只保存经过行动验证、未来可复用的信息，证据随版本保存。
+
+- 已知条目用返回的 entry 读取；关键词检索用 memory_search；浏览目录用 memory_list。
+- entry = {namespace, kind, key}，直接复用工具返回值。显示标题可以含标点，不要自行把标题转换成文件名。
+- ${WRITE_POLICY}
+- 更新、归档和恢复前保留历史；通过 memory_history 选择 snapshot_id，再用 memory_rollback 恢复。
+- 工具标明 complete 才表示该次返回含全文。长文按 next_line 继续，或 full:true 读取。
+- 搜索默认查当前项目与 global 的活跃条目；历史经验用 include_archived:true 检索，再按返回的 entry 读取。
+- L1 只提供存在性目录和规则摘录。完整目录、规则和正文通过工具按需取回；相似度只提供复核线索。
+- 凭据值、临时状态、未经验证的猜测和普通日志不属于长期记忆；凭据只保存配置位置或引用。
+- 候选经整理并附证据后接受；无价值候选显式丢弃；零修改是正常维护结果。
+`;
+
+export const INDEX_TEMPLATE = `# Memory Index
+环境事实在 facts.md，任务经验在 sops/；正文按需读取。
 ${WRITE_POLICY}
-记忆工具不在列表里时先调用 memory_activate 激活（L1 常驻但工具是渐进暴露的）
-<!-- AUTO-BEGIN -->
-[L2] （facts.md 的条目将在此列出）
-[L3] （sops/ 的文件将在此列出）
-<!-- AUTO-END -->
+记忆工具尚未激活时调用 memory_activate；管理操作选择 mode:manage。
+${AUTO_BEGIN}
+[L2] （暂无事实）
+[L3] （暂无经验）
+${AUTO_END}
 [RULES]
-（红线规则：不提醒就会犯的错。词级维护，禁 overwrite）
 `;
 
-export const FACTS_TEMPLATE = `# [Facts - L2]
-按 ## SECTION 组织环境特异性事实。只写行动验证过的内容。
+export const FACTS_TEMPLATE = `# Facts
+按 ## SECTION 保存已验证的环境事实。
 `;
+
+export function migrateIndexPolicy(text) {
+	const auto = text.indexOf(AUTO_BEGIN);
+	const rules = text.indexOf("[RULES]");
+	const end = auto >= 0 ? auto : rules >= 0 ? rules : text.length;
+	return text.slice(0, end).replace(LEGACY_WRITE_POLICY, WRITE_POLICY) + text.slice(end);
+}

@@ -2,98 +2,78 @@
 
 # dsh-layered-memory
 
-**A three-tier cross-session long-term memory extension for DeepSeek Harness (DSH).**
+Cross-session memory for DeepSeek Harness. Facts and operating procedures live in Markdown files. The agent sees a compact project and global index, then retrieves the relevant content on demand.
 
-Standard coding agents lose their entire context the moment a session closes. Returning to the same repository requires developers to re-explain runtime parameters, build commands, and past debugging workarounds. `dsh-layered-memory` implements a transparent, dependency-free long-term memory engine backed entirely by on-disk Markdown and JSON files—featuring branch-aware namespaces, BM25 indexing, rollback snapshots, and automated memory hygiene.
-
----
-
-## Architectural Design: The Three Tiers
-
-```mermaid
-flowchart TD
-    subgraph Architecture["Three-Tier Memory Architecture"]
-        L1["<b>Tier 1: Index (L1)</b><br/>Compact index dictionary + persistent [RULES] blocks<br/><i>(Token budget auto-folding)</i>"]
-        L2["<b>Tier 2: Facts (L2)</b><br/>Deterministic environment constants, ports & flags"]
-        L3["<b>Tier 3: Experience / SOPs (L3)</b><br/>Task procedures, troubleshooting steps, and evidence<br/><i>(Tagged with session provenance metadata)</i>"]
-        L1 --> L2 --> L3
-    end
-```
-
-* **L1 Compact Index**: A lightweight table of contents loaded into active context with token budget auto-folding to prevent context bloat.
-* **L2 Environment Facts**: Explicit technical specifications, container parameters, and project quirks.
-* **L3 Task SOPs**: Step-by-step troubleshooting solutions and workflows, tagged with provenance metadata referencing historical turns.
-
----
-
-## Technical Highlights
-
-* **Zero External Database Dependencies**: All memories reside as plain Markdown and JSON files in `~/.dsh/memory/`. No vector stores or embedding services required; everything is human-editable, diffable, and easily tracked under Git.
-* **Fast BM25 Keyword Retrieval**: Includes an on-device BM25 ranking algorithm that searches across facts, SOP documents, and archived entries in milliseconds.
-* **Dynamic Workspace & Git Branch Namespaces**: Infers isolated memory namespaces automatically based on current working directory and checked-out branch, keeping experiments and projects segregated.
-* **Progressive Disclosure**: By default, only lightweight discovery endpoints are exposed. The full suite of 14 granular tools is revealed only when the agent explicitly activates memory management.
-* **Secret Redaction & Security Guards**: Blocks plain-text secrets (API keys, credentials, private keys) from being saved into memory. Redacts sensitive patterns in supporting evidence before writing.
-* **Immutable Snapshotting & Rollback**: Edits and updates automatically generate timestamped snapshots in `.history/`, allowing instant rollbacks at any time.
-
----
-
-## Tool Matrix
-
-| Category | Tool | Function |
-| :--- | :--- | :--- |
-| **Search & Discovery** | `memory_list` | Inspect active entries across all tiers, pending queues, and budgets |
-| | `memory_read` | Fetch entries with support for outline excerpts and line slicing |
-| | `memory_search` | BM25 full-text search across active facts, SOPs, and archives |
-| **Authoring & Revisions**| `memory_write` | Save new facts or SOPs with mandatory evidence and secret filtering |
-| | `memory_update` | Modify entries with automatic `.history/` snapshotting |
-| | `memory_rollback` | Revert entries to the most recent historical snapshot |
-| **Lifecycle** | `memory_archive` | Hide obsolete entries from active L1 without deleting searchable files |
-| | `memory_pending` | Review candidates automatically distilled from retry sequences |
-| | `memory_accept` | Promote a pending candidate into an official SOP entry |
-| | `memory_promote` | Elevate repository-specific lessons into the global namespace |
-| **Hygiene & Auditing** | `memory_index` | Rebuild L1 indexes while protecting manual rule segments |
-| | `memory_maintain` | Merge duplicates, evaluate near-collision entries, and prune cold data |
-| | `memory_stats` | Report entry counts, size footprints, and namespace distribution |
-
----
-
-## Installation & Setup
+## Install
 
 ```bash
-# Install via DSH Plugin Manager
 dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
 ```
 
-For local development:
-```bash
-git clone https://github.com/DDDFXYqiming/dsh-layered-memory.git
-cd dsh-layered-memory
-npm install && npm run build
-dsh plugin --profile web add .
+For Desktop, use its bundled `dsh` command with the `desktop` profile. Development installs can link this repository. `lib/index.js` forwards to the source modules.
+
+## Use
+
+Load the `memory` skill or call `memory_activate({mode:"common"})`. Management operations use `mode:"manage"`. Read-only work can request `access:"read"`; child agents default to read-only access.
+
+Version 0.8 identifies entries with `{namespace, kind, key}`. Reuse the `entry` returned by search, list or create. A display title is not a filename, and a fact and SOP may share a title without sharing an identity.
+
+```js
+memory_write({
+  namespace: "my-project",
+  kind: "fact",
+  topic: "Preview command",
+  content: "Run pnpm dev to start the preview.",
+  evidence: "The command started successfully and the page loaded."
+})
+// Reuse the returned entry.
+memory_read({entry, full: true})
+memory_update({entry, content: "A revised finding", evidence: "New verification"})
+memory_history({entry})
+memory_rollback({entry, snapshot_id: "Choose a returned snapshot id"})
 ```
 
----
+`memory_write` creates new entries; `memory_update` changes existing entries. Update, archive and restore preserve the current version first. Tool consumers using the old `entry_type` or bare `name/topic` addressing should adopt `entry`. Existing Markdown data remains readable.
+
+| Task | Tools |
+| --- | --- |
+| Find and read | memory_search, memory_list, memory_read |
+| Create and update | memory_write, memory_update |
+| Inspect evidence | memory_expand |
+| Restore history | memory_history, memory_rollback |
+| Archive and restore visibility | memory_archive |
+| Share and migrate | memory_promote, memory_namespace |
+| Process candidates | memory_pending, memory_accept, memory_discard |
+| Inspect and maintain | memory_stats, memory_index, memory_maintain |
+
+Search defaults to active entries in the current and global spaces. Set `include_archived:true` to find archived content, then read the returned entry. Reads expose line ranges, total lines, revision, complete and next_line. Global rules and complete indexes remain accessible through the `rules`, `index` and `policy` entry kinds.
 
 ## Configuration
-
-Adjust memory policies in your profile's `cordis.patch.yml`:
 
 ```yaml
 - id: dsh-layered-memory
   config:
-    memoryDir: ''              # Memory root directory (defaults to ~/.dsh/memory)
-    l1MaxChars: 12288         # Character budget ceiling for L1 index
-    progressive: true          # Enable progressive tool disclosure
-    autoNamespace: true        # Automatic namespace isolation per directory and branch
-    autoPending: false         # Distill candidates from failed command loops
-    maintainEveryTurns: 20     # Run automated maintenance sweep every N turns
-    nearDupeThreshold: 0.85    # Jaccard similarity threshold for duplicate warnings
-    heatHalfLifeDays: 14       # Access frequency half-life (in days)
-    recencyWindowDays: 7       # Protected grace period for newly created items
+    defaultNamespace: ''
+    autoNamespace: true
+    progressive: true
+    l1MaxChars: 12288
+    globalL1MaxChars: 2048
+    memoryAccess: write
+    subagentMemoryAccess: read
+    autoPending: false
+    reflectionMode: notify
 ```
 
----
+Automatic namespaces use persistent workspace identity or canonical root paths. Identically named projects on different paths stay separate; branches share their project memory. Existing namespaces migrate explicitly and retain their source directory.
 
-## License
+The `default` namespace is global. Project indexes and default searches include it. Character budgets cover both index entries and manual rules; full files remain available through the tools. Host variables carry memory as data, preserving literal `{{template brackets}}`.
 
-This project is open-sourced under the [MIT License](LICENSE).
+Automatic model maintenance is optional. It uses native fresh-context subagents with explicit tool, write, time and model-output limits. Maintenance with no actionable findings finishes without a model task. See the [maintenance guide](docs/automatic-maintenance.zh.md).
+
+## Development
+
+`pnpm build` checks source syntax. Validate changes in the installed DSH desktop application and its bundled CLI using real sessions, tools, persisted logs and a dedicated memory directory. See [development and end-to-end acceptance](docs/development.md).
+
+A source pull does not imply a live module reload. Configure the host HMR source root or reload the module, then check the plugin version/path in the startup log and its actual behavior.
+
+[Design](docs/design.md) · [Changelog](CHANGELOG.md) · [MIT License](LICENSE)

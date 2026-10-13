@@ -2,98 +2,99 @@
 
 # dsh-layered-memory
 
-**DeepSeek Harness (DSH) 的三层结构跨会话长期记忆扩展**。
+DeepSeek Harness 的跨会话记忆插件。环境事实和任务经验保存在 Markdown 文件中，当前项目与全局目录进入上下文，正文按需检索和读取。
 
-普通智能体在会话关闭的瞬间就会丢失全部上下文。再次打开项目时，开发者往往需要重复解释运行环境、编译指令与历史踩坑经验。`dsh-layered-memory` 通过纯本地 Markdown/JSON 文件系统实现可读、可追溯且无依赖的跨会话记忆引擎，支持多命名空间隔离、BM25 快速检索、版本回滚与自动化记忆维护。
-
----
-
-## 核心设计：三层记忆架构
-
-```mermaid
-flowchart TD
-    subgraph Memory["三层记忆架构体系"]
-        L1["<b>L1 索引层 (Index)</b><br/>紧凑索引字典 + 用户持久规则 [RULES]<br/><i>(支持 Token 预算动态聚类折叠)</i>"]
-        L2["<b>L2 事实层 (Facts)</b><br/>环境配置、编译参数、数据库连接规则、服务端口等确定性事实"]
-        L3["<b>L3 经验层 (SOPs)</b><br/>踩坑排查流程、操作规程、失败重试沉淀<br/><i>(携带会话证据溯源元数据)</i>"]
-        L1 --> L2 --> L3
-    end
-```
-
-* **L1 紧凑索引（Index）**：会话启动时默认注入的高频轻量清单，包含核心工作流规则。当超出字符预算时，自动聚类折叠二级条目。
-* **L2 确定性事实（Facts）**：存储项目技术栈、特殊参数与环境事实，消除重复沟通。
-* **L3 任务经验库（SOPs）**：沉淀多步排查方案与成功经验，每条记录携带对应会话轮次的证据引用与元数据。
-
----
-
-## 关键技术亮点
-
-* **零外部数据库依赖**：全部数据以结构化 Markdown 与 JSON 文件保存在 `~/.dsh/memory/` 下。无需向量数据库或嵌入模型服务，普通文本编辑器即可手改、备份或纳入 Git 管理。
-* **BM25 极速全文本检索**：原生内置 BM25 词频评分算法，跨越事实库、SOP 库与历史归档秒级召回关联条目。
-* **动态命名空间与分支感知**：根据当前项目路径与 Git 分支自动推断独立命名空间（如 `repo-main`、`repo-feature`），实现多项目与多开发分支环境互不干扰。
-* **渐进式工具注入（Progressive Disclosure）**：默认仅向模型暴露核心入口；模型确认需要读取或管理记忆时才动态激活完整 14 个细粒度工具，节约常规对话的工具定义开销。
-* **安全审计与凭据脱敏**：写入记忆时严格审查明文敏感信息（API Key、Token、私钥），发现明文机密立即拒绝入库，证据引用中的敏感片段自动打码脱敏。
-* **不可变快照与回滚机制**：任何条目的修改和覆盖自动保留 `.history/` 时间戳快照，支持随时一键回滚。
-
----
-
-## 记忆工具矩阵
-
-| 工具分类 | 工具名称 | 职责定位 |
-| :--- | :--- | :--- |
-| **检索与阅读** | `memory_list` | 列出当前命名空间下各层记忆、待审候选及预算使用情况 |
-| | `memory_read` | 读取指定词条，支持大文件行级切片与大纲透视 |
-| | `memory_search` | 基于 BM25 全文检索事实、经验库及归档记录 |
-| **写入与迭代** | `memory_write` | 新增事实或 SOP 经验，强制关联证据并脱敏敏感信息 |
-| | `memory_update` | 更新词条，同步更新溯源并自动创建历史快照 |
-| | `memory_rollback` | 一键回滚指定词条至上一版本快照 |
-| **生命周期** | `memory_archive` | 归档低频条目（从 L1 隐藏但保留可检索性） |
-| | `memory_pending` | 查看运行中从重试序列提炼出的待定候选经验 |
-| | `memory_accept` | 将待定候选经验审核晋升为正式 L3 SOP |
-| | `memory_promote` | 将项目私有经验晋升至全局通用命名空间 |
-| **治理与审计** | `memory_index` | 重新生成并校验 L1 索引，保留手动 `[RULES]` 规则区 |
-| | `memory_maintain` | 合并同名重复节、排查相似度冲突、清理冷数据 |
-| | `memory_stats` | 输出记忆库条目数、存储占用与生命周期状态统计 |
-
----
-
-## 安装与快速上手
+## 安装
 
 ```bash
-# 通过 DSH 插件管理器安装
 dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
 ```
 
-本地开发：
-```bash
-git clone https://github.com/DDDFXYqiming/dsh-layered-memory.git
-cd dsh-layered-memory
-npm install && npm run build
-dsh plugin --profile web add .
+桌面端使用它随附的 `dsh` 命令，把 profile 改为 `desktop`。本地开发可链接本仓库。运行源码位于 `src/`，`lib/index.js` 只转发导出。
+
+## 使用
+
+让 Agent 加载 `memory` 技能，或调用 `memory_activate({mode:"common"})`。日常读写只加载常用工具；历史、归档、候选与维护使用 `mode:"manage"`。只读任务可以请求 `access:"read"`，子代理默认只读。
+
+0.8.0 统一使用 `entry = {namespace, kind, key}` 定位条目。直接复用 list、search 或 write 返回的 entry；显示标题与文件名不再混用，同名 fact 和 SOP 可以分别读取。
+
+```js
+// 新建已经验证的事实
+memory_write({
+  namespace: "my-project",
+  kind: "fact",
+  topic: "预览启动命令",
+  content: "项目预览通过 pnpm dev 启动。",
+  evidence: "已在当前项目执行，服务启动成功并能打开页面。"
+})
+
+// 使用上一步返回的 entry
+memory_read({entry, full: true})
+memory_update({entry, content: "更新后的实测结论", evidence: "本次验证结果"})
+memory_history({entry})
+memory_rollback({entry, snapshot_id: "从 history 返回值选择"})
 ```
 
----
+`memory_write` 只创建新条目，`memory_update` 只更新已有条目。更新、归档和恢复都保留当前版本。原来使用 `entry_type`、裸 `topic/name` 定位的工具调用应切换到新协议；已有 Markdown 记忆继续读取。
 
-## 配置指南
+## 工具
 
-可在当前 Profile 的 `cordis.patch.yml` 中调整记忆策略：
+| 工作 | 工具 | 行为 |
+| --- | --- | --- |
+| 查找 | `memory_search`、`memory_list` | 返回可直接复用的 entry；默认检索当前空间与 global 的活跃条目 |
+| 阅读 | `memory_read` | 返回范围、总行数、revision、complete 和 next_line；支持归档全文 |
+| 写入 | `memory_write`、`memory_update` | 新增与更新分开；新证据可指定 evidence_call_ids，宿主补充实际来源 |
+| 来源 | `memory_expand` | 展开普通调用或 PTC 子调用的真实事件 |
+| 历史 | `memory_history`、`memory_rollback` | 按 snapshot_id 恢复；恢复前保存当前版本 |
+| 归档 | `memory_archive` | 隐藏活跃入口并保留全文；unarchive 恢复可见性 |
+| 跨空间 | `memory_promote`、`memory_namespace` | 提升为全局经验，列空间或显式迁移；迁移保留来源 |
+| 候选 | `memory_pending`、`memory_accept`、`memory_discard` | 阅读、提交精炼正文与证据，或明确放弃候选 |
+| 状态 | `memory_stats`、`memory_index`、`memory_maintain` | 查看实际空间、存储分项和维护状态；重建目录与程序维护 |
+
+搜索归档时传 `include_archived:true`，读取直接使用返回的 entry。全文规则、目录和管理原则通过 `memory_read` 的 `kind:"rules"|"index"|"policy"` 读取。
+
+## 项目与全局记忆
+
+固定空间由 `defaultNamespace` 指定。自动空间使用工作区的稳定身份或规范化根路径，不再依赖目录名和分支；同名不同路径的项目保持隔离。同一个项目默认跨分支共享记忆。
+
+`default` 是全局空间。项目的 L1 和默认搜索同时提供全局入口。`memory_promote` 可将可复用经验提升到全局空间。
+
+旧版自动空间不会被猜测归属于某个新项目；使用 `memory_namespace` 显式迁移，并保留来源目录。
+
+## 配置
+
+在当前 profile 的 `cordis.patch.yml` 中覆盖已有 bundle id。
 
 ```yaml
 - id: dsh-layered-memory
   config:
-    memoryDir: ''              # 存储主目录（默认为 ~/.dsh/memory）
-    l1MaxChars: 12288         # L1 索引的最大字符预算
-    progressive: true          # 是否启用渐进式工具加载以减少日常上下文开销
-    autoNamespace: true        # 是否基于项目工作区与 Git 分支自动隔离命名空间
-    autoPending: false         # 是否自动将失败重试序列提炼为待定经验候选
-    maintainEveryTurns: 20     # 每隔 N 轮自动执行轻量级维护与冗余检查
-    nearDupeThreshold: 0.85    # Jaccard 相似度疑似重复检测阈值
-    heatHalfLifeDays: 14       # 记忆访问热度衰减半衰期（天）
-    recencyWindowDays: 7       # 新建词条的保护期（天）
+    memoryDir: ''
+    defaultNamespace: ''
+    autoNamespace: true
+    progressive: true
+    l1MaxChars: 12288
+    globalL1MaxChars: 2048
+    memoryAccess: write
+    subagentMemoryAccess: read
+    autoPending: false
+    maintainEveryTurns: 20
+    reflectionEnabled: true
+    reflectionMode: notify
 ```
 
----
+L1 按字符预算生成项目与全局视图；磁盘索引保留完整目录。手写规则也受注入预算限制，完整内容始终可以用工具读取。实际内容经宿主变量传递，`{{模板括号}}` 保持原文。
 
-## 许可证
+维护阈值、模型选择和执行预算见 [自动维护](docs/automatic-maintenance.zh.md)。
 
-本项目基于 [MIT License](LICENSE) 开源。
+## 文件与更新
+
+默认根目录是 `~/.dsh/memory/`。每个空间包含 `facts.md`、`sops/`、`index.txt`、`memory-meta.json`、`.history/` 以及维护状态。`default` 直接使用根目录，其他空间使用子目录。文件可直接备份，历史按条目身份保存。
+
+拉取源码后，需要确认宿主真正重载了模块。配置热更新不等于源码热更新。开发环境可为 `hmr` 的 `root` 明确指定本仓库的真实路径；启动日志会记录已加载版本和路径。操作步骤见 [开发与端到端验收](docs/development.md)。
+
+- [设计与数据流程](docs/design.md)
+- [自动维护与模型预算](docs/automatic-maintenance.zh.md)
+- [开发与端到端验收](docs/development.md)
+- [更新记录](CHANGELOG.md)
+
+MIT License

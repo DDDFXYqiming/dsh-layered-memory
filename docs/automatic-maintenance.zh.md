@@ -1,37 +1,49 @@
-# 自动记忆整理（测试版）
+# 自动记忆维护
 
-## 启用
+默认 `reflectionMode: notify`。程序扫描将可行动事项交给当前会话；`auto` 使用独立的 DSH 子代理。没有可行动事项时记录 no_action，不启动模型任务。
 
-在现有 layered-memory 插件配置项中加入下面三行。
+## 配置
 
 ```yaml
-reflectionEnabled: true
-reflectionMode: auto
-maintenanceProvider: spawn
+- id: dsh-layered-memory
+  config:
+    reflectionEnabled: true
+    reflectionMode: auto
+    maintenanceProvider: spawn
+    maintenanceLlmProvider: ''
+    maintenanceModel: ''
+    maintenanceReasoningEffort: ''
+    maintenanceMaxTokens: 4096
+    maintenanceCooldownMinutes: 30
+    maintenanceMaxCalls: 32
+    maintenanceMaxWrites: 6
+    maintenanceTimeoutSeconds: 300
 ```
 
-本版默认仍为 `reflectionMode: notify`，保持已有安装兼容。`auto` 才会用独立 DSH 子任务执行语义整理，不再向主会话注入整理请求。`notify` 可作为回退；`reflectionEnabled: false` 关闭模型参与，原有周期程序维护和手动维护仍可使用。
+LLM提供方与模型应选择本机已配置且可用的组合，并成对设置。留空时沿用父会话模型。`maintenanceProvider` 是执行子代理的提供方，与 `maintenanceLlmProvider` 分别表示两种职责。`maintenanceMaxTokens` 限制模型输出，不能等同于整次输入与输出的总计费上限。
 
-宿主必须提供 `ctx.subagents.getProvider()` 和 `start()`，并加载指定 provider。默认 `spawn` 必须为不继承父会话上下文、支持 `toolFilter` 和 `outputSchema` 的 provider。未满足时只运行程序维护，在日志和 `reflection-state.json.agentError` 中明确报告未执行模型复核，不冒充成功，也不退回主会话催促。无需为该插件单独填写模型 API key；路由由 DSH provider 决定。
+## 何时检查
 
-## 行为
+程序维护按 `maintainEveryTurns` 累计轮次，每个命名空间独立节流。反思还受 `reflectCooldownTurns` 与内容revision约束。相同内容已有结论时不重复通知。
 
-保留 SOP/pending/索引阈值和周期检查。达到检查条件且内容发生变化（或有上次未完成工作）、满足冷却后，先运行现有程序维护，再派发有限范围的独立整理任务。数量只触发检查，不是必须压低的指标；没有值得调整的内容时允许零写入并正常结束。每次最多提供六组合并候选、六组近重复候选和四个冷条目作为线索，模型仍须读取完整原文再判断，截断读取不算读完整。程序只自动合并同名同内容的重复段；跨条目内容一致与相似度候选一律只出候选，交由本子任务或人工语义确认后才合并、归档。
+扫描将同名冲突、跨条目一致/近重复候选和待处理pending归入actionable；冷条目仅提供复核线索。磁盘索引长于注入预算本身不要求模型为了凑数删减知识。
 
-子任务通过专用激活入口获得绑定当前命名空间的记忆工具。跨命名空间检索、提升记忆、再次调用维护均不可用；不授予终端、网络或继续派生子代理的全局工具。覆盖已有内容前要求完整读取（截断读取不算完整；写全新条目自由），归档要求具体的替代条目关系（替代条目已写入且在其 related 中关联源条目，或显式传 replacement）；替代内容是否完整由模型判断，不能把这个检查当作语义无损证明。正常写操作复用原有工具及其证据检查；子任务的 memory_update 强制保留快照。
+`autoPending:false` 为默认值。启用后，同一工具先失败后成功的序列进入候选；正式记忆仍需提交精炼正文和验证证据。候选可以显式丢弃，结果留在管理历史中。
 
-默认限制如下。命名空间级冷却 30 分钟；单次 32 次记忆工具调用、6 次写操作；超时 300 秒。配置分别为 `maintenanceCooldownMinutes`、`maintenanceMaxCalls`、`maintenanceMaxWrites`、`maintenanceTimeoutSeconds`。激活调用不计入 32 次。超时通过宿主取消信号执行，完成后始终释放子任务。冷却到期本身不会启动定时任务，仍需之后的交互会话 turn/end 触发检查。
+## 子任务权限与完整读取
 
-命名空间文件锁防止多个宿主正常情况下重复派发；仅自动回收确定属于同机已退出进程的锁。内容检查忽略时间戳、访问热度和溯源补登记；自身写入结束后记录最终内容版本。发现其他会话改变记忆时停止使用旧内容，不把未检查的新版本登记为已完成。提交一轮多文件写（快照、正文、元数据、索引）时持命名空间写锁并在锁内重新读取，写锁只在提交期持有，与模型思考、子任务执行互不重叠。
+auto维护使用宿主原生fresh-context子代理，通过专用激活入口获取绑定当前空间的有限工具。普通子代理默认read访问；维护任务的写入权限由专门的调用数、写入数和时间预算约束。
 
-## 查看结果
+修改已有条目前必须完整读取同一revision。类型、空间和key共同构成身份；读取另一种类型或尾页都不会取得完整读取资格。归档还需给出明确的替代条目。
 
-命名空间的 `reflection-state.json` 增加 `agentStatus`、`agentRevision`、`agentLastAttemptAt`、`agentLastFinishedAt`、`agentSession`、`agentCalls`、`agentMutations`、`agentSummary`、`agentError`。`done`/`no_action` 表示本次正常结束；`deferred` 表示仍有待处理事项，冷却后允许继续；`failed` 表示未完成复核。成功判定依赖模型结构化结果与宿主完成状态，不将被中断、无结果或未激活工具的运行标成成功。不要手工对齐 revision 来消警。
+程序只自动合并同名同内容段，跨条目相似度供模型或人工核对。模型可以得出零修改结论；有待办却未处理完时记录deferred，中断或执行失败记录failed。
 
-写入提示统一为“已验证、有未来复用价值、有信息增量才写”。旧 `index.txt` 中的标准催写句在读取时精确迁移；下次索引同步持久化，只替换头部已知句子，保留其他内容和 `[RULES]`。
+## 结果与成本
 
-## 验收
+`memory_stats` 提供当前空间及最近维护状态。`reflection-state.json` 记录最近一次状态，`maintenance-runs.json` 保存最近50次的原因、状态、会话、模型路由、调用数、修改数及可取得的usage。
 
-运行 `pnpm test`，或独立运行 `node --test test/maintenance-agent.node.mjs`。独立测试模拟宿主和存储工具，接线测试使用真实插件工具与临时存储、模拟 DSH 子代理服务；均不调用真实模型。还需在 Windows DSH 中确认 provider 可用、实际子会话工具过滤生效、模型完成整理、主任务继续执行，以及同内容不重复触发。先备份真实记忆库再试，修改前后均可比对快照和状态文件。其他插件自行注册的子会话局部工具不受全局工具过滤约束，需在本机检查实际工具列表。
+查看完整的provider子会话可以确认实际工具、读取范围和修改结果。usage来自宿主记录，缺失时保留未知值；不根据调用次数估算费用。
 
-宿主接口依据 deepseek-ai/deepseek-harness 的 `ddefc45f`，`packages/subagent/subagent/src/index.ts`、`types.ts` 和 `packages/core/tools/src/index.ts`。
+## 真实验收
+
+在实际桌面宿主中使用专用记忆库，先验证notify的可行动事项，再以少量重复候选启用auto。观察真实子会话是否启动、完整读取后才修改、预算是否执行、主会话是否继续工作，以及相同revision是否重复触发。结束后恢复日常配置并保留本次会话与维护历史。

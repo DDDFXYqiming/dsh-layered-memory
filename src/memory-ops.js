@@ -1,29 +1,19 @@
-// 记忆写操作与 pending 候选：writeMemory / pending 读写解析。
-// 依赖方向：memory-ops → store + l1index（单向，无循环）。
-// [v0.6] 三处硬约束（把 L0 公理从提示词变成代码）：
-//  - 覆盖已有条目必须先快照到 .history/（神圣不可删改：任何调用方都走这条路径）；
-//  - facts 正文禁止出现 "## " 行（否则会被解析成幽灵 section，实测已产生 10+ 条脏数据）；
-//  - 疑似密钥形态直接拒写（L0：凭证只允许存"引用"）。
-// [0.6.9] 校验收口到「最终持久化的所有受控字段」，且不为难正常使用：
-//  - evidence 逐行引用编码后拼接（含 "## " 的证据行不再可能被解析成新 section）；
-//  - evidence/related 命中疑似密钥时自动脱敏（不留明文），正文保持响亮拒写；
-//  - 写入整轮（快照/正文/meta/索引）持命名空间写锁，锁内重读再算。
-
+// 正式记忆写入和候选读写。正文、证据、来源和快照按同一条目身份提交。
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
+import { randomUUID } from "node:crypto";
 import { atomicWriteFileSync } from "./atomic-write.js";
 import {
 	PENDING_DIR,
-	setEntryMeta,
-	getEntryMeta,
 	slugify,
-	upsertFact,
 	snapshotEntry,
-	readFact,
-	stripArchiveBanner,
 	withNsWriteLock,
-	sopSlugConflict,
 	RESERVED_ENTRY_NAMES,
+	readEntry,
+	parseEntryBody,
+	commitEntry,
+	ensureNamespaceLayout,
+	entryIdentity,
 } from "./store.js";
 import { syncIndex, L1_MAX_CHARS_DEFAULT } from "./l1index.js";
 
@@ -63,16 +53,9 @@ export function redactSecretLines(text) {
 	}).join("\n");
 }
 
-/**
- * [0.7.1] related key 规范化：关联指针是条目 key（fact 的 section 名 / sop 的
- * 文件裸名），不是路径。实测出现过 `sops/xxx.md` 形式入库，解析侧按裸 key 匹配，
- * 关联永远显示「目标不存在」。写入侧统一剥掉 `sops/`（或 `sops\`）前缀与 `.md`
- * 后缀；其余形式原样保留——不做存在性校验，跨命名空间/尚未创建的条目都是合法目标。
- */
+// 新关系使用类型化身份；旧字符串保持原样，读取方展示为未解析。
 export function normalizeRelatedKey(value) {
-	return String(value ?? "").trim()
-		.replace(/^sops[/\\]/i, "")
-		.replace(/\.md$/i, "");
+	return typeof value === "string" ? value.trim() : entryIdentity(value.namespace, value.kind, value.key);
 }
 
 /**
@@ -117,7 +100,7 @@ export function buildAdvisories({ topic, content, existing, index, maxTopicChars
 		out.push("topic 含日期/commit 等易变状态（L0 公理 3）：这类信息放正文或删除，名字要能长期定位");
 	}
 	if (existing) {
-		out.push("该主题已存在：本次已自动把旧版本快照到 .history/，同主题演进更推荐 memory_update（可显式 supersede:false）");
+		out.push("旧版本已保存在 .history/，可按快照 id 恢复。");
 	}
 	if (index?.over_limit) {
 		out.push(`L1 索引 ${index.index_chars} 字符已超预算 ${index.max_chars}：请 memory_maintain 合并相近条目或归档冷条目（系统不会自动隐藏任何条目）`);
@@ -131,113 +114,55 @@ export function buildAdvisories({ topic, content, existing, index, maxTopicChars
  * 所有覆盖写都必须经过这里快照（memory_write / memory_update / memory_accept 共用）。
  */
 export function writeMemory(root, {
-	topic, entryType, content, evidence, sourceSession, sourceSeqs, namespace, related,
-	maxChars = L1_MAX_CHARS_DEFAULT, snapshot = true,
+  topic, key, entryType, content, evidence, sourceSession, sourceSeqs, sourceCallId,
+  evidenceCallIds, namespace = "default", related, preserveSource = false, mode = "create",
+  maxChars = L1_MAX_CHARS_DEFAULT,
 }) {
-	// [0.6.1 M4] 校验逻辑提取为 assertSafeTopic 单源，供全部 topic 入参工具复用。
-	const safeTopic = assertSafeTopic(topic, "memory_write");
-	// [0.6.9] topic 是进 L1 索引/section 的持久化受控字段：密钥形态同样不许进（拒写）。
-	const topicSecret = detectSecret(safeTopic);
-	if (topicSecret) {
-		throw new Error(`memory_write: topic 疑似含密钥（命中 ${topicSecret}），拒绝写入。主题名用自解释短语，凭证只存引用。`);
-	}
-	// [0.6.9] 保留名写入侧统一拦截：readme/license/index/l1/索引 写入即隐身
-	// （sopNames 过滤、read 的 index 分支），直接拒绝并指路改名。
-	if (RESERVED_ENTRY_NAMES.has(safeTopic.toLowerCase()) || (entryType === "sop" && RESERVED_ENTRY_NAMES.has(slugify(safeTopic)))) {
-		throw new Error(`memory_write: 「${safeTopic}」是保留名（readme/license/index/l1/索引），写入后无法被列出或读取，请换一个主题名。`);
-	}
-	// [0.6.4] 取消归档/重写的入口：剥掉可能残留的归档横幅，避免旧标记跟着新内容走。
-	const body = stripArchiveBanner(String(content ?? "").trim());
-	const secretHit = detectSecret(body);
-	if (secretHit) {
-		throw new Error(`memory_write: 内容疑似含密钥（命中 ${secretHit}）。行动验证公理之外还有 L0 红线「密钥仅引用」：请改存引用名/路径（如 keychain:<name> 或配置文件路径），不要写明文凭证。`);
-	}
-	if (entryType === "fact" && /^##\s+/m.test(body)) {
-		throw new Error("memory_write: fact 正文禁止以 \"## \" 开头的行——它会被解析成新的 L2 section（幽灵条目）。需要小标题请用 \"### \" 或列表。");
-	}
-	// [0.6.9] evidence 同样是持久化字段：疑似密钥自动脱敏（不拒写，真实证据不陪葬），
-	// 再逐行引用编码——证据里的 "## " 行、控制字符不再可能破坏 facts.md 的 section 结构。
-	const evidenceText = redactSecretLines(String(evidence ?? "").trim());
-	if (!evidenceText.trim()) {
-		throw new Error("memory_write: evidence 必填（行动验证公理：无行动，不记忆）");
-	}
-	// [0.6.9] related 逐项过滤疑似密钥（引用名不该是凭证明文的旁路）。
-	// [0.7.1] 入库前先规范化为裸 key（剥 sops/ 前缀与 .md 后缀）。
-	const relatedList = Array.isArray(related)
-		? related.map((r) => normalizeRelatedKey(r)).filter(Boolean).filter((r) => !detectSecret(r))
-		: undefined;
-	const wrapped = `${body}\n\n${quoteEvidence(evidenceText)}\n`;
+  if (!["fact", "sop"].includes(entryType)) throw new Error("entryType must be fact or sop");
+  if (!["create", "update"].includes(mode)) throw new Error("mode must be create or update");
+  ensureNamespaceLayout(root);
+  return withNsWriteLock(root, () => {
+    const entryKey = key ?? (entryType === "sop" ? slugify(topic) : String(topic ?? "").trim());
+    entryIdentity(namespace, entryType, entryKey);
+    const previous = readEntry(root, entryType, entryKey);
+    if (mode === "create" && previous) throw new Error("Entry already exists; update its entry id: " + entryKey);
+    if (mode === "update" && !previous) throw new Error("Entry does not exist: " + entryKey);
+    const title = assertSafeTopic(previous?.title ?? topic, "memory_write");
+    if (!title) throw new Error("A new entry needs a title");
+    if (detectSecret(title)) throw new Error("Entry title contains a credential");
+    if (RESERVED_ENTRY_NAMES.has(title.toLowerCase()) || (entryType === "sop" && RESERVED_ENTRY_NAMES.has(entryKey))) throw new Error("Reserved entry name: " + title);
 
-	// [0.6.9] 整轮写（快照/正文/meta/索引）持命名空间写锁：锁内重读、锁内计算。
-	return withNsWriteLock(root, () => {
-		let path;
-		let action;
-		let history = "";
-		let existing = false;
-		// [0.6.1 N13] 快照失败不再静默：记录原因，出口统一进 advisories 响亮上报。
-		let snapshotFailure = "";
-		if (entryType === "fact") {
-			path = join(root, "facts.md");
-			existing = readFact(root, safeTopic) !== null;
-			if (existing && snapshot) {
-				const snap = snapshotEntry(root, "fact", safeTopic);
-				history = snap.path;
-				if (snap.error) snapshotFailure = snap.error;
-			}
-			action = upsertFact(root, safeTopic, wrapped.trim());
-			setEntryMeta(root, "fact", safeTopic, metaPatch({ sourceSession, sourceSeqs, evidence: evidenceText, namespace, related: relatedList, root, kind: "fact", key: safeTopic }));
-		} else {
-			const slug = slugify(safeTopic);
-			// [0.6.9] slug 碰撞检查：不同主题名折叠到同一文件时，覆盖写等于换掉另一条事实。
-			const conflict = sopSlugConflict(root, safeTopic, slug);
-			if (conflict) {
-				throw new Error(`memory_write: 「${safeTopic}」与已有条目「${conflict}」折叠到同一文件名 ${slug}.md（slugify 会折叠标点/截断）。请改名区分，避免互相覆盖。`);
-			}
-			path = join(root, "sops", `${slug}.md`);
-			existing = existsSync(path);
-			if (existing && snapshot) {
-				const snap = snapshotEntry(root, "sop", slug);
-				history = snap.path;
-				if (snap.error) snapshotFailure = snap.error;
-			}
-			atomicWriteFileSync(path, `# ${safeTopic}\n\n${wrapped}`);
-			action = existing ? "updated" : "created";
-			setEntryMeta(root, "sop", slug, metaPatch({ sourceSession, sourceSeqs, evidence: evidenceText, namespace, related: relatedList, root, kind: "sop", key: slug }));
-		}
-		const index = syncIndex(root, maxChars);
-		const advisories = buildAdvisories({ topic: safeTopic, content: body, existing, index });
-		// [0.6.1 N13] 「所有覆盖写统一先快照」是 v0.6 数据丢失级修复；磁盘满/EPERM 等
-		// 持续故障下旧实现会静默绕过它。现在快照失败必须出现在返回体判据里，
-		// 让调用方（模型/用户）知道旧版本没保住。（写本身仍继续——拒写会丢新数据。）
-		if (snapshotFailure) advisories.unshift(`快照失败，旧版本未保留: ${snapshotFailure}`);
-		return {
-			entry_type: entryType,
-			topic: safeTopic,
-			path,
-			action,
-			history: history || undefined,
-			index,
-			advisories,
-		};
-	});
-}
-
-function metaPatch({ sourceSession, sourceSeqs, evidence, namespace, related, root, kind, key }) {
-	const prev = getEntryMeta(root, kind, key) || {};
-	return {
-		sourceSession: sourceSession || prev.sourceSession || null,
-		sourceSeqs: Array.isArray(sourceSeqs) && sourceSeqs.length
-			? sourceSeqs.map(Number).filter(Number.isFinite)
-			: (prev.sourceSeqs || []),
-		evidence,
-		namespace: namespace || null,
-		// [0.6.9] 写入即激活：正文横幅已被剥掉，隐藏状态必须同步解除，
-		// 否则"重写已归档条目"会出现无横幅却仍隐身的错位（更新/回滚混用问题之一）。
-		archived: false,
-		// [0.6.9] related 语义区分「未提供」与「明确空数组」：数组即显式替换（空数组=清空旧关联），
-		// 未提供时走 setEntryMeta 的 spread 继承旧值。
-		...(Array.isArray(related) ? { related: related.map(String) } : {}),
-	};
+    // 接受纯正文，也规范化由已有文件复制来的包装；不会剥掉不同名的正文标题。
+    const supplied = String(content ?? "").trim();
+    const body = parseEntryBody(entryType, entryKey, entryType === "sop" ? "# " + title + "\n\n" + supplied : supplied).content;
+    if (!body) throw new Error("Entry content must not be empty");
+    if (detectSecret(body)) throw new Error("Entry content contains a credential; store a reference instead");
+    if (entryType === "fact" && /^##\s+/m.test(body)) throw new Error('Fact content cannot contain "## " section headings');
+    const evidenceText = redactSecretLines(String(evidence ?? (preserveSource ? previous?.meta.evidence : "") ?? "").trim());
+    if (!evidenceText) throw new Error("Verified evidence is required");
+    const relatedList = related === undefined ? previous?.meta.related || [] : related.map(normalizeRelatedKey);
+    if (relatedList.some(value => detectSecret(JSON.stringify(value)))) throw new Error("Entry relations contain a credential");
+    const history = previous ? snapshotEntry(root, entryType, entryKey).path : "";
+    const now = new Date().toISOString();
+    const prior = previous?.meta || {};
+    const source = preserveSource
+      ? { sourceSession: prior.sourceSession || null, sourceSeqs: prior.sourceSeqs || [], ...(prior.sourceCallId ? { sourceCallId: prior.sourceCallId } : {}) }
+      : { sourceSession: sourceSession || null, sourceSeqs: Array.isArray(sourceSeqs) ? sourceSeqs : [], ...(sourceCallId ? { sourceCallId } : {}) };
+    const meta = { ...prior, ...source, namespace, evidence: evidenceText, related: relatedList, archived: false, createdAt: prior.createdAt || now, updatedAt: now };
+    if (!preserveSource && !sourceCallId) delete meta.sourceCallId;
+    if (evidenceCallIds) meta.evidenceCallIds = evidenceCallIds;
+    else if (!preserveSource) delete meta.evidenceCallIds;
+    for (const field of ["archivedAt", "archivedFrom", "replacedBy", "promotedTo", "unarchivedAt"]) delete meta[field];
+    const wrapped = body + "\n\n" + quoteEvidence(evidenceText) + "\n";
+    const raw = entryType === "sop" ? "# " + title + "\n\n" + wrapped : wrapped;
+    const entry = commitEntry(root, entryType, entryKey, raw, meta);
+    const index = syncIndex(root, maxChars);
+    return {
+      entry_type: entryType, topic: title, key: entryKey, path: join(root, entryType === "fact" ? "facts.md" : "sops/" + entryKey + ".md"),
+      action: previous ? "updated" : "created", history: history || undefined, index, entry,
+      advisories: buildAdvisories({ topic: title, content: body, existing: Boolean(previous), index }),
+    };
+  });
 }
 
 /**
@@ -285,7 +210,7 @@ function redactSecretTail(text) {
 
 /** 写入 pending 候选（重试序列尾部先过密钥消毒）。 */
 export function writePending(root, payload) {
-	const fileName = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.md`;
+	const fileName = "pending-" + randomUUID() + ".md";
 	const p = join(root, PENDING_DIR, fileName);
 	const safe = Array.isArray(payload?.retries)
 		? {
@@ -297,12 +222,13 @@ export function writePending(root, payload) {
 			})),
 		}
 		: payload;
-	atomicWriteFileSync(p, pendingContent(safe));
+	withNsWriteLock(root, () => atomicWriteFileSync(p, pendingContent(safe)));
 	return fileName;
 }
 
 /** 读取 pending 候选。 */
 export function readPending(root, name) {
+	if (basename(name) !== name || !name.endsWith(".md")) throw new Error("Invalid pending file name");
 	const p = join(root, PENDING_DIR, name);
 	if (!existsSync(p)) return null;
 	const text = readFileSync(p, "utf8");

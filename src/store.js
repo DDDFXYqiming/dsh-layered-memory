@@ -1,11 +1,8 @@
-// 存储原语：命名空间、目录布局、facts/sops/pending 读写、meta 溯源、访问热度（带衰减）。
-// 本模块不依赖索引逻辑（l1index），保持单向依赖。
-
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, openSync, writeFileSync, closeSync, renameSync } from "node:fs";
+// 文件存储与条目身份。正文变更由命名空间锁串行化，索引是可重建的派生数据。
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, linkSync, cpSync, realpathSync } from "node:fs";
 import { homedir, hostname } from "node:os";
-import { join, basename } from "node:path";
-import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { join, basename, dirname, resolve } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
 import { atomicWriteFileSync, stageWrite, commitStaged } from "./atomic-write.js";
 import { FACTS_TEMPLATE, INDEX_TEMPLATE, L0_TEMPLATE } from "./templates.js";
 
@@ -15,706 +12,485 @@ export const ARCHIVE_DIR = "archive";
 export const HISTORY_DIR = ".history";
 export const ACCESS_FILE = "file_access_stats.json";
 export const TURN_STATE_FILE = "turn-state.json";
-
-// [fix 2026-08-20] sops/ 保留名：非 SOP 内容文件不得计入 L3 条目。
 export const SOP_RESERVED_NAMES = new Set(["readme", "license", "index"]);
-// [0.6.9] 写入侧统一保留名（含 L1 索引别名）：这些名字写进去也读不出来（read 的
-// index 分支、sopNames 的过滤都会拦掉），属于"写入即隐身"，写入口直接拒绝。
 export const RESERVED_ENTRY_NAMES = new Set([...SOP_RESERVED_NAMES, "l1", "索引"]);
-// recency 保护窗口：新建条目在窗口内获得加成，避免"写完即隐身"。
-export const RECENCY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+export const RECENCY_WINDOW_MS = 7 * 86400000;
 export const RECENCY_BONUS = 1;
-// [v0.5] 访问热度半衰期：14 天前的访问权重减半（Ebbinghaus 直觉，对齐 Generative Agents 的指数衰减）。
 export const HEAT_HALF_LIFE_DAYS = 14;
-
-export function defaultMemDir() {
-	return join(homedir(), ".dsh", "memory");
-}
-
-/** 命名空间安全化：只允许小写字母、数字、下划线、连字符。 */
-export function safeNs(value) {
-	const s = String(value ?? "default").trim().toLowerCase()
-		.replace(/[^a-z0-9_-]+/g, "-")
-		.replace(/^-+|-+$/g, "");
-	return s || "default";
-}
-
-/** namespace=default 时兼容旧根目录，其余使用 <memoryDir>/<namespace>/。 */
-export function nsRoot(memDir, ns) {
-	const s = safeNs(ns);
-	return s === "default" ? memDir : join(memDir, s);
-}
-
-/** 命名空间缓存默认 TTL：60s——分支切换按分钟级感知；热路径每轮求值不再 spawn git。 */
 export const NAMESPACE_CACHE_TTL_MS_DEFAULT = 60_000;
-
-const nsCache = new Map(); // cwd -> { ns, expires }
-/** 测试探针：累计 git 子进程 spawn 次数（验证缓存命中用）。 */
-export const namespaceProbe = { gitSpawns: 0 };
-/** 清空命名空间缓存与探针计数（测试隔离用）。 */
-export function clearNamespaceCache() {
-	nsCache.clear();
-	namespaceProbe.gitSpawns = 0;
-}
-
-/** 查当前 git 分支（无分支/非仓库/git 缺失统一归一为空串）。 */
-function queryCurrentBranch(cwd) {
-	namespaceProbe.gitSpawns += 1;
-	try {
-		return execFileSync("git", ["branch", "--show-current"], {
-			cwd,
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "ignore"],
-			timeout: 2000,
-		}).trim();
-	} catch { /* 非 git 目录 / git 不可用 / 超时：视为无分支 */ return ""; }
-}
-
-/**
- * 自动命名空间：workspace 目录名 + git 分支名（若可用）。
- * [0.6.1 M3] 进程内 memoize（key=cwd）：autoNamespace 开启时本函数位于每轮
- * prompt 装配（systemPrompt.context 的 text 回调）与每次 memory_* 工具执行的
- * 同步路径上，此前无缓存导致每轮 spawn git（正常几十 ms、文件系统挂起时最长
- * 2s timeout），全程阻塞宿主事件循环。TTL 由配置 namespaceCacheTtlMs 控制，0 关闭缓存。
- * [0.6.9] cwd 改为入参（缺省才回退 process.cwd()）：DSH 的工作区按会话确定
- * （exec.agent.session.header.cwd），服务进程启动目录只是无会话上下文时的兜底。
- */
-export function detectNamespace(ttlMs = NAMESPACE_CACHE_TTL_MS_DEFAULT, now = Date.now(), cwd = process.cwd()) {
-	try {
-		// 家目录不是项目：此前实测在 ~/.dsh/memory 下生成了以用户名命名的垃圾命名空间。
-		if (join(cwd).replace(/[\\/]+$/, "") === join(homedir()).replace(/[\\/]+$/, "")) return "default";
-		const hit = nsCache.get(cwd);
-		if (ttlMs > 0 && hit && hit.expires > now) return hit.ns;
-		const base = basename(cwd) || "default";
-		const branch = queryCurrentBranch(cwd);
-		// [0.6.9] 纯中文/符号名字经 safeNs 会塌成 "default"（等于跨项目串库）：
-		// 这类名字改用完整路径短 hash 命名空间。旧 default 库不迁移，只是新目录不再落进去。
-		const baseNs = safeNs(base);
-		const anchor = baseNs === "default" && base.toLowerCase() !== "default"
-			? `p${createHash("sha256").update(String(cwd)).digest("hex").slice(0, 8)}`
-			: baseNs;
-		const branchNs = branch ? safeNs(branch) : "";
-		const ns = branchNs && branchNs !== "default"
-			? safeNs(`${anchor}__${branchNs}`)
-			: anchor;
-		if (ttlMs > 0) nsCache.set(cwd, { ns, expires: now + ttlMs });
-		return ns;
-	} catch {
-		return "default";
-	}
-}
-
-export function resolveNamespace(cfg, explicit, cwd) {
-	if (explicit) return safeNs(explicit);
-	if (cfg.defaultNamespace) return safeNs(cfg.defaultNamespace);
-	if (cfg.autoNamespace) return detectNamespace(cfg.namespaceCacheTtlMs ?? NAMESPACE_CACHE_TTL_MS_DEFAULT, Date.now(), cwd ?? process.cwd());
-	return "default";
-}
-
-/** 初始化命名空间目录结构（幂等，不覆盖已有内容；种子文件缺失时写入模板）。 */
-export function ensureNamespaceLayout(root) {
-	mkdirSync(root, { recursive: true });
-	// 子目录创建失败（如命名空间目录只读）不得阻断初始化——工具仍应可用。
-	for (const dir of ["sops", PENDING_DIR, ARCHIVE_DIR, HISTORY_DIR]) {
-		try {
-			mkdirSync(join(root, dir), { recursive: true });
-		} catch (err) {
-			if (err && (err.code === "EACCES" || err.code === "EPERM")) continue;
-			throw err;
-		}
-	}
-	const seeds = [
-		["memory_management_sop.md", L0_TEMPLATE],
-		["index.txt", INDEX_TEMPLATE],
-		["facts.md", FACTS_TEMPLATE],
-	];
-	for (const [file, content] of seeds) {
-		const p = join(root, file);
-		try {
-			if (!existsSync(p)) atomicWriteFileSync(p, content);
-		} catch (err) {
-			if (err && (err.code === "EACCES" || err.code === "EPERM")) continue;
-			throw err;
-		}
-	}
-	// [0.7.1] 遗留文件隔离：memory_stats.json 是早期版本的访问统计落点，现版本
-	// 统计在 file_access_stats.json（ACCESS_FILE），旧文件全代码库零引用，留在库里
-	// 只会误导人工翻库。发现时改名 .legacy 隔离（保底可读，不删除）；目标已存在
-	// 说明隔离过又出现新遗留，直接删新件。隔离失败静默跳过——遗留清理绝不能
-	// 阻断记忆库初始化（本函数在所有工具路径与启动路径上，抛出等于全库不可用）。
-	try {
-		const legacyStats = join(root, "memory_stats.json");
-		if (existsSync(legacyStats)) {
-			const quarantine = join(root, "memory_stats.json.legacy");
-			if (existsSync(quarantine)) rmSync(legacyStats, { force: true });
-			else renameSync(legacyStats, quarantine);
-		}
-	} catch { /* 隔离失败不影响初始化 */ }
-}
-
-export function slugify(topic) {
-	const s = String(topic).trim().toLowerCase()
-		.replace(/[^\p{L}\p{N}]+/gu, "-")
-		.replace(/^-+|-+$/g, "");
-	return s.slice(0, 48) || "entry";
-}
-
-/**
- * [0.6.9] SOP slug 碰撞检查：slugify 会折叠标点并截断 48 字符，不同主题名可能
- * 映射到同一文件（Build.A vs Build-A、两个长前缀相同的 SOP）。此时覆盖写等于
- * 用另一条事实替换这条事实。返回冲突的已有主题名；无冲突（含同名覆盖）返回 null。
- * 比较用"连字符/下划线视为空格 + 小写"的宽松归一，同名不同大小写不算碰撞。
- */
-export function sopSlugConflict(root, topic, slug) {
-	const p = join(root, "sops", `${slug}.md`);
-	if (!existsSync(p)) return null;
-	try {
-		const head = readFileSync(p, "utf8").split("\n")[0].trim();
-		const m = head.match(/^#\s+(.+)$/);
-		const existingTopic = m ? m[1].trim() : "";
-		if (!existingTopic) return null; // 无标题行的旧文件无法判定，不拦
-		const norm = (s) => s.toLowerCase().replace(/[-_]+/g, " ").trim();
-		if (norm(existingTopic) !== norm(String(topic).trim())) return existingTopic;
-		return null;
-	} catch {
-		return null;
-	}
-}
-
-/** facts.md 的 section 名列表。 */
-export function factSections(root) {
-	try {
-		const text = readFileSync(join(root, "facts.md"), "utf8");
-		const out = [];
-		for (const line of text.split("\n")) {
-			const m = line.match(/^##\s+(.+)$/);
-			if (m) out.push(m[1].trim());
-		}
-		return out;
-	} catch {
-		return [];
-	}
-}
-
-/** sops/ 的文件名列表（去 .md，过滤保留名）。 */
-export function sopNames(root) {
-	try {
-		return readdirSync(join(root, "sops"))
-			.filter((f) => f.endsWith(".md"))
-			.filter((f) => !SOP_RESERVED_NAMES.has(f.slice(0, -3).toLowerCase()))
-			.map((f) => f.replace(/\.md$/, ""))
-			.sort();
-	} catch {
-		return [];
-	}
-}
-
-export function pendingNames(root) {
-	try {
-		return readdirSync(join(root, PENDING_DIR))
-			.filter((f) => f.endsWith(".md"))
-			.sort();
-	} catch {
-		return [];
-	}
-}
-
-// [0.6.6] meta 读取缓存：getEntryMeta / isArchived 是 turn/end 热路径上的按条查询，
-// 此前每一条都要 readFileSync + JSON.parse 整份 memory-meta.json（实测 46 条 SOP 的
-// 一轮判定 = 46 次全量解析 200KB+ 文件）。缓存键为 size+mtime+ino：任何写盘（含
-// rename 换 inode）都会自动换键；写入方另调 invalidateMetaCache 做显式双保险。
-const metaCache = new Map(); // path -> { key, value }
-
-/** 失效命名空间（或全部）的 meta 缓存。写入方调用。 */
-export function invalidateMetaCache(root) {
-	if (root) metaCache.delete(join(root, META_FILE));
-	else metaCache.clear();
-}
-
-function metaCacheKey(p) {
-	try {
-		const s = statSync(p);
-		return `${s.size}:${Math.round(s.mtimeMs)}:${s.ino ?? 0}`;
-	} catch {
-		return null;
-	}
-}
-
-export function readMeta(root) {
-	const p = join(root, META_FILE);
-	const key = metaCacheKey(p);
-	if (key === null) {
-		metaCache.delete(p);
-		return { facts: {}, sops: {} };
-	}
-	const hit = metaCache.get(p);
-	if (hit && hit.key === key) return hit.value;
-	try {
-		const value = JSON.parse(readFileSync(p, "utf8"));
-		metaCache.set(p, { key, value });
-		return value;
-	} catch {
-		metaCache.delete(p);
-		return { facts: {}, sops: {} };
-	}
-}
-
+const WRITE_LOCK_FILE = ".write.lock";
+const heldWriteLocks = new Set();
 const SLEEP_BUF = new Int32Array(new SharedArrayBuffer(4));
 
-// ── [0.6.9] 命名空间写锁（跨进程，短持有）────────────────────────────────────
-// casRewrite 是单文件 CAS，能防单文件互相覆盖，但"读取→快照→正文→meta→索引"
-// 这一整轮写不是原子的：两个进程交错执行时，后完成者的 meta/索引可能盖掉先完成者的
-// 正文（独立 worker 实测可复现"只剩 B 的更新"）。所有多文件写流程包这把锁，
-// 锁内重新读取再算，锁外不预计算结果。锁只在实际提交期间持有（毫秒级），
-// 不跨模型思考/维护子任务，锁等待超预算响亮抛错、绝不静默丢写。
-const WRITE_LOCK_FILE = ".write.lock";
-const WRITE_LOCK_STALE_MS = 5_000;
-const WRITE_LOCK_WAIT_MS = 3_000;
-const heldWriteLocks = new Set(); // 同进程重入（同步执行段内不会再开并发写）
-
-/** 命名空间级写锁：fn 内完成一轮多文件读改写。同进程可重入。 */
-export function withNsWriteLock(root, fn, { waitBudgetMs = WRITE_LOCK_WAIT_MS } = {}) {
-	if (heldWriteLocks.has(root)) return fn();
-	const lockPath = join(root, WRITE_LOCK_FILE);
-	const id = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-	const t0 = Date.now();
-	for (;;) {
-		let fd = null;
-		try {
-			fd = openSync(lockPath, "wx");
-			try { writeFileSync(fd, JSON.stringify({ id, pid: process.pid, host: hostname(), at: Date.now() })); } finally { closeSync(fd); fd = null; }
-			break;
-		} catch (error) {
-			if (fd !== null) { try { closeSync(fd); } catch { /* 忽略 */ } }
-			if (error.code !== "EEXIST") throw error;
-			let stale = true;
-			try {
-				const info = JSON.parse(readFileSync(lockPath, "utf8"));
-				let dead = false;
-				try { process.kill(info.pid, 0); } catch (e) { if (e.code === "ESRCH") dead = true; }
-				const age = Date.now() - (Number(info.at) || 0);
-				stale = dead || age > WRITE_LOCK_STALE_MS;
-			} catch { /* 锁文件损坏/半写：视为陈旧可回收 */ }
-			if (stale) { try { rmSync(lockPath, { force: true }); } catch { /* 下轮重试 */ } continue; }
-			if (Date.now() - t0 > waitBudgetMs) {
-				throw new Error(`withNsWriteLock: 命名空间写锁等待超 ${waitBudgetMs}ms（另一进程正在写入），请重试: ${root}`);
-			}
-			Atomics.wait(SLEEP_BUF, 0, 0, 5 + Math.floor(Math.random() * 10));
-		}
-	}
-	heldWriteLocks.add(root);
-	try {
-		return fn();
-	} finally {
-		heldWriteLocks.delete(root);
-		try { rmSync(lockPath, { force: true }); } catch { /* 残留锁按陈旧处理 */ }
-	}
+export function defaultMemDir() { return join(homedir(), ".dsh", "memory"); }
+export function hashText(text) { return createHash("sha512").update(String(text ?? "")).digest("hex").slice(0, 32); }
+export function safeNs(value) {
+  return String(value ?? "default").trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "default";
+}
+export function nsRoot(memDir, ns) { const name = safeNs(ns); return name === "default" ? memDir : join(memDir, name); }
+export function canonicalWorkspacePath(cwd) {
+  const path = realpathSync.native(resolve(cwd)).replace(/[\\\/]+$/, "");
+  return process.platform === "win32" ? path.toLowerCase() : path;
+}
+export function detectNamespace(_ttl, _now, cwd = process.cwd()) {
+  const path = canonicalWorkspacePath(cwd);
+  if (path === canonicalWorkspacePath(homedir())) return "default";
+  return `${safeNs(basename(path)).slice(0, 40)}-${hashText(path).slice(0, 12)}`;
+}
+export function resolveNamespace(cfg, explicit, cwd = process.cwd()) {
+  if (explicit) return safeNs(explicit);
+  if (cfg.defaultNamespace) return safeNs(cfg.defaultNamespace);
+  return cfg.autoNamespace ? detectNamespace(undefined, undefined, cfg.workspaceRootFor?.(cwd) || cwd) : "default";
 }
 
-/**
- * 跨进程更新丢失防护：CAS 读改写（无锁无死锁），三段关窗。
- * 1) 暂存：内容先写进唯一下 tmp（rename 的弹药备好，正式文件未动）；
- * 2) 关窗复核：rename 前一刻重读正式文件，仍等于本方基座才提交——校验与
- *    rename 之间不再夹任何耗时操作（tmp 已备好），窗口压到微秒级；
- * 3) 回读兜底：rename 成功后回读确认。EPERM 退避的每轮 sleep 后同样复核基座，
- *    基座已被并发改写则放弃本次 rename 回炉重算（新基座已含胜者内容，单调收敛）。
- * 持续冲突超预算抛错，绝不静默丢。单进程内写都在同一同步段，本防护只针对多宿主
- * 进程共享同一命名空间的场景。compute(text) 必须是仅依赖传入文本的纯函数；
- * 返回 null 表示无需写入。
- */
-export function casRewrite(path, compute, budgetMs = 3000) {
-	const t0 = Date.now();
-	for (;;) {
-		const text = existsSync(path) ? readFileSync(path, "utf8") : null;
-		const next = compute(text);
-		if (next === null) return;
-		const tmp = stageWrite(path, next);
-		const cur = existsSync(path) ? readFileSync(path, "utf8") : null;
-		let settled = false;
-		if (cur === text) {
-			const r = commitStaged(tmp, path, () => {
-				const now = existsSync(path) ? readFileSync(path, "utf8") : null;
-				return now === text;
-			});
-			if (r === "ok") {
-				const done = existsSync(path) ? readFileSync(path, "utf8") : null;
-				if (done === next) settled = true;
-			}
-		}
-		// [0.6.1 N1] rmSync 此前未导入，这里必抛 ReferenceError 并被 catch 静默吞掉，
-		// CAS 复核失败分支的 .tmp-* 永久泄漏。补导入后 force:true 已吸收 ENOENT
-		// （成功提交时 commitStaged 的 finally 已删掉 tmp）；仍能到这里只剩
-		// EPERM/EBUSY（杀软短暂持锁）——残留可接受，不阻断 CAS 重试。
-		try { rmSync(tmp, { force: true }); } catch { /* EPERM/EBUSY：tmp 残留但不影响正确性 */ }
-		if (settled) return;
-		if (Date.now() - t0 > budgetMs) {
-			throw new Error(`casRewrite: 并发冲突持续超 ${budgetMs}ms 预算，放弃写入（防更新丢失）: ${path}`);
-		}
-		Atomics.wait(SLEEP_BUF, 0, 0, 2 + Math.floor(Math.random() * 8));
-	}
+function readText(path) {
+  try { return readFileSync(path, "utf8"); }
+  catch (error) { if (error.code === "ENOENT") return null; throw error; }
+}
+function readJson(path, absent) {
+  const text = readText(path);
+  if (text === null) return absent;
+  try { return JSON.parse(text); }
+  catch (error) { throw new Error(`Invalid JSON in ${path}: ${error.message}`, { cause: error }); }
+}
+function markdownNames(dir) {
+  try { return readdirSync(dir).filter(name => name.endsWith(".md")).sort(); }
+  catch (error) { if (error.code === "ENOENT") return []; throw error; }
 }
 
-export function getEntryMeta(root, kind, key) {
-	const m = readMeta(root);
-	return (kind === "fact" ? m.facts : m.sops)[key] || null;
+/** 显式初始化；读工具不调用本函数。不迁移、删除或覆盖既有用户文件。 */
+export function ensureNamespaceLayout(root, identity) {
+  mkdirSync(root, { recursive: true });
+  return withNsWriteLock(root, () => {
+    for (const dir of ["sops", PENDING_DIR, ARCHIVE_DIR, HISTORY_DIR]) mkdirSync(join(root, dir), { recursive: true });
+    for (const [name, content] of [["memory_management_sop.md", L0_TEMPLATE], ["index.txt", INDEX_TEMPLATE], ["facts.md", FACTS_TEMPLATE]]) {
+      if (!existsSync(join(root, name))) atomicWriteFileSync(join(root, name), content);
+    }
+    if (identity && !existsSync(join(root, ".namespace.json"))) atomicWriteFileSync(join(root, ".namespace.json"), JSON.stringify(identity, null, 2));
+  });
 }
 
-export function setEntryMeta(root, kind, key, patch) {
-	let out = null;
-	casRewrite(join(root, META_FILE), (text) => {
-		let m = null;
-		try { m = text === null ? null : JSON.parse(text); } catch { m = null; }
-		if (!m || !m.facts || !m.sops) m = { facts: {}, sops: {} };
-		const store = kind === "fact" ? m.facts : m.sops;
-		const prev = store[key] || {};
-		const now = new Date().toISOString();
-		store[key] = {
-			...prev,
-			...patch,
-			createdAt: prev.createdAt || now,
-			updatedAt: now,
-		};
-		out = store[key];
-		return JSON.stringify(m, null, 2);
-	});
-	invalidateMetaCache(root);
-	return out;
+/** 锁内容先完整写入独立文件，再以 hard link 原子占位，消除空锁窗口。 */
+export function withNsWriteLock(root, fn, { waitBudgetMs = 3000 } = {}) {
+  mkdirSync(root, { recursive: true });
+  const canonical = canonicalWorkspacePath(root);
+  if (heldWriteLocks.has(canonical)) return fn();
+  const lockPath = join(canonical, WRITE_LOCK_FILE);
+  const id = randomUUID();
+  const candidate = join(canonical, `.write-owner-${id}`);
+  writeFileSync(candidate, JSON.stringify({ id, pid: process.pid, host: hostname() }), { flag: "wx" });
+  const deadline = Date.now() + waitBudgetMs;
+  try {
+    for (;;) {
+      try { linkSync(candidate, lockPath); break; }
+      catch (error) {
+        if (error.code !== "EEXIST") throw error;
+        const owner = readJson(lockPath, null);
+        if (owner?.host === hostname() && Number.isSafeInteger(owner.pid) && owner.pid > 0) {
+          try { process.kill(owner.pid, 0); }
+          catch (e) {
+            if (e.code === "ESRCH") throw new Error(`Namespace lock belongs to an exited process; recover the lock explicitly before writing: ${lockPath}`);
+            if (e.code !== "EPERM") throw e;
+          }
+        }
+        if (Date.now() >= deadline) throw new Error(`Namespace lock wait exceeded ${waitBudgetMs}ms: ${lockPath}`);
+        Atomics.wait(SLEEP_BUF, 0, 0, 10);
+      }
+    }
+    heldWriteLocks.add(canonical);
+    try {
+      const result = fn();
+      if (result && typeof result.then === "function") throw new Error("Namespace transaction callback must be synchronous");
+      return result;
+    } finally {
+      heldWriteLocks.delete(canonical);
+      if (readJson(lockPath, null)?.id === id) rmSync(lockPath);
+    }
+  } finally { rmSync(candidate, { force: true }); }
+}
+export function withNsWriteLocks(roots, fn) {
+  for (const root of roots) mkdirSync(root, { recursive: true });
+  const ordered = [...new Set(roots.map(canonicalWorkspacePath))].sort();
+  const enter = i => i === ordered.length ? fn() : withNsWriteLock(ordered[i], () => enter(i + 1));
+  return enter(0);
 }
 
-export function isArchived(root, kind, key) {
-	return Boolean(getEntryMeta(root, kind, key)?.archived);
+/** 锁内重读再写。没有比较后 rename 的伪 CAS 窗口。 */
+export function rewriteFile(path, compute) {
+  return withNsWriteLock(dirname(path), () => {
+    const previous = readText(path);
+    const next = compute(previous);
+    if (next !== null && next !== previous) atomicWriteFileSync(path, next);
+  });
 }
 
-export function activeEntries(root) {
-	return {
-		facts: factSections(root).filter((f) => !isArchived(root, "fact", f)),
-		sops: sopNames(root).filter((s) => !isArchived(root, "sop", s)),
-	};
+// 多文件提交先完整暂存；运行期提交出错时恢复旧文件，并保留原始错误。
+function commitFiles(root, changes) {
+  return withNsWriteLock(root, () => {
+    const staged = [];
+    const committed = [];
+    try {
+      for (const [path, content] of changes) staged.push({ path, previous: readText(path), tmp: stageWrite(path, content) });
+      for (const item of staged) { commitStaged(item.tmp, item.path); committed.push(item); }
+    } catch (error) {
+      for (const item of committed.reverse()) {
+        if (item.previous === null) rmSync(item.path, { force: true });
+        else atomicWriteFileSync(item.path, item.previous);
+      }
+      throw error;
+    } finally { for (const item of staged) rmSync(item.tmp, { force: true }); }
+  });
 }
 
-/** 记忆名称安全校验：拒绝绝对路径与任何 ".." 路径段。 */
+export function slugify(topic) { return String(topic).trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "entry"; }
 export function isSafeMemName(value) {
-	if (/^[a-zA-Z]:[\\/]/.test(value)) return false;
-	if (value.split(/[\\/]/).includes("..")) return false;
-	return true;
+  return typeof value === "string" && Boolean(value.trim()) && !/^[\\\/]|^[a-z]:/i.test(value) && !value.split(/[\\\/]/).includes("..") && !/[\x00-\x1f\x7f]/.test(value);
+}
+function assertEntryKey(kind, key) {
+  if (!["fact", "sop"].includes(kind)) throw new Error(`Unknown entry kind: ${kind}`);
+  if (!key || /[\x00-\x1f\x7f]/.test(key)) throw new Error("Entry key must be nonempty and contain no control characters");
+  if (kind === "sop" && (!isSafeMemName(key) || /[\\\/]/.test(key))) throw new Error(`Invalid SOP key: ${key}`);
+}
+export function entryIdentity(namespace, kind, key) { assertEntryKey(kind, key); return { namespace: safeNs(namespace), kind, key }; }
+export function parseFacts(text) {
+  const lines = String(text ?? "").split(/\r?\n/);
+  const out = [];
+  let entry;
+  lines.forEach((line, index) => {
+    const heading = line.match(/^##\s+(.+)$/);
+    if (heading) {
+      if (entry) { entry.end = index; out.push(entry); }
+      entry = { key: heading[1].trim(), start: index, lines: [] };
+    } else if (entry) entry.lines.push(line);
+  });
+  if (entry) { entry.end = lines.length; out.push(entry); }
+  return out.map(({ lines: body, ...rest }) => ({ ...rest, raw: body.join("\n").trim() }));
+}
+export function factSections(root) { return parseFacts(readText(join(root, "facts.md"))).map(entry => entry.key); }
+export function sopNames(root) { return markdownNames(join(root, "sops")).map(name => name.slice(0, -3)).filter(name => !SOP_RESERVED_NAMES.has(name.toLowerCase())); }
+export function pendingNames(root) { return markdownNames(join(root, PENDING_DIR)); }
+export function readFact(root, topic) { return parseFacts(readText(join(root, "facts.md"))).find(entry => entry.key === topic)?.raw ?? null; }
+export function readSop(root, key) { assertEntryKey("sop", key); return readText(join(root, "sops", key + ".md")); }
+export function entryExists(root, kind, key) { return kind === "fact" ? readFact(root, key) !== null : readSop(root, key) !== null; }
+export function readMeta(root) {
+  const meta = readJson(join(root, META_FILE), { facts: {}, sops: {} });
+  if (!meta || typeof meta !== "object" || !meta.facts || !meta.sops || typeof meta.facts !== "object" || typeof meta.sops !== "object" || Array.isArray(meta.facts) || Array.isArray(meta.sops)) throw new Error("Invalid memory metadata structure: " + join(root, META_FILE));
+  Object.setPrototypeOf(meta.facts, null);
+  Object.setPrototypeOf(meta.sops, null);
+  return meta;
+}
+export function getEntryMeta(root, kind, key) { assertEntryKey(kind, key); return readMeta(root)[kind === "fact" ? "facts" : "sops"][key] ?? null; }
+export function setEntryMeta(root, kind, key, patch) {
+  assertEntryKey(kind, key);
+  return withNsWriteLock(root, () => {
+    const meta = readMeta(root), bucket = kind === "fact" ? meta.facts : meta.sops;
+    const change = typeof patch === "function" ? patch(bucket[key] || null) : patch;
+    if (change === null) return bucket[key] || null;
+    const now = new Date().toISOString();
+    bucket[key] = { ...bucket[key], ...change, createdAt: bucket[key]?.createdAt || change.createdAt || now, updatedAt: now };
+    atomicWriteFileSync(join(root, META_FILE), JSON.stringify(meta, null, 2));
+    return bucket[key];
+  });
+}
+export function isArchived(root, kind, key) { return Boolean(getEntryMeta(root, kind, key)?.archived); }
+export function activeEntries(root, entries = readEntries(root)) {
+  const all = entries.filter(entry => !entry.meta?.archived);
+  return { facts: all.filter(entry => entry.kind === "fact").map(entry => entry.key), sops: all.filter(entry => entry.kind === "sop").map(entry => entry.key) };
 }
 
-/** 读取 facts.md 的指定 section。 */
-export function readFact(root, topic) {
-	const text = existsSync(join(root, "facts.md")) ? readFileSync(join(root, "facts.md"), "utf8") : "";
-	const lines = text.split("\n");
-	let inSection = false;
-	const out = [];
-	for (const line of lines) {
-		if (line.startsWith("## ")) {
-			if (inSection) break;
-			if (line.slice(3).trim() === topic) { inSection = true; continue; }
-		}
-		if (inSection) out.push(line);
-	}
-	return inSection ? out.join("\n").trim() : null;
-}
-
-/** 读取 sop 文件全文。 */
-export function readSop(root, slug) {
-	const p = join(root, "sops", `${slug}.md`);
-	return existsSync(p) ? readFileSync(p, "utf8") : null;
-}
-
-/** 条目是否已存在（maintenance 的"覆盖已有内容须先读"判据用）。 */
-export function entryExists(root, kind, key) {
-	return kind === "fact" ? readFact(root, key) !== null : readSop(root, key) !== null;
-}
-
-/** facts.md 里所有同名 ## SECTION 的 [start,end) 行区间。 */
-function factSectionSpans(text, topic) {
-	const lines = String(text ?? "").split("\n");
-	const heads = [];
-	lines.forEach((line, i) => { if (line.startsWith("## ")) heads.push(i); });
-	const spans = [];
-	for (let k = 0; k < heads.length; k++) {
-		const start = heads[k];
-		const end = k + 1 < heads.length ? heads[k + 1] : lines.length;
-		if (lines[start].slice(3).trim() === topic) spans.push([start, end]);
-	}
-	return spans;
-}
-
-/**
- * [0.6.9] 读出 facts.md 中同名 topic 的全部重复段正文（按出现顺序）。
- * 维护侧用它区分"同名同内容"（可合并的重复）与"同名不同内容"（需人工裁决的冲突）。
- */
-export function readFactDupes(root, topic) {
-	try {
-		const text = readFileSync(join(root, "facts.md"), "utf8");
-		return factSectionSpans(text, topic)
-			.map(([s, e]) => text.split("\n").slice(s + 1, e).join("\n").trim());
-	} catch {
-		return [];
-	}
-}
-
-/**
- * upsert facts.md 的 ## SECTION（基于行解析；CAS 防跨进程更新丢失）。
- * [v0.6] 同名 section 只保留一个：历史上正文里的 "## " 行造成过重复 section，
- * 旧实现只替换第一个 → 第二个永久隐身且互相覆盖 meta。多余的重复段先落 .history/
- * 快照再合并掉（神圣不可删改：不丢内容）。
- */
-export function upsertFact(root, topic, content) {
-	let action = "created";
-	const factsPath = join(root, "facts.md");
-	const current = existsSync(factsPath) ? readFileSync(factsPath, "utf8") : null;
-	if (current !== null) {
-		const dupes = factSectionSpans(current, topic).slice(1);
-		for (const [s, e] of dupes) {
-			try {
-				const ts = Date.now();
-				const rel = join(HISTORY_DIR, `fact-${slugify(topic)}-dup-${ts}.md`);
-				atomicWriteFileSync(join(root, rel), current.split("\n").slice(s, e).join("\n").trim() + "\n");
-			} catch { /* 快照失败不阻断合并 */ }
-		}
-	}
-	casRewrite(factsPath, (text) => {
-		const base = text ?? FACTS_TEMPLATE;
-		const lines = base.split("\n");
-		const spans = factSectionSpans(base, topic);
-		if (!spans.length) {
-			action = "created";
-			return base.replace(/\s*$/, "\n") + `## ${topic}\n${content}\n\n`;
-		}
-		action = spans.length > 1 ? "merged" : "updated";
-		// 从后往前删掉多余的同名段（不影响首段行号），再把首段整体换成新内容。
-		const out = [...lines];
-		for (const [s, e] of spans.slice(1).reverse()) out.splice(s, e - s);
-		const [firstStart, firstEnd] = spans[0];
-		out.splice(firstStart, firstEnd - firstStart, `## ${topic}`, content, "");
-		return out.join("\n").replace(/\n{3,}/g, "\n\n");
-	});
-	return action;
-}
-
-/**
- * 把一条已有记忆的当前内容快照到 .history/，返回 { path, error? }。
- * path === "" 表示条目本无内容（不算失败）。
- * [v0.6] 所有覆盖写（memory_write / memory_update / memory_accept）统一走这里，
- * 修复此前"write 静默覆盖且不留历史"的数据丢失缺陷。
- * [0.6.1 N13] 此前失败也静默返回 ""，与「无内容」不可区分——磁盘满/EPERM 会让
- * 上述保护被无声绕过。现失败原因显式返回，由 writeMemory 汇入 advisories 响亮上报。
- * [0.6.9] 正文与溯源元数据成对快照：写 <base>.meta.json sidecar（当时 evidence/
- * sourceSession/sourceSeqs/related 的快照），回滚时一起恢复，避免"正文回到旧版、
- * 证据还是新版"的版本错位。老快照没有 sidecar，恢复时明确标记缺失。
- */
-export function snapshotEntry(root, kind, key) {
-	try {
-		const ts = Date.now();
-		const meta = getEntryMeta(root, kind, key);
-		const metaJson = JSON.stringify(meta ?? { missing: true, note: "本快照创建于元数据成对快照之前" }, null, 2);
-		if (kind === "fact") {
-			const old = readFact(root, key);
-			if (old === null) return { path: "" };
-			const base = `fact-${slugify(key)}-${ts}`;
-			atomicWriteFileSync(join(root, HISTORY_DIR, `${base}.md`), `# ${key}\n\n${old}\n`);
-			try { atomicWriteFileSync(join(root, HISTORY_DIR, `${base}.meta.json`), metaJson); } catch { /* sidecar 失败不阻断快照 */ }
-			return { path: join(HISTORY_DIR, `${base}.md`) };
-		}
-		const old = readSop(root, key);
-		if (old === null) return { path: "" };
-		const base = `sop-${key}-${ts}`;
-		atomicWriteFileSync(join(root, HISTORY_DIR, `${base}.md`), old);
-		try { atomicWriteFileSync(join(root, HISTORY_DIR, `${base}.meta.json`), metaJson); } catch { /* sidecar 失败不阻断快照 */ }
-		return { path: join(HISTORY_DIR, `${base}.md`) };
-	} catch (error) {
-		return { path: "", error: String(error?.message || error) };
-	}
-}
-
-export function loadAccess(root) {
-	try {
-		return JSON.parse(readFileSync(join(root, ACCESS_FILE), "utf8"));
-	} catch {
-		return {};
-	}
-}
-
-/**
- * 访问热度（v2 带衰减）：
- * - 存储格式升级为 { count, lastAt }；旧版纯数字按 { count: n, lastAt: now } 迁移。
- * - 衰减分 = count * 0.5^(ageDays / HEAT_HALF_LIFE_DAYS)，14 天半衰。
- * - 新建条目（RECENCY_WINDOW_MS 内）在无访问记录时保留 RECENCY_BONUS 保护。
- *
- * @param access loadAccess(root) 的结果（调用方复用，避免逐条重读文件）。
- */
-export function entryHeat(access, meta, kind, key, heat = {}) {
-	const halfLifeDays = heat.halfLifeDays ?? HEAT_HALF_LIFE_DAYS;
-	const recencyWindowMs = heat.recencyWindowMs ?? RECENCY_WINDOW_MS;
-	const entry = access[`${kind}:${key}`];
-	let decayed = 0;
-	if (typeof entry === "number") decayed = entry;
-	else if (entry && typeof entry === "object") {
-		const count = Number(entry.count ?? 0);
-		const lastAt = Date.parse(entry.lastAt ?? "");
-		const ageDays = Number.isFinite(lastAt)
-			? Math.max(0, (Date.now() - lastAt) / 86400000)
-			: 0;
-		decayed = count * Math.pow(0.5, ageDays / halfLifeDays);
-	}
-	if (decayed > 0) return decayed;
-	const e = (kind === "fact" ? meta.facts : meta.sops)[key];
-	if (!e?.createdAt) return 0;
-	const age = Date.now() - new Date(e.createdAt).getTime();
-	return age >= 0 && age <= recencyWindowMs ? RECENCY_BONUS : 0;
-}
-
-/** 记录一次真实读取（v2 格式：count + lastAt）。写入不再计入热度（写≠读）。 */
-export function bumpAccess(root, key) {
-	try {
-		const raw = loadAccess(root);
-		const prev = raw[key];
-		const count = (typeof prev === "number" ? prev : prev?.count ?? 0) + 1;
-		raw[key] = { count, lastAt: new Date().toISOString() };
-		atomicWriteFileSync(join(root, ACCESS_FILE), JSON.stringify(raw, null, 2));
-	} catch { /* 热度统计失败不影响主流程 */ }
-}
-
-export function hashText(text) {
-	return createHash("sha256").update(String(text || "")).digest("hex").slice(0, 16);
-}
-
-export function computeNamespaceStats(root) {
-	const facts = factSections(root).filter((f) => !isArchived(root, "fact", f));
-	const sops = sopNames(root).filter((s) => !isArchived(root, "sop", s));
-	const archivedFacts = factSections(root).filter((f) => isArchived(root, "fact", f));
-	const archivedSops = sopNames(root).filter((s) => isArchived(root, "sop", s));
-	const pending = pendingNames(root);
-	let sizeBytes = 0;
-	for (const f of ["index.txt", "facts.md", "memory_management_sop.md"]) {
-		try { sizeBytes += statSync(join(root, f)).size; } catch { /* 忽略 */ }
-	}
-	try {
-		for (const f of readdirSync(join(root, "sops"))) sizeBytes += statSync(join(root, "sops", f)).size;
-	} catch { /* 忽略 */ }
-	try {
-		for (const f of readdirSync(join(root, PENDING_DIR))) sizeBytes += statSync(join(root, PENDING_DIR, f)).size;
-	} catch { /* 忽略 */ }
-	return {
-		facts: facts.length,
-		sops: sops.length,
-		pending: pending.length,
-		archived: archivedFacts.length + archivedSops.length,
-		size_bytes: sizeBytes,
-		updatedAt: new Date().toISOString(),
-	};
-}
-
-/** 全局 turn 计数持久化（跨会话累计，headless 一次性会话也能触发周期维护）。 */
-export function bumpTurnCounter(root) {
-	try {
-		const p = join(root, TURN_STATE_FILE);
-		let state = { totalTurns: 0, lastAt: "" };
-		try { state = JSON.parse(readFileSync(p, "utf8")); } catch { /* 首次 */ }
-		state.totalTurns = (Number(state.totalTurns) || 0) + 1;
-		state.lastAt = new Date().toISOString();
-		atomicWriteFileSync(p, JSON.stringify(state, null, 2));
-		return state.totalTurns;
-	} catch {
-		return 0;
-	}
-}
-
-// ── [0.6.4] 归档横幅 ─────────────────────────────────────────────────────────
-// 动因（2026-09-18 记忆库体检）：memory_archive 只把条目从 L1 隐藏，正文照旧留在
-// facts.md / sops/*.md 里。人工读文件或 memory_search 命中的读者会把历史快照当成
-// 现行事实（Jev 判「会误导」0.74）。现在归档时给正文首部写一行自解释横幅；任何
-// 再次写入（write / update / accept / rollback）都会先剥掉它，避免取消归档后残留。
 export const ARCHIVE_BANNER_PREFIX = "> [已归档";
-
-export function archiveBannerLine(at = new Date()) {
-	const day = new Date(at).toISOString().slice(0, 10);
-	return `${ARCHIVE_BANNER_PREFIX} ${day}] 历史快照：已不在 L1 索引中，现行结论请以同主题活跃条目为准；本条仍可被 memory_search 检索到。`;
-}
-
+export function archiveBannerLine(at = new Date()) { return ARCHIVE_BANNER_PREFIX + " " + new Date(at).toISOString().slice(0, 10) + "] 历史快照；现行结论请查同主题活跃条目。"; }
 export function hasArchiveBanner(text) {
-	return String(text ?? "").split("\n").some((line) => line.trim().startsWith(ARCHIVE_BANNER_PREFIX));
+  const lines = String(text ?? "").split(/\r?\n/);
+  let index = 0;
+  while (index < lines.length && !lines[index].trim()) index++;
+  if (/^#\s/.test(lines[index] || "")) index++;
+  while (index < lines.length && !lines[index].trim()) index++;
+  return Boolean(lines[index]?.trim().startsWith(ARCHIVE_BANNER_PREFIX));
 }
-
-/** 剥掉正文首部的归档横幅（含其后的空行），其余内容原样保留。 */
 export function stripArchiveBanner(text) {
-	const lines = String(text ?? "").split("\n");
-	let i = 0;
-	while (i < lines.length && (lines[i].trim() === "" || lines[i].trim().startsWith(ARCHIVE_BANNER_PREFIX))) i++;
-	return lines.slice(i).join("\n");
+  const lines = String(text ?? "").split(/\r?\n/);
+  let index = 0;
+  while (index < lines.length && !lines[index].trim()) index++;
+  const title = /^#\s/.test(lines[index] || "") ? lines[index++] : null;
+  while (index < lines.length && (!lines[index].trim() || lines[index].trim().startsWith(ARCHIVE_BANNER_PREFIX))) index++;
+  return (title ? title + "\n\n" : "") + lines.slice(index).join("\n");
 }
-
 export function withArchiveBanner(text, at = new Date()) {
-	return `${archiveBannerLine(at)}\n\n${stripArchiveBanner(text)}`;
+  const clean = stripArchiveBanner(text);
+  const match = clean.match(/^(# .+)\n+/);
+  return match ? match[1] + "\n\n" + archiveBannerLine(at) + "\n\n" + clean.slice(match[0].length)
+    : archiveBannerLine(at) + "\n\n" + clean;
+}
+export function parseEntryBody(kind, key, raw) {
+  let content = String(raw ?? "").trim(), title = key;
+  if (kind === "sop") {
+    const first = content.match(/^#\s+(.+)(?:\r?\n|$)/);
+    if (first) {
+      title = first[1].trim();
+      content = content.slice(first[0].length).trimStart();
+      for (;;) {
+        const duplicate = content.match(/^#\s+(.+)(?:\r?\n|$)/);
+        if (!duplicate || duplicate[1].trim() !== title) break;
+        content = content.slice(duplicate[0].length).trimStart();
+      }
+    }
+  }
+  content = stripArchiveBanner(content).trim();
+  // 只剥离文件格式的尾部证据块；正文中间的引用不变。
+  for (;;) {
+    const marker = content.lastIndexOf("\n\n> 证据:");
+    if (marker < 0 || !content.slice(marker + 2).split("\n").every(line => !line.trim() || line.startsWith(">"))) break;
+    content = content.slice(0, marker).trimEnd();
+  }
+  return { title, content };
+}
+function entryFromRaw(kind, key, raw, meta = {}) {
+  const body = parseEntryBody(kind, key, raw);
+  const semantic = { evidence: meta.evidence || "", related: meta.related || [], archived: Boolean(meta.archived), replacedBy: meta.replacedBy || null };
+  return { kind, key, ...body, raw, meta, revision: hashText(JSON.stringify([kind, key, raw, semantic])) };
+}
+export function readEntry(root, kind, key) {
+  assertEntryKey(kind, key);
+  const raw = kind === "fact" ? readFact(root, key) : readSop(root, key);
+  return raw === null ? null : entryFromRaw(kind, key, raw, getEntryMeta(root, kind, key) || {});
+}
+export function readEntries(root) {
+  const meta = readMeta(root);
+  const facts = parseFacts(readText(join(root, "facts.md"))).map(entry => entryFromRaw("fact", entry.key, entry.raw, meta.facts[entry.key] || {}));
+  const sops = sopNames(root).map(key => entryFromRaw("sop", key, readSop(root, key), meta.sops[key] || {}));
+  return [...facts, ...sops];
+}
+export function entryContentRevision(root, kind, key) { return readEntry(root, kind, key)?.revision ?? null; }
+function factTextWith(text, key, content) {
+  const base = text ?? FACTS_TEMPLATE;
+  const spans = parseFacts(base).filter(entry => entry.key === key);
+  if (!spans.length) return base.trimEnd() + "\n\n## " + key + "\n" + content.trim() + "\n";
+  const lines = base.split(/\r?\n/);
+  for (const span of spans.slice(1).reverse()) lines.splice(span.start, span.end - span.start);
+  lines.splice(spans[0].start, spans[0].end - spans[0].start, "## " + key, content.trim(), "");
+  return lines.join("\n");
+}
+/** 内部正文写入原语。重复段的每份内容先单独保存，再合并。 */
+export function upsertFact(root, key, content) {
+  assertEntryKey("fact", key);
+  return withNsWriteLock(root, () => {
+    const path = join(root, "facts.md"), previous = readText(path);
+    const duplicates = parseFacts(previous).filter(entry => entry.key === key);
+    for (const entry of duplicates.slice(1)) saveSnapshot(root, "fact", key, entry.raw, getEntryMeta(root, "fact", key));
+    atomicWriteFileSync(path, factTextWith(previous, key, content));
+    return duplicates.length > 1 ? "merged" : duplicates.length ? "updated" : "created";
+  });
+}
+/** 正文与元数据一起提交；meta 为完整的新版本。索引由上层在同一锁内重建。 */
+export function commitEntry(root, kind, key, raw, entryMeta) {
+  assertEntryKey(kind, key);
+  return withNsWriteLock(root, () => {
+    const meta = readMeta(root);
+    const path = kind === "fact" ? join(root, "facts.md") : join(root, "sops", key + ".md");
+    const previous = readText(path);
+    if (kind === "fact") {
+      for (const duplicate of parseFacts(previous).filter(entry => entry.key === key).slice(1)) saveSnapshot(root, kind, key, duplicate.raw, meta.facts[key]);
+    }
+    meta[kind === "fact" ? "facts" : "sops"][key] = entryMeta;
+    const entry = entryFromRaw(kind, key, kind === "fact" ? raw.trim() : raw, entryMeta);
+    commitFiles(root, [[path, kind === "fact" ? factTextWith(previous, key, raw) : raw], [join(root, META_FILE), JSON.stringify(meta, null, 2)]]);
+    return entry;
+  });
+}
+function saveSnapshot(root, kind, key, raw, meta) {
+  const id = randomUUID(), createdAt = new Date().toISOString();
+  const path = join(HISTORY_DIR, id + ".json");
+  const sequencePath = join(root, HISTORY_DIR, "sequence.json");
+  const sequence = readJson(sequencePath, { value: 0 }).value + 1;
+  atomicWriteFileSync(sequencePath, JSON.stringify({ value: sequence }));
+  const snapshot = { format: "memory-snapshot-v2", id, kind, key, title: parseEntryBody(kind, key, raw).title, createdAt, sequence, raw, meta: meta || {} };
+  atomicWriteFileSync(join(root, path), JSON.stringify(snapshot, null, 2));
+  return { id, path, createdAt };
+}
+export function snapshotEntry(root, kind, key) {
+  return withNsWriteLock(root, () => {
+    const entry = readEntry(root, kind, key);
+    return entry ? saveSnapshot(root, kind, key, entry.raw, entry.meta) : { path: "" };
+  });
+}
+function historyRecords(root, kind, key) {
+  let files;
+  try { files = readdirSync(join(root, HISTORY_DIR)); }
+  catch (error) { if (error.code === "ENOENT") return []; throw error; }
+  const records = [];
+  for (const name of files) {
+    const path = join(HISTORY_DIR, name);
+    if (name.endsWith(".json") && !name.endsWith(".meta.json")) {
+      const record = readJson(join(root, path), null);
+      if (record?.format === "memory-snapshot-v2" && record.kind === kind && record.key === key) records.push({ ...record, path, legacy: false, metaAvailable: true });
+      continue;
+    }
+    if (!name.endsWith(".md") || !name.startsWith(kind + "-")) continue;
+    const rawFile = readFileSync(join(root, path), "utf8");
+    const heading = rawFile.match(/^#{1,2}\s+(.+)(?:\r?\n|$)/);
+    if (!heading) continue;
+    const title = heading[1].trim();
+    if (kind === "fact" ? title !== key : slugify(title) !== key) continue;
+    const raw = kind === "fact" ? rawFile.slice(heading[0].length).trim() : rawFile;
+    const sidecar = readJson(join(root, HISTORY_DIR, name.replace(/\.md$/, ".meta.json")), null);
+    const timestamp = name.match(/-(\d{10,})\.md$/)?.[1];
+    records.push({ id: name, path, kind, key, title, raw, meta: sidecar?.missing ? null : sidecar, metaAvailable: Boolean(sidecar && !sidecar.missing), createdAt: timestamp ? new Date(Number(timestamp)).toISOString() : statSync(join(root, path)).mtime.toISOString(), legacy: true });
+  }
+  return records.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || (a.sequence || 0) - (b.sequence || 0) || a.id.localeCompare(b.id));
+}
+export function listEntryHistory(root, kind, key) {
+  assertEntryKey(kind, key);
+  return historyRecords(root, kind, key).map(({ raw, meta, ...record }) => record);
+}
+export function restoreEntry(root, kind, key, snapshotId) {
+  return withNsWriteLock(root, () => {
+    const records = historyRecords(root, kind, key);
+    const record = snapshotId ? records.find(item => item.id === snapshotId) : records.at(-1);
+    if (!record) return { restored: false, entry: null };
+    const current = readEntry(root, kind, key);
+    const history = current ? snapshotEntry(root, kind, key).path : "";
+    const now = new Date().toISOString();
+    // 旧快照无来源时明确标未知，不能把新版本证据冒充旧版证据。
+    const meta = { ...(record.meta || {}), sourceSession: record.meta?.sourceSession || null, sourceSeqs: record.meta?.sourceSeqs || [], evidence: record.meta?.evidence || "", restoredFrom: record.id, createdAt: record.meta?.createdAt || record.createdAt, updatedAt: now };
+    const raw = meta.archived ? withArchiveBanner(record.raw) : stripArchiveBanner(record.raw);
+    if (kind === "fact" && /^##\s+/m.test(raw)) throw new Error("Historical fact contains section headings; inspect its snapshot before restoring");
+    const entry = commitEntry(root, kind, key, raw, meta);
+    return { restored: true, source: record.id, history, meta_restored: record.metaAvailable, entry };
+  });
+}
+export function archiveEntry(root, kind, key, { unarchive = false, replacement } = {}) {
+  return withNsWriteLock(root, () => {
+    const previous = readEntry(root, kind, key);
+    if (!previous) return { archived: false, unarchived: false, entry: null };
+    const history = snapshotEntry(root, kind, key).path;
+    const now = new Date().toISOString();
+    const meta = { ...previous.meta, archived: !unarchive, updatedAt: now };
+    if (unarchive) { meta.unarchivedAt = now; delete meta.replacedBy; }
+    else { meta.archivedAt = now; meta.archivedFrom = history; if (replacement) meta.replacedBy = replacement; }
+    const entry = commitEntry(root, kind, key, unarchive ? stripArchiveBanner(previous.raw) : withArchiveBanner(previous.raw), meta);
+    return { archived: !unarchive, unarchived: unarchive, history, entry };
+  });
 }
 
-/** 归档时把横幅写进正文：fact 走 upsertFact（保留 section 结构），sop 保留 # 标题行位置。返回是否发生改动。 */
-export function archiveEntryBody(root, kind, key, at = new Date()) {
-	if (kind === "fact") {
-		const body = readFact(root, key);
-		if (body === null || hasArchiveBanner(body)) return false;
-		upsertFact(root, key, withArchiveBanner(body, at));
-		return true;
-	}
-	const text = readSop(root, key);
-	if (text === null || hasArchiveBanner(text)) return false;
-	const lines = text.split("\n");
-	const head = lines.length && lines[0].startsWith("# ") ? lines.shift() : null;
-	const rest = lines.join("\n").replace(/^\n+/, "");
-	atomicWriteFileSync(join(root, "sops", `${key}.md`), `${head ? head + "\n\n" : ""}${archiveBannerLine(at)}\n\n${rest}`);
-	return true;
+export function loadAccess(root) { return readJson(join(root, ACCESS_FILE), {}); }
+export function entryHeat(access, meta, kind, key, heat = {}) {
+  const value = access[kind + ":" + key];
+  const halfLife = heat.halfLifeDays || HEAT_HALF_LIFE_DAYS;
+  if (typeof value === "number") return value;
+  if (value) {
+    const age = Math.max(0, Date.now() - Date.parse(value.lastAt));
+    return Number(value.score ?? value.count ?? 0) * Math.pow(0.5, age / (halfLife * 86400000));
+  }
+  const created = meta[kind === "fact" ? "facts" : "sops"]?.[key]?.createdAt;
+  const age = created ? Date.now() - Date.parse(created) : Infinity;
+  return age >= 0 && age <= (heat.recencyWindowMs ?? RECENCY_WINDOW_MS) ? RECENCY_BONUS : 0;
 }
-
-/**
- * [0.6.9] 恢复可见性的正文侧：剥掉归档横幅写回（与 archiveEntryBody 对称）。
- * memory_archive({unarchive:true}) 用；与 rollback（恢复历史版本）语义分开。
- */
-export function unarchiveEntryBody(root, kind, key) {
-	if (kind === "fact") {
-		const body = readFact(root, key);
-		if (body === null || !hasArchiveBanner(body)) return false;
-		upsertFact(root, key, stripArchiveBanner(body));
-		return true;
-	}
-	const text = readSop(root, key);
-	if (text === null || !hasArchiveBanner(text)) return false;
-	atomicWriteFileSync(join(root, "sops", `${key}.md`), stripArchiveBanner(text));
-	return true;
+export function bumpAccess(root, key, { halfLifeDays = HEAT_HALF_LIFE_DAYS } = {}) {
+  return withNsWriteLock(root, () => {
+    const access = loadAccess(root), previous = access[key];
+    const age = previous?.lastAt ? Math.max(0, Date.now() - Date.parse(previous.lastAt)) : 0;
+    const oldScore = typeof previous === "number" ? previous : Number(previous?.score ?? previous?.count ?? 0);
+    const count = (typeof previous === "number" ? previous : previous?.count || 0) + 1;
+    access[key] = { count, score: oldScore * Math.pow(0.5, age / (halfLifeDays * 86400000)) + 1, lastAt: new Date().toISOString() };
+    atomicWriteFileSync(join(root, ACCESS_FILE), JSON.stringify(access, null, 2));
+  });
 }
-
-/**
- * [0.6.4] 元数据补登记：facts.md 的 ## section 与 sops/*.md 中可能存在
- * memory-meta.json 没有记录的条目（旧版本迁移、examples 种子、跨机导入的记忆）。
- * 缺记录 = 没有 updatedAt/证据追踪，冷条目复核对它们只能报 age_days=null。
- * 只补「存在性 + 文件 mtime」，**不把正文里的证据行抄进 evidence**——那会把别处的
- * 验证洗成本机验证（行动验证公理）。补登记条目带 backfilled 标记，便于事后分辨。
- * 幂等：无缺失时返回空数组且不写文件。
- */
+export function bumpTurnCounter(root) {
+  let count;
+  rewriteFile(join(root, TURN_STATE_FILE), text => {
+    const state = text === null ? { totalTurns: 0 } : JSON.parse(text);
+    count = state.totalTurns + 1;
+    return JSON.stringify({ totalTurns: count, lastAt: new Date().toISOString() }, null, 2);
+  });
+  return count;
+}
+function directoryBytes(path) {
+  let names;
+  try { names = readdirSync(path, { withFileTypes: true }); }
+  catch (error) { if (error.code === "ENOENT") return 0; throw error; }
+  return names.reduce((total, name) => total + (name.isDirectory() ? directoryBytes(join(path, name.name)) : statSync(join(path, name.name)).size), 0);
+}
+function fileBytes(path) {
+  try { return statSync(path).size; }
+  catch (error) { if (error.code === "ENOENT") return 0; throw error; }
+}
+export function computeNamespaceStats(root, entries = readEntries(root)) {
+  const active = entries.filter(entry => !entry.meta.archived);
+  const contentBytes = ["facts.md", "index.txt", "memory_management_sop.md"].reduce((sum, name) => sum + fileBytes(join(root, name)), 0) + directoryBytes(join(root, "sops"));
+  const historyBytes = directoryBytes(join(root, HISTORY_DIR)) + directoryBytes(join(root, ARCHIVE_DIR));
+  const pendingBytes = directoryBytes(join(root, PENDING_DIR));
+  let metadataBytes = 0;
+  try {
+    for (const name of readdirSync(root, { withFileTypes: true })) {
+      if (name.isFile() && !["facts.md", "index.txt", "memory_management_sop.md", WRITE_LOCK_FILE, ".maintenance-agent.lock"].includes(name.name) && !name.name.startsWith(".write-owner-")) metadataBytes += statSync(join(root, name.name)).size;
+    }
+  } catch (error) { if (error.code !== "ENOENT") throw error; }
+  return { facts: active.filter(entry => entry.kind === "fact").length, sops: active.filter(entry => entry.kind === "sop").length, archived: entries.length - active.length, pending: pendingNames(root).length, size_bytes: contentBytes + historyBytes + pendingBytes + metadataBytes, content_bytes: contentBytes, history_bytes: historyBytes, pending_bytes: pendingBytes, metadata_bytes: metadataBytes, updatedAt: new Date().toISOString() };
+}
 export function backfillMeta(root, { namespace = "default", now = new Date() } = {}) {
-	const added = [];
-	casRewrite(join(root, META_FILE), (text) => {
-		let meta = null;
-		try { meta = text === null ? null : JSON.parse(text); } catch { meta = null; }
-		if (!meta || !meta.facts || !meta.sops) meta = { facts: {}, sops: {} };
-		const ensure = (kind, key, file) => {
-			const bucket = kind === "fact" ? meta.facts : meta.sops;
-			if (bucket[key]) return;
-			let iso = now.toISOString();
-			try {
-				const st = statSync(file);
-				iso = new Date(Math.min(st.mtimeMs, now.getTime())).toISOString();
-			} catch { /* 取不到 mtime 就用 now */ }
-			bucket[key] = {
-				sourceSession: null, sourceSeqs: [], evidence: "", namespace,
-				archived: false, createdAt: iso, updatedAt: iso,
-				backfilled: true, backfilledAt: now.toISOString(),
-			};
-			added.push(`${kind}:${key}`);
-		};
-		for (const name of factSections(root)) ensure("fact", name, join(root, "facts.md"));
-		for (const name of sopNames(root)) ensure("sop", name, join(root, "sops", `${name}.md`));
-		return added.length ? JSON.stringify(meta, null, 2) : null;
-	});
-	return added;
+  return withNsWriteLock(root, () => {
+    const meta = readMeta(root), added = [];
+    for (const [kind, names] of [["fact", factSections(root)], ["sop", sopNames(root)]]) {
+      const bucket = meta[kind === "fact" ? "facts" : "sops"];
+      for (const key of names) {
+        if (bucket[key]) continue;
+        const file = join(root, kind === "fact" ? "facts.md" : "sops/" + key + ".md");
+        const iso = new Date(Math.min(statSync(file).mtimeMs, now.getTime())).toISOString();
+        bucket[key] = { sourceSession: null, sourceSeqs: [], evidence: "", namespace, archived: false, createdAt: iso, updatedAt: iso, backfilled: true, backfilledAt: now.toISOString() };
+        added.push(kind + ":" + key);
+      }
+    }
+    if (added.length) atomicWriteFileSync(join(root, META_FILE), JSON.stringify(meta, null, 2));
+    return added;
+  });
+}
+/** 定向修复库存状态：孤儿元数据保存在历史中，只给缺标记的已归档正文补横幅。 */
+export function reconcileEntries(root) {
+  return withNsWriteLock(root, () => {
+    const entries = readEntries(root), meta = readMeta(root);
+    const found = new Set(entries.map(entry => JSON.stringify([entry.kind, entry.key])));
+    const orphans = [];
+    for (const [kind, bucket] of [["fact", meta.facts], ["sop", meta.sops]]) {
+      for (const key of Object.keys(bucket)) {
+        if (found.has(JSON.stringify([kind, key]))) continue;
+        orphans.push({ kind, key, meta: bucket[key] });
+        delete bucket[key];
+      }
+    }
+    if (orphans.length) {
+      const file = join(root, HISTORY_DIR, "orphan-meta-" + randomUUID() + ".json");
+      atomicWriteFileSync(file, JSON.stringify({ format: "memory-orphan-meta-v1", at: new Date().toISOString(), entries: orphans }, null, 2));
+      atomicWriteFileSync(join(root, META_FILE), JSON.stringify(meta, null, 2));
+    }
+    const banners = [];
+    for (const entry of entries) {
+      if (!entry.meta.archived || hasArchiveBanner(entry.raw)) continue;
+      snapshotEntry(root, entry.kind, entry.key);
+      commitEntry(root, entry.kind, entry.key, withArchiveBanner(entry.raw, entry.meta.archivedAt || new Date()), entry.meta);
+      banners.push({ kind: entry.kind, key: entry.key });
+    }
+    return { orphan_meta_archived: orphans.map(({ kind, key }) => ({ kind, key })), archive_banners_added: banners };
+  });
+}
+export function readNamespaceIdentity(memDir, namespace) {
+  const name = safeNs(namespace), root = nsRoot(memDir, name);
+  return { namespace: name, root, ...readJson(join(root, ".namespace.json"), {}) };
+}
+export function migrateNamespace(memDir, fromNamespace, toNamespace, { workspace } = {}) {
+  const from = safeNs(fromNamespace), to = safeNs(toNamespace);
+  if (from === to) throw new Error("Source and destination namespace must differ");
+  const source = nsRoot(memDir, from), target = nsRoot(memDir, to);
+  if (!existsSync(source)) throw new Error("Source namespace does not exist: " + source);
+  mkdirSync(target, { recursive: true });
+  return withNsWriteLocks([source, target], () => {
+    const dataDirs = new Set(["sops", PENDING_DIR, ARCHIVE_DIR, HISTORY_DIR]);
+    const contents = readdirSync(target, { withFileTypes: true }).filter(name => name.name !== WRITE_LOCK_FILE && !name.name.startsWith(".write-owner-") && (to !== "default" || !name.isDirectory() || dataDirs.has(name.name)));
+    if (contents.length) throw new Error("Destination namespace must be empty: " + target);
+    const names = readdirSync(source, { withFileTypes: true }).filter(name => ![WRITE_LOCK_FILE, ".maintenance-agent.lock"].includes(name.name) && !name.name.startsWith(".write-owner-") && (!name.isDirectory() || from !== "default" || dataDirs.has(name.name)));
+    for (const name of names) cpSync(join(source, name.name), join(target, name.name), { recursive: name.isDirectory(), errorOnExist: true, force: false });
+    const identity = { namespace: to, ...(workspace ? { workspace: canonicalWorkspacePath(workspace) } : {}), migratedFrom: from, migratedAt: new Date().toISOString(), sourcePreserved: true };
+    atomicWriteFileSync(join(target, ".namespace.json"), JSON.stringify(identity, null, 2));
+    return { from, to, source_preserved: true, root: target, identity };
+  });
 }

@@ -87,10 +87,6 @@ export function assertSafeTopic(topic, caller = "memory_write") {
 	return s;
 }
 
-/**
- * 写入侧 L0 判据回显：把方法论放到决策点（借鉴 GA 的 "'This is L0:' + 写入动作同屏"）。
- * 只提示不阻断——阻断只用于上面三条硬约束。
- */
 export function buildAdvisories({ topic, content, existing, index, maxTopicChars = 40 }) {
 	const out = [];
 	if (String(topic).length > maxTopicChars) {

@@ -37,6 +37,16 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 	const jobs = new Map();
 	const roots = new Set();
 	const usage = new Map();
+	// 新版子代理在发布前发出创建事件，此处按保留的精确身份安装维护边界。
+	const stopCreated = ctx.on("agent/created", ({ agent }) => {
+		const job = [...jobs.values()].find(value => value.childId === agent.id);
+		if (!job) return;
+		if (agent.session.header.parentSession !== job.parentId) throw new Error("wrong maintenance parent");
+		job.session = agent.session;
+		job.disposers.push(agent.ctx.tools.restrict({ allow: ["memory_maintenance_activate"] }));
+		job.disposers.push(agent.ctx.tools.guard(exec => ["memory_maintenance_activate", "structured_output", "run_code", ...job.names].includes(exec.name)
+			? undefined : "maintenance task is limited to its assigned memory tools"));
+	});
 	const stopUsage = ctx.on("session/event", (session, event) => {
 		if (![...jobs.values()].some(job => job.parentId === session.header.parentSession)) return;
 		if (event.type !== "assistant/message" && event.type !== "assistant/attempt") return;
@@ -152,7 +162,11 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 			if (!report.actionable.needsModelReview) return finish("no_action", "程序扫描没有需要模型处理的事项");
 			const service = ctx.get("subagents");
 			const provider = service?.getProvider(cfg.maintenanceProvider);
-			if (!provider || provider.inheritsParentContext !== false || !provider.capabilities.toolFilter || !provider.capabilities.outputSchema || !provider.capabilities.agentOptions) throw new Error(`maintenance provider '${cfg.maintenanceProvider}' must support fresh context, toolFilter, outputSchema and agentOptions`);
+			const activationApi = typeof service?.startActivation === "function";
+			if (!provider || provider.inheritsParentContext !== false || !provider.capabilities.outputSchema || !provider.capabilities.agentOptions
+				|| (activationApi ? typeof provider.prepareContinuable !== "function" : !provider.capabilities.toolFilter)) {
+				throw new Error(`maintenance provider '${cfg.maintenanceProvider}' must support fresh local context, restricted tools, outputSchema and agentOptions`);
+			}
 			const agentOptions = { maxTokens: cfg.maintenanceMaxTokens };
 			if (cfg.maintenanceModel) Object.assign(agentOptions, { provider: cfg.maintenanceLlmProvider, model: cfg.maintenanceModel });
 			if (cfg.maintenanceReasoningEffort) agentOptions.reasoningEffort = cfg.maintenanceReasoningEffort;
@@ -160,7 +174,7 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 			record.status = "running";
 			saveRun(root, record);
 			io.writeState(root, { agentStatus: "running", agentLastAttemptAt: record.startedAt, agentError: null });
-			job = { id, root, namespace, parentId: parent.session.id, controller: new AbortController(), expectedRevision: computeContentRevision(root), calls: 0, mutations: 0, reads: new Map(), saved: new Set(), links: new Map(), queue: Promise.resolve(), disposers: [], agentId: null, session: null, names: [] };
+			job = { id, root, namespace, parentId: parent.session.id, controller: new AbortController(), expectedRevision: computeContentRevision(root), calls: 0, mutations: 0, reads: new Map(), saved: new Set(), links: new Map(), queue: Promise.resolve(), disposers: [], agentId: null, session: null, names: [], childId: activationApi ? `memory-maintenance-${id}` : null };
 			jobs.set(id, job);
 			timer = setTimeout(() => job.controller.abort(new Error("maintenance timeout")), cfg.maintenanceTimeoutSeconds * 1000);
 			timer.unref();
@@ -175,7 +189,19 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 				"最后返回 status=complete 或 deferred，summary 简述处理和遗留事项。预算不足直接 deferred，不循环重试。",
 				`扫描报告：${JSON.stringify({ actionable: report.actionable, mergeCandidates: report.mergeCandidates?.slice(0, 8), nearDuplicates: report.dedupe?.nearDuplicates?.slice(0, 8), conflicts: report.conflicts?.slice(0, 8) })}`,
 			].join("\n");
-			run = await service.start(cfg.maintenanceProvider, { parent, signal: job.controller.signal, label: "记忆自动整理", prompt: [{ type: "text", text }], toolFilter: { allow: ["memory_maintenance_activate"] }, outputSchema: RESULT_SCHEMA, agentOptions });
+			if (activationApi) {
+				run = await service.startActivation({
+					provider: cfg.maintenanceProvider, childId: job.childId, label: "记忆自动整理", delivery: "caller", signal: job.controller.signal,
+					request: { parent, prompt: [{ type: "text", text }], outputSchema: RESULT_SCHEMA, agentOptions },
+				});
+				// 新接口的 signal 只负责发布前取消；发布后的超时由精确 activation 的 dispose 负责。
+				const cancel = () => { void run.dispose().catch(warn); };
+				job.controller.signal.addEventListener("abort", cancel, { once: true });
+				job.disposers.push(() => job.controller.signal.removeEventListener("abort", cancel));
+				if (job.controller.signal.aborted) cancel();
+			} else {
+				run = await service.start(cfg.maintenanceProvider, { parent, signal: job.controller.signal, label: "记忆自动整理", prompt: [{ type: "text", text }], toolFilter: { allow: ["memory_maintenance_activate"] }, outputSchema: RESULT_SCHEMA, agentOptions });
+			}
 			job.session = run.localAgent?.session || job.session;
 			const result = await run.result;
 			await job.queue;
@@ -202,8 +228,8 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 	}
 	return {
 		request, activate,
-		owns(agent) { return [...jobs.values()].some(job => job.agentId === agent?.id); },
+		owns(agent) { return [...jobs.values()].some(job => job.agentId === agent?.id || job.childId === agent?.id); },
 		namespaceFor(agent) { return [...jobs.values()].find(job => job.agentId === agent?.id)?.namespace ?? null; },
-		dispose() { disposed = true; stopUsage(); for (const job of jobs.values()) job.controller.abort(new Error("maintenance plugin disposed")); },
+		dispose() { disposed = true; stopCreated(); stopUsage(); for (const job of jobs.values()) job.controller.abort(new Error("maintenance plugin disposed")); },
 	};
 }

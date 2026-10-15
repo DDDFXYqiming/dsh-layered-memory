@@ -2,6 +2,12 @@
 
 All notable changes to `@dsh-external/dsh-layered-memory` are documented here.
 
+## [0.8.1] - 2026-10-15
+
+- 兼容 DSH 0.2.1-alpha.3 的托管子代理接口，自动维护使用精确保留的子会话身份和 caller 结果交付。
+- 子会话发布前安装继承工具过滤和执行守卫，保留结构化结果出口，激活后仍受原有空间、调用和修改预算约束。
+- 新版发布后的维护超时通过 activation.dispose 终止子任务；旧版 start 接口继续兼容。
+
 ## [0.8.0] - 2026-10-13
 
 - 工具统一使用 `{namespace, kind, key}`，创建与更新分开；列表和检索返回值可直接用于后续操作，SOP 更新保留原标题。

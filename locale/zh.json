@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "分层记忆",
+    "description": "DeepSeek Harness 的跨会话记忆。项目与全局索引常驻上下文，条目带结构标识与证据，历史可恢复。"
+  }
+}

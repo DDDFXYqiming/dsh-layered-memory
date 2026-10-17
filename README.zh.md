@@ -1,8 +1,25 @@
-简体中文 | [English](README.en.md)
+---
+description: "DeepSeek Harness 的跨会话记忆。项目与全局索引常驻上下文，条目带结构标识与证据，旧版本可以恢复。"
+kind: "package-bundle"
+---
 
-# dsh-layered-memory
+# @dsh-external/dsh-layered-memory
 
-DeepSeek Harness 的跨会话记忆插件。环境事实和任务经验保存在 Markdown 文件中，当前项目与全局目录进入上下文，正文按需检索和读取。
+[English](README.md) | 中文
+
+## 概述
+
+分层记忆把事实和操作经验从一次会话带到下一次。事实放在 `facts.md` 的二级标题下，操作流程放在 `sops/*.md`。会话开始时，agent 拿到一份项目索引和一份全局索引，正文等用到时再读。每个条目用 `{namespace, kind, key}` 定位，显示标题和身份是两件事。写入之前先把当前版本存下来，所以历史可以查，也可以回滚。
+
+## 目录
+
+- [安装](#安装)
+- [使用](#使用)
+- [配置](#配置)
+- [理解实现](#理解实现)
+- [进一步探索](#进一步探索)
+- [模型体验](#模型体验)
+- [已知限制与暂缓工作](#已知限制与暂缓工作)
 
 ## 安装
 
@@ -10,65 +27,49 @@ DeepSeek Harness 的跨会话记忆插件。环境事实和任务经验保存在
 dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
 ```
 
-桌面端使用它随附的 `dsh` 命令，把 profile 改为 `desktop`。本地开发可链接本仓库。运行源码位于 `src/`，`lib/index.js` 只转发导出。
+桌面端用它随附的 `dsh` 命令，把 profile 换成 `desktop`。本地开发可以直接链接这个仓库，再让 profile 指向它。`lib/index.js` 只转发导出，实际源码在 `src/`。
 
 ## 使用
 
-让 Agent 加载 `memory` 技能，或调用 `memory_activate({mode:"common"})`。日常读写只加载常用工具；历史、归档、候选与维护使用 `mode:"manage"`。只读任务可以请求 `access:"read"`，子代理默认只读。
+加载 `memory` skill，或者调用 `memory_activate({mode:"common"})` 打开工具。管理操作用 `mode:"manage"`。只读会话可以传 `access:"read"`，子 agent 默认就是只读。
 
-0.8.0 统一使用 `entry = {namespace, kind, key}` 定位条目。直接复用 list、search 或 write 返回的 entry；显示标题与文件名不再混用，同名 fact 和 SOP 可以分别读取。
+条目用 search、list 或 create 返回的 `entry` 对象定位，不要拿标题重新拼一个身份出来。
 
 ```js
-// 新建已经验证的事实
 memory_write({
   namespace: "my-project",
   kind: "fact",
-  topic: "预览启动命令",
-  content: "项目预览通过 pnpm dev 启动。",
-  evidence: "已在当前项目执行，服务启动成功并能打开页面。"
+  topic: "预览命令",
+  content: "跑 pnpm dev 就能起预览。",
+  evidence: "命令正常启动，页面加载成功。"
 })
-
-// 使用上一步返回的 entry
+// 后续调用复用返回的 entry。
 memory_read({entry, full: true})
-memory_update({entry, content: "更新后的实测结论", evidence: "本次验证结果"})
+memory_update({entry, content: "修正后的事实", evidence: "新的验证过程"})
 memory_history({entry})
-memory_rollback({entry, snapshot_id: "从 history 返回值选择"})
+memory_rollback({entry, snapshot_id: "填一个返回的快照 id"})
 ```
 
-`memory_write` 只创建新条目，`memory_update` 只更新已有条目。更新、归档和恢复都保留当前版本。原来使用 `entry_type`、裸 `topic/name` 定位的工具调用应切换到新协议；已有 Markdown 记忆继续读取。
+`memory_write` 负责新建，`memory_update` 负责改动已有条目。更新、归档和恢复都会先写一份当前版本，之前的状态因此还能找回来。
 
-## 工具
+| 要做的事 | 工具 |
+| --- | --- |
+| 查找与阅读 | memory_search、memory_list、memory_read |
+| 新建与更新 | memory_write、memory_update |
+| 查看证据 | memory_expand |
+| 恢复历史 | memory_history、memory_rollback |
+| 归档与恢复可见性 | memory_archive |
+| 共享与迁移 | memory_promote、memory_namespace |
+| 处理候选 | memory_pending、memory_accept、memory_discard |
+| 状态与维护 | memory_stats、memory_index、memory_maintain |
 
-| 工作 | 工具 | 行为 |
-| --- | --- | --- |
-| 查找 | `memory_search`、`memory_list` | 返回可直接复用的 entry；默认检索当前空间与 global 的活跃条目 |
-| 阅读 | `memory_read` | 返回范围、总行数、revision、complete 和 next_line；支持归档全文 |
-| 写入 | `memory_write`、`memory_update` | 新增与更新分开；新证据可指定 evidence_call_ids，宿主补充实际来源 |
-| 来源 | `memory_expand` | 展开普通调用或 PTC 子调用的真实事件 |
-| 历史 | `memory_history`、`memory_rollback` | 按 snapshot_id 恢复；恢复前保存当前版本 |
-| 归档 | `memory_archive` | 隐藏活跃入口并保留全文；unarchive 恢复可见性 |
-| 跨空间 | `memory_promote`、`memory_namespace` | 提升为全局经验，列空间或显式迁移；迁移保留来源 |
-| 候选 | `memory_pending`、`memory_accept`、`memory_discard` | 阅读、提交精炼正文与证据，或明确放弃候选 |
-| 状态 | `memory_stats`、`memory_index`、`memory_maintain` | 查看实际空间、存储分项和维护状态；重建目录与程序维护 |
-
-搜索归档时传 `include_archived:true`，读取直接使用返回的 entry。全文规则、目录和管理原则通过 `memory_read` 的 `kind:"rules"|"index"|"policy"` 读取。
-
-## 项目与全局记忆
-
-固定空间由 `defaultNamespace` 指定。自动空间使用工作区的稳定身份或规范化根路径，不再依赖目录名和分支；同名不同路径的项目保持隔离。同一个项目默认跨分支共享记忆。
-
-`default` 是全局空间。项目的 L1 和默认搜索同时提供全局入口。`memory_promote` 可将可复用经验提升到全局空间。
-
-旧版自动空间不会被猜测归属于某个新项目；使用 `memory_namespace` 显式迁移，并保留来源目录。
+搜索默认只看当前空间和全局空间的活跃条目。要翻归档内容就传 `include_archived:true`，再用返回的 entry 去读。读取结果会给出行范围、总行数、revision、是否完整以及下一行位置。全局规则和完整索引通过 `rules`、`index`、`policy` 三种 entry 读取。
 
 ## 配置
-
-在当前 profile 的 `cordis.patch.yml` 中覆盖已有 bundle id。
 
 ```yaml
 - id: dsh-layered-memory
   config:
-    memoryDir: ''
     defaultNamespace: ''
     autoNamespace: true
     progressive: true
@@ -77,24 +78,59 @@ memory_rollback({entry, snapshot_id: "从 history 返回值选择"})
     memoryAccess: write
     subagentMemoryAccess: read
     autoPending: false
-    maintainEveryTurns: 20
-    reflectionEnabled: true
     reflectionMode: notify
 ```
 
-L1 按字符预算生成项目与全局视图；磁盘索引保留完整目录。手写规则也受注入预算限制，完整内容始终可以用工具读取。实际内容经宿主变量传递，`{{模板括号}}` 保持原文。
+自动命名空间来自工作区身份或者规范化后的根路径。两个同名项目放在不同路径下仍然是两个空间，同一个仓库的不同分支共用项目记忆。已有的命名空间要显式迁移，迁移后保留原目录。
 
-维护阈值、模型选择和执行预算见 [自动维护](docs/automatic-maintenance.zh.md)。
+`default` 是全局空间，项目索引和默认搜索都把它算进来。字符预算同时管索引条目和手写规则，完整文件仍然可以通过工具读到。宿主用变量传递记忆文本，内容按数据处理，`{{模板括号}}` 会原样保留。
 
-## 文件与更新
+自动维护是可选能力，跑在原生 fresh-context subagent 上，对工具、写入、时间和模型输出都有明确上限。维护没有可处理的发现时不发起模型调用。细节见[维护指南](docs/automatic-maintenance.zh.md)。
 
-默认根目录是 `~/.dsh/memory/`。每个空间包含 `facts.md`、`sops/`、`index.txt`、`memory-meta.json`、`.history/` 以及维护状态。`default` 直接使用根目录，其他空间使用子目录。文件可直接备份，历史按条目身份保存。
+## 理解实现
 
-拉取源码后，需要确认宿主真正重载了模块。配置热更新不等于源码热更新。开发环境可为 `hmr` 的 `root` 明确指定本仓库的真实路径；启动日志会记录已加载版本和路径。操作步骤见 [开发与端到端验收](docs/development.md)。
+<details>
+<summary>存储、身份与上下文组装</summary>
 
-- [设计与数据流程](docs/design.md)
-- [自动维护与模型预算](docs/automatic-maintenance.zh.md)
-- [开发与端到端验收](docs/development.md)
-- [更新记录](CHANGELOG.md)
+事实靠它在 `facts.md` 里的二级标题定位，操作流程靠 `sops/` 里的路径定位。显示标题和条目 key 是两个值，所以同一个标题可以既是事实又是流程，可以在一个空间里，也可以跨两个空间。
 
-MIT License
+L1 索引在磁盘上保存完整的活跃目录。组装上下文时，项目索引和全局索引各有自己的字符预算。预算不够时条目会被折叠，描述截短，但每个折叠的条目都留了一条能读回正文的路径。
+
+宿主通过 `systemPrompt.variable` 把记忆文本交出去，prompt 里引用的是固定变量，正文不会被当成模板再解析一遍。宿主比较内容快照，只有快照变了才追加。L0 和运行期 skill 共用同一份核心规则模板。
+
+</details>
+
+## 进一步探索
+
+- [设计说明](docs/design.md) 讲存储、身份和上下文组装的具体做法。
+- [开发与端到端验收](docs/development.md) 讲怎么构建和验证改动。
+- [自动维护](docs/automatic-maintenance.zh.md) 讲可选的模型维护流程。
+- [更新日志](CHANGELOG.md) 记录已经发布的行为变化。
+
+## 模型体验
+
+### 系统提示词里的记忆索引
+
+#### 模型看到什么
+
+系统提示词里带一份项目索引和一份全局索引，加上当前命名空间的手写规则。索引每行给出条目名和一句简短描述，正文留在磁盘上，等模型调用读取工具。
+
+#### Token 影响
+
+索引部分是会话内的固定开销，项目索引受 `l1MaxChars` 限制，全局索引受 `globalL1MaxChars` 限制。读取按需增加 token，返回的是行范围，长条目可以分几次读完。`progressive: true` 让索引行保持短小，把细节留给读取。
+
+#### KV cache 影响
+
+索引位于稳定前缀里，快照没变就能复用服务端的缓存。一旦写入改变了索引，这个前缀就换了内容，它后面的缓存 token 随之失效。
+
+## 已知限制与暂缓工作
+
+- **折叠会藏起细节**，项目索引或全局索引超出字符预算时，条目被折叠、描述被截短。完整正文还能通过 `memory_read` 拿到，但只看索引的 agent 看到的东西比文件里少。
+- **维护要花模型调用**，把 `reflectionMode` 设成 `notify` 以外的值，或者打开 `autoPending`，都可能启动 fresh-context subagent。每次运行都消耗 token，而这些上限是按单次运行算的，不按整个会话累计。
+- **命名空间靠路径识别**，自动命名空间来自工作区身份或者规范化根路径。项目挪到别的路径就会变成另一个空间，除非显式迁移。
+- **工具按会话生效**，记忆工具要等 `memory_activate` 之后才存在。一个始终没激活记忆的会话既看不到条目，也写不进去。
+- **索引超预算会被改写**，超出上限时引擎重写索引文件并标记 `over_limit`，条目列表可能被重新编排。写入方看到的条目数量不能当成文件里真实条目的数量。
+
+### 开发者备注
+
+无。

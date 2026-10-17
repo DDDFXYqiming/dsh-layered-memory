@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-layered-memory",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "DSH 跨会话记忆：项目与全局视图、结构化条目标识、证据溯源、可恢复历史及按需维护。",
   "type": "module",
   "main": "lib/index.js",
@@ -8,7 +8,8 @@
     ".": {
       "default": "./lib/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
   },
   "files": [
     "lib",
@@ -16,6 +17,8 @@
     "README.md",
     "README.zh.md",
     "CHANGELOG.md",
+    "locale",
+    "icon.svg",
     "cordis.patch.yml",
     "LICENSE",
     "docs",
@@ -31,7 +34,8 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
-    }
+    },
+    "manifestVersion": 1
   },
   "keywords": [
     "deepseek-harness",
@@ -49,7 +53,8 @@
     "url": "git+https://github.com/DDDFXYqiming/dsh-layered-memory.git"
   },
   "engines": {
-    "node": ">=22.19"
+    "node": ">=22.19",
+    "dsh": ">=0.2.0 <0.3.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.0-rc <5 || 4.0.5-alpha.2",
@@ -70,5 +75,8 @@
     "@deepseek-ai/dsh-session-query": {
       "optional": true
     }
-  }
+  },
+  "author": "DDDFXYqiming",
+  "homepage": "https://github.com/DDDFXYqiming/dsh-layered-memory#readme",
+  "icon": "./icon.svg"
 }

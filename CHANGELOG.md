@@ -2,6 +2,14 @@
 
 All notable changes to `@dsh-external/dsh-layered-memory` are documented here.
 
+## [0.8.2] - 2026-10-17
+
+### 变更（按 DSH 官方插件规范补齐元数据与文档）
+- package.json 增加 `engines.dsh` 兼容范围与 `dsh.manifestVersion` 格式标识，补齐 `author` 与 `homepage`。
+- 新增 `locale/en.json` 与 `locale/zh.json` 提供插件管理页的展示标题与描述，`exports` 与 `files` 同步登记。
+- 新增 `icon.svg`，36×36 画布、自包含几何。
+- `README.md` 改为英文、`README.zh.md` 改为中文，按官方结构补齐概述、目录、实现机制、模型体验、已知限制与开发者备注；删除内容重复的 `README.en.md`。
+
 ## [0.8.1] - 2026-10-15
 
 - 兼容 DSH 0.2.1-alpha.3 的托管子代理接口，自动维护使用精确保留的子会话身份和 caller 结果交付。

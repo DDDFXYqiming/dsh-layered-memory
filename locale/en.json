@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Layered memory",
+    "description": "Cross-session memory for DeepSeek Harness. Project and global indexes stay in context, entries carry structured identity and evidence, and history can be restored."
+  }
+}

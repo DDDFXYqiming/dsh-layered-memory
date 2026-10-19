@@ -91,7 +91,10 @@ function apply(ctx, config = {}) {
 	disposers.push(systemPrompt.context({ name: "memory:index", order: 10, text: "{{layered_memory_index}}" }));
 	disposers.push(ctx.skills.register({ name: SKILL_NAME, description: SKILL_DESCRIPTION, whenToUse: SKILL_WHEN_TO_USE, source: "runtime", content: SKILL_CONTENT }));
 	let maintenance;
-	const allowedAccess = agent => cfg.memoryAccess === "read" || (agent?.session.header.parentSession !== undefined && cfg.subagentMemoryAccess === "read") ? "read" : "write";
+	// 只有真正的委派子会话（header.origin === "subagent"）才受 subagentMemoryAccess 约束。
+	// 会话分叉（session.fork）是普通会话的副本：它带 parentSession 表示血缘，但仍是独立运行的根 Agent。
+	const isSubagentSession = agent => agent?.session.header.origin === "subagent";
+	const allowedAccess = agent => cfg.memoryAccess === "read" || (isSubagentSession(agent) && cfg.subagentMemoryAccess === "read") ? "read" : "write";
 	const allTools = buildTools(ctx, cfg).map(def => READ_TOOLS.has(def.name) ? def : {
 		...def,
 		execute(args, exec) {

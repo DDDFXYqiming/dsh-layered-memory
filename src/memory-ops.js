@@ -191,7 +191,6 @@ export function pendingContent({ sourceSession, sourceSeqs, retries, reason }) {
 	return lines.join("\n");
 }
 
-/** 写入 pending 候选。 */
 /**
  * [0.6.1 N12] 尾部摘要的密钥消毒：autoPending 开启时错误/结果尾部会原样进
  * pending/*.md 落盘；若工具错误回显了凭证，此前要到 accept 侧才被 detectSecret 拦
@@ -204,7 +203,6 @@ function redactSecretTail(text) {
 	return hit ? `[redacted:${hit}]` : s;
 }
 
-/** 写入 pending 候选（重试序列尾部先过密钥消毒）。 */
 export function writePending(root, payload) {
 	const fileName = "pending-" + randomUUID() + ".md";
 	const p = join(root, PENDING_DIR, fileName);
@@ -222,7 +220,6 @@ export function writePending(root, payload) {
 	return fileName;
 }
 
-/** 读取 pending 候选。 */
 export function readPending(root, name) {
 	if (basename(name) !== name || !name.endsWith(".md")) throw new Error("Invalid pending file name");
 	const p = join(root, PENDING_DIR, name);
@@ -232,7 +229,6 @@ export function readPending(root, name) {
 	return m ? text : null;
 }
 
-/** 从 pending 文件解析简单字段。 */
 export function parsePending(text) {
 	const out = {};
 	const session = text.match(/^- sourceSession: (.+)$/m);

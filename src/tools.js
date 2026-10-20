@@ -60,7 +60,7 @@ function safeFile(key) {
 	return key;
 }
 
-// All pages are contiguous whole lines. A single oversized line is returned whole.
+// 分页只能按整行切；单行超长时整行返回。
 export function pageContent(text, args = {}) {
 	const lines = text.split("\n"), total = lines.length;
 	const from = args.full ? 1 : args.from_line ?? 1;

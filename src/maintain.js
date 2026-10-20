@@ -12,7 +12,6 @@ export const MIN_TOKENS_FOR_FUZZY = 12;
 export const NEAR_DUPE_REPORT_LIMIT = 20;
 export const COLD_REVIEW_DAYS = 90;
 
-// One file scan and one pair comparison pass feed both duplicate and merge reports.
 function compareEntries(entries, opts) {
 	const report = { removed: [], merged: [], conflicts: [], exactDuplicates: [], nearDuplicates: [] };
 	const mergeCandidates = [];

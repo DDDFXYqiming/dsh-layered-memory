@@ -1,20 +1,15 @@
-// 纯 JS 文本相似度与检索引擎（无模型红线）：
-// - tokenize/jaccard：近重复检测与合并候选（ASCII 词 + 单数字 + CJK bigram）
-// - BM25Index：memory_search 的全文检索排序（Okapi BM25，k1/b 经典取值）
-//
-// 分词策略：ASCII 词元（≥2 位）+ 单个数字（端口/版本等区分性重要）+ CJK bigram。
+// 无模型红线：本文件不引入任何模型依赖，检索与相似度必须是纯 JS 计算。
 // 中文没有空格边界，bigram 是无模型条件下最稳的召回单元。
 
-/** 规范化文本：小写、压缩空白。只用于检索/相似度评分，**不用于"是否同一内容"的归档判定**。 */
+/** 只用于检索/相似度评分，**不用于"是否同一内容"的归档判定**。 */
 export function normalizeText(text) {
 	return String(text ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 /**
- * [0.6.9] 精确内容比较的唯一规范化（自动去重判定专用）：统一换行、去行尾空白、
- * 去尾部空行。不折叠大小写、不合并正文空白——路径、命令、参数里的大小写与空格
- * 都是语义（/srv/App 与 /srv/app 是两个目录）。这与 normalizeText（检索用）分离：
- * 适合搜索的归一化不适合决定某条记忆是否可以被隐藏。
+ * 自动去重判定专用，与 normalizeText（检索用）分离：适合搜索的归一化不适合
+ * 决定某条记忆是否可以被隐藏。不折叠大小写、不合并正文空白——路径、命令、
+ * 参数里的大小写与空格都是语义（/srv/App 与 /srv/app 是两个目录）。
  */
 export function exactNormalize(text) {
 	return String(text ?? "")
@@ -25,7 +20,6 @@ export function exactNormalize(text) {
 		.replace(/\n+$/, "");
 }
 
-/** 混合分词：ASCII 词 + 单个数字 + CJK bigram。用于 BM25 检索与 Jaccard。 */
 export function tokenize(text) {
 	const s = normalizeText(text);
 	const tokens = [];
@@ -47,7 +41,7 @@ export function tokenize(text) {
 	return tokens;
 }
 
-/** Jaccard 相似度 = |A∩B| / |A∪B|，空集对空集定义为 1（等价于完全一致）。 */
+/** 空集对空集定义为 1（等价于完全一致）。 */
 export function jaccard(a, b) {
 	if (a.size === 0 && b.size === 0) return 1;
 	if (a.size === 0 || b.size === 0) return 0;
@@ -57,10 +51,7 @@ export function jaccard(a, b) {
 	return union === 0 ? 0 : inter / union;
 }
 
-/**
- * Okapi BM25 全文检索索引。
- * addDoc(id, text) 后 search(query, limit) 返回 [{ id, score }]（按分数降序）。
- */
+/** Okapi BM25 全文检索索引。 */
 export class BM25Index {
 	constructor({ k1 = 1.2, b = 0.75 } = {}) {
 		this.k1 = k1;
@@ -99,7 +90,6 @@ export class BM25Index {
 		return this.docs.size;
 	}
 
-	/** 查询词元：与文档同一套分词。 */
 	search(query, limit = 8) {
 		const N = this.docs.size;
 		if (N === 0) return [];

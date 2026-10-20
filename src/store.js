@@ -58,7 +58,7 @@ function markdownNames(dir) {
   catch (error) { if (error.code === "ENOENT") return []; throw error; }
 }
 
-/** 显式初始化；读工具不调用本函数。不迁移、删除或覆盖既有用户文件。 */
+/** 只做创建，不迁移、不删除、不覆盖既有用户文件。 */
 export function ensureNamespaceLayout(root, identity) {
   mkdirSync(root, { recursive: true });
   return withNsWriteLock(root, () => {
@@ -115,7 +115,7 @@ export function withNsWriteLocks(roots, fn) {
   return enter(0);
 }
 
-/** 锁内重读再写。没有比较后 rename 的伪 CAS 窗口。 */
+/** 锁内重读再写，避免比较后 rename 的伪 CAS 窗口。 */
 export function rewriteFile(path, compute) {
   return withNsWriteLock(dirname(path), () => {
     const previous = readText(path);

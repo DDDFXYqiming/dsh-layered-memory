@@ -7,6 +7,7 @@ import { NEAR_DUPE_THRESHOLD, MERGE_CANDIDATE_THRESHOLD, MIN_TOKENS_FOR_FUZZY, C
 import { L1_MAX_CHARS_DEFAULT, buildCombinedPromptIndex } from "./l1index.js";
 import { buildTools } from "./tools.js";
 import { wireEvents } from "./events.js";
+import { wireTurnReview } from "./turn-review.js";
 import { readActivation } from "./activation-history.js";
 import { SKILL_NAME, SKILL_DESCRIPTION, SKILL_WHEN_TO_USE, SKILL_CONTENT } from "./skill-content.js";
 
@@ -20,6 +21,7 @@ export const Config = Schema.object({
 	defaultNamespace: Schema.string().default(""),
 	autoNamespace: Schema.boolean().default(true),
 	autoPending: Schema.boolean().default(false),
+	turnReviewEnabled: Schema.boolean().default(true),
 	reflectionEnabled: Schema.boolean().default(true),
 	reflectionMode: Schema.union([Schema.const("auto"), Schema.const("notify")]).default("notify"),
 	maintenanceProvider: Schema.string().default("spawn"),
@@ -53,7 +55,7 @@ function apply(ctx, config = {}) {
 	const cfg = Config(Object.fromEntries(Object.entries(config).filter(([, value]) => value !== "")));
 	if (!cfg.memoryDir) cfg.memoryDir = defaultMemDir();
 	const version = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
-	const runtimeInfo = { version, loadedAt: new Date().toISOString(), source: fileURLToPath(import.meta.url), memoryDir: cfg.memoryDir, mode: cfg.reflectionMode };
+	const runtimeInfo = { version, loadedAt: new Date().toISOString(), source: fileURLToPath(import.meta.url), memoryDir: cfg.memoryDir, mode: cfg.reflectionMode, turnReviewEnabled: cfg.turnReviewEnabled };
 	cfg.runtimeInfo = runtimeInfo;
 	if (Boolean(cfg.maintenanceLlmProvider) !== Boolean(cfg.maintenanceModel)) throw new Error("maintenanceLlmProvider and maintenanceModel must be set together");
 	cfg.heat = { halfLifeDays: cfg.heatHalfLifeDays, recencyWindowMs: cfg.recencyWindowDays * 86400000 };
@@ -130,6 +132,10 @@ function apply(ctx, config = {}) {
 		onSkillResult(exec, result) {
 			if (!result.isError && exec.name === "skill" && exec.arguments.name === "memory" && exec.agent && !maintenance.owns(exec.agent)) activate(exec.agent);
 		},
+	}));
+	disposers.push(wireTurnReview(ctx, cfg, {
+		canWrite: agent => allowedAccess(agent) === "write" && states.get(agent)?.access !== "read" && !maintenance.owns(agent),
+		activate: agent => activate(agent),
 	}));
 	const restored = new WeakSet();
 	disposers.push(ctx.on("system-prompt/assemble", async (_assembly, context, next) => {

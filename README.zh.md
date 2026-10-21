@@ -78,6 +78,7 @@ memory_rollback({entry, snapshot_id: "填一个返回的快照 id"})
     memoryAccess: write
     subagentMemoryAccess: read
     autoPending: false
+    turnReviewEnabled: true
     reflectionMode: notify
 ```
 
@@ -85,7 +86,7 @@ memory_rollback({entry, snapshot_id: "填一个返回的快照 id"})
 
 `default` 是全局空间，项目索引和默认搜索都把它算进来。字符预算同时管索引条目和手写规则，完整文件仍然可以通过工具读到。宿主用变量传递记忆文本，内容按数据处理，`{{模板括号}}` 会原样保留。
 
-自动维护是可选能力，跑在原生 fresh-context subagent 上，对工具、写入、时间和模型输出都有明确上限。维护没有可处理的发现时不发起模型调用。细节见[维护指南](docs/automatic-maintenance.zh.md)。
+主模型默认在相关任务收尾时检查一次记忆，利用本轮证据纠正旧事实或保存新经验；`turnReviewEnabled: false` 可关闭。独立自动维护由 `reflectionMode: auto` 启用，使用原生 fresh-context subagent，并限制工具调用、写入、时间和模型输出。细节见[维护指南](docs/automatic-maintenance.zh.md)。
 
 ## 理解实现
 
@@ -126,9 +127,9 @@ L1 索引在磁盘上保存完整的活跃目录。组装上下文时，项目�
 ## 已知限制与暂缓工作
 
 - **折叠会藏起细节**，项目索引或全局索引超出字符预算时，条目被折叠、描述被截短。完整正文还能通过 `memory_read` 拿到，但只看索引的 agent 看到的东西比文件里少。
-- **维护要花模型调用**，把 `reflectionMode` 设成 `notify` 以外的值，或者打开 `autoPending`，都可能启动 fresh-context subagent。每次运行都消耗 token，而这些上限是按单次运行算的，不按整个会话累计。
+- **维护要花模型调用**，收尾检查可能增加主模型调用；`reflectionMode: auto` 使用独立子代理。`autoPending` 收集候选，候选的处理方式由维护模式决定。预算按单次维护运行计算。
 - **命名空间靠路径识别**，自动命名空间来自工作区身份或者规范化根路径。项目挪到别的路径就会变成另一个空间，除非显式迁移。
-- **工具按会话生效**，记忆工具要等 `memory_activate` 之后才存在。一个始终没激活记忆的会话既看不到条目，也写不进去。
+- **工具按会话生效**，读取记忆技能、调用 `memory_activate` 或进入收尾检查时激活相应工具。目录索引随上下文提供，正文通过工具读取。
 - **索引超预算会被改写**，超出上限时引擎重写索引文件并标记 `over_limit`，条目列表可能被重新编排。写入方看到的条目数量不能当成文件里真实条目的数量。
 
 ### 开发者备注

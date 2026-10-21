@@ -2,11 +2,18 @@
 
 默认 `reflectionMode: notify`。程序扫描将可行动事项交给当前会话；`auto` 使用独立的 DSH 子代理。没有可行动事项时记录 no_action，不启动模型任务。
 
+## 任务收尾检查
+
+`turnReviewEnabled: true` 默认启用主模型收尾检查。宿主的 `agent/turn-stopping` 钩子在本轮结束前检查成功的工具记录：本轮查阅过记忆或取得工具返回时，向仍持有任务上下文的主模型投递一次检查。模型核对相关旧事实与本轮证据，已有条目先完整读取，再更新原条目；新信息先检索再保存。
+
+检查消息保存在官方会话事件中，同一轮恢复或插件热重载后仍能识别已经检查过。普通子代理和只读访问保持原有权限。无新信息时可以直接结束；每次检查可能增加模型调用。
+
 ## 配置
 
 ```yaml
 - id: dsh-layered-memory
   config:
+    turnReviewEnabled: true
     reflectionEnabled: true
     reflectionMode: auto
     maintenanceProvider: spawn

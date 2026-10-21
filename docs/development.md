@@ -29,7 +29,9 @@ npm pack --dry-run
 在实际桌面应用的新会话中执行常用流程；边界样本写入专用 memoryDir。并发和多工作区场景使用同一安装随附的 headless CLI，复用相同真实模型和插件源码。
 
 ```bash
-dsh --profile memory-e2e --from-default-profile headless --patch ./memory-e2e.patch.yml --json - < scenario.txt
+dsh --profile memory-e2e --from-default-profile headless --dump-config
+# 配置好专用 profile 后，后续场景直接运行该 profile。
+dsh --profile memory-e2e --patch ./memory-e2e.patch.yml --json - < scenario.txt
 ```
 
 验收 profile 需在自己的 bundles 中启用此插件。overlay 指定专用记忆目录，避免把合成样本混入日常知识库。
@@ -48,6 +50,14 @@ dsh --profile memory-e2e --from-default-profile headless --patch ./memory-e2e.pa
 10. 候选接受/丢弃、损坏 meta、历史快照写入失败、旧库迁移分别观察真实返回与磁盘结果。
 11. notify 和 auto 模式分别观察可行动事项、真实子会话、完整读取资格、预算、usage 与结束状态。
 12. 恢复日常配置，读取现有条目，确认已载入的版本与实际行为。
+
+## 主动维护验收
+
+收尾场景使用真实根会话：预置一条旧事实，再要求模型读取实际配置确认事实。检查本轮官方事件中恰好出现一次 `plugin:layered-memory:turn-review`，相关更新使用实际证据，普通闲聊和只读访问保持原样。
+
+分批整理使用独立记忆空间和 `reflectionMode: auto`。预置超过注入预算、词面相似度不足以触发旧扫描的目录，观察原生维护子代理是否浏览目录、完整读取候选并保存处置理由。降低写入预算观察未完成进度，下一次符合冷却条件的根会话结束后继续；审完仍超限的空间应保持已完成。
+
+需要连续多轮及子代理完成边界时，使用官方 SDK profile，经 stdio JSON-RPC 依次调用 `initialize`、`session/prompt`、`session/wait`，并观察 `subagent.started` 与 `subagent.finished`。场景结束以 `shutdown` 释放专用进程。热应用后重新读取 `memory_stats.runtime`，核对版本、加载时间、路径和模式。
 
 ## 保存证据
 

@@ -4,8 +4,10 @@ import { computeContentRevision, readReflectionState, writeReflectionState, coll
 import { runMaintain } from "./maintain.js";
 import { writePending } from "./memory-ops.js";
 import { createMaintenanceRunner } from "./maintenance-agent.js";
+import { hasReviewWork, recordOrdinaryChange } from "./review.js";
 
 const MUTATIONS_WITH_SOURCE = new Set(["memory_write", "memory_update", "memory_accept"]);
+const MEMORY_MUTATIONS = new Set([...MUTATIONS_WITH_SOURCE, "memory_archive", "memory_rollback", "memory_promote"]);
 function resultText(result) { return (result.content || []).filter(block => block.type === "text").map(block => block.text).join("\n").replace(/\s+/g, " ").slice(0, 600); }
 function resultCallId(event) {
 	if (event.type === "tool/result") return event.data.callId || event.data.message?.source?.callId || event.data.message?.tool_call_id;
@@ -57,6 +59,9 @@ export function wireEvents(ctx, cfg, io) {
 			const previousEvent = state.calls.get(exec.callId);
 			if (previousEvent?.seq !== undefined) bindSource(session, exec.callId, previousEvent.seq);
 		}
+		if (!result.isError && MEMORY_MUTATIONS.has(exec.name) && result.value?.changed && result.value.entry && !maintenance.owns(exec.agent)) {
+			recordOrdinaryChange(nsRoot(cfg.memoryDir, result.value.entry.namespace), { entry: result.value.entry, revision: result.value.revision });
+		}
 		if (!cfg.autoPending || maintenance.owns(exec.agent) || exec.name.startsWith("memory_")) return;
 		if (result.isError) {
 			const previous = state.retries.get(exec.name) || { fails: 0, calls: [] };
@@ -78,21 +83,22 @@ export function wireEvents(ctx, cfg, io) {
 	async function scanNamespace(session, root, totalTurns, periodic) {
 		const state = readReflectionState(root);
 		const revision = computeContentRevision(root);
-		if (!periodic && isSettledRevision(state, revision)) return;
+		const reviewReady = hasReviewWork(root);
+		if (!periodic && !reviewReady && isSettledRevision(state, revision)) return;
 		const signals = collectReflectionSignals(root);
-		if (!periodic && !reflectionBuckets(signals, cfg).length && state.outcome !== "needs_review") return;
+		if (!periodic && !reviewReady && !reflectionBuckets(signals, cfg).length && state.outcome !== "needs_review") return;
 		const report = runMaintain(root, cfg.l1MaxChars, cfg.maintainOpts);
 		if (!cfg.reflectionEnabled || !report.actionable.needsModelReview) return;
 		const namespace = resolveNamespace(cfg, undefined, session.header.cwd);
 		const agent = ctx.get("agents").get(session.id);
-		if (!agent) return;
+		if (!agent || !io.canWrite(agent)) return;
 		if (cfg.reflectionMode === "auto") { await maintenance.request(root, namespace, agent, report); return; }
 		const current = readReflectionState(root);
 		const currentRevision = computeContentRevision(root);
 		const decision = decideReflection({ enabled: true, cooled: true, state: current, revision: currentRevision, signals, cfg });
 		if (!decision.notify) return;
-		agent.inject({ id: randomUUID(), role: "user", content: [{ type: "text", text: `[记忆整理请求] 插件扫描发现待确认事项：${report.actionable.reasons.join("、")}。需要时使用 memory_activate({mode:"manage"}) 与 memory_maintain 检查；当前任务优先。` }], source: { kind: "plugin:layered-memory" } });
-		writeReflectionState(root, { notifiedRevision: currentRevision, notifiedAt: new Date().toISOString(), notifiedSession: session.id });
+		agent.followup({ id: randomUUID(), role: "user", content: [{ type: "text", text: `[记忆整理请求] 插件扫描发现待确认事项：${report.actionable.reasons.join("、")}。需要时使用 memory_activate({mode:"manage"}) 与 memory_maintain 检查；当前任务优先。` }], source: { kind: "plugin:layered-memory" } });
+		writeReflectionState(root, { notifiedRevision: currentRevision, notifiedReviewRevision: current.review?.revision, notifiedAt: new Date().toISOString(), notifiedSession: session.id });
 	}
 	disposers.push(ctx.on("session/event", (session, event) => {
 		const state = stateFor(session);
@@ -106,14 +112,14 @@ export function wireEvents(ctx, cfg, io) {
 		if (event.type !== "turn/end") return;
 		flushPending(session);
 		state.retries.clear();
-		if (session.header.parentSession !== undefined) return;
+		if (session.header.origin === "subagent") return;
 		const root = io.resolveRoot(session.header.cwd);
 		const totalTurns = bumpTurnCounter(root);
 		const periodic = cfg.maintainEveryTurns > 0 && totalTurns % cfg.maintainEveryTurns === 0;
 		if (!periodic && !cfg.reflectionEnabled) return;
 		const previous = namespaceScans.get(root) || { turn: -Infinity, at: -Infinity };
 		const cooled = totalTurns - previous.turn >= cfg.reflectCooldownTurns;
-		if ((!periodic && !cooled) || Date.now() - previous.at < 600000) return;
+		if (!hasReviewWork(root) && ((!periodic && !cooled) || Date.now() - previous.at < 600000)) return;
 		namespaceScans.set(root, { turn: totalTurns, at: Date.now() });
 		schedule("namespace scan", () => scanNamespace(session, root, totalTurns, periodic));
 	}));

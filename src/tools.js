@@ -9,7 +9,8 @@ import {
 	readNamespaceIdentity, migrateNamespace, hashText,
 } from "./store.js";
 import { readIndex, readRules, syncIndex, indexChars, buildCombinedPromptIndex, L1_MAX_CHARS_DEFAULT } from "./l1index.js";
-import { writeMemory, readPending, parsePending } from "./memory-ops.js";
+import { writeMemory, readPending, parsePending, redactSecretLines } from "./memory-ops.js";
+import { enqueueReview, readReviewState } from "./review.js";
 import { runMaintain } from "./maintain.js";
 import { listNamespaces, searchNamespaces } from "./search.js";
 
@@ -160,6 +161,27 @@ export function buildTools(ctx, cfg) {
 			return result(entry, "updated", stored, newEvidence && args.sourceSession === undefined);
 		});
 	}));
+	defs.push(tool("memory_review", "为已发现但尚未解决的新旧事实冲突登记复核。提供确切entry、冲突原因和本会话成功验证工具的call id；宿主保存真实证据片段供维护代理读取。", {
+		entry: refArg, reason: req(str), evidence_call_ids: req(arr(str)),
+	}, { review: req(record) }, async (args, exec) => {
+		if (args.evidence_call_ids.length < 1 || args.evidence_call_ids.length > 4) throw new Error("请提供1至4个验证调用id");
+		const entry = ref(args.entry), root = rootOf(entry);
+		const { extractSessionEventText } = await import("@deepseek-ai/dsh-session-query");
+		const observation = await ctx.get("sessionQuery").observeSession(exec.agent.session.id, { projectionMode: "none", signal: exec.signal });
+		const evidence = [];
+		try {
+			for (const callId of new Set(args.evidence_call_ids)) {
+				const event = observation.events.findLast(event =>
+					(event.type === "tool/result" && event.data.message.source.callId === callId && !event.data.message.source.isError) ||
+					(["tool/ptc-dispatch", "tool/code-dispatch"].includes(event.type) && (event.data.subCallId || event.data.callId) === callId && !event.data.isError));
+				if (!event) throw new Error(`本会话未找到成功的证据调用：${callId}`);
+				const text = redactSecretLines(event.type === "tool/result" ? extractSessionEventText(event) : event.data.content.filter(block => block.type === "text").map(block => block.text).join("\n"));
+				evidence.push({ text: text.length > 12000 ? `${text.slice(0, 12000)}\n[证据片段已截断，完整结果见来源事件]` : text, sourceSession: exec.agent.session.id, sourceSeqs: [event.seq] });
+			}
+		} finally { observation[Symbol.dispose](); }
+		return { review: enqueueReview(root, { entry, revision: mustRead(root, entry).revision, reason: redactSecretLines(args.reason), evidence }) };
+	}));
+
 	defs.push(tool("memory_archive", "归档或恢复可见性；归档正文仍可memory_read。replacement可指向已保存的替代entry。", {
 		entry: refArg, unarchive: bool, replacement: entryRef, if_revision: str,
 	}, mutationOutput, async args => {
@@ -224,7 +246,7 @@ export function buildTools(ctx, cfg) {
 			return { ...readNamespaceIdentity(cfg.memoryDir, namespace), ...computeNamespaceStats(root), index_chars: indexChars(readIndex(root)),
 				history_files: existsSync(history) ? readdirSync(history).filter(name => name.endsWith(".md") || name.endsWith(".json") && !name.endsWith(".meta.json") && JSON.parse(readFileSync(join(history, name), "utf8")).format === "memory-snapshot-v2").length : 0,
 				prompt_views: views.map(({ namespace, totalChars, shownChars, maxChars, overLimit }) => ({ namespace, total_chars: totalChars, shown_chars: shownChars, max_chars: maxChars, truncated: overLimit })),
-				maintenance: readState("maintenance-report.json"), maintenance_runs: readState("maintenance-runs.json"), reflection: readState("reflection-state.json") };
+				maintenance: readState("maintenance-report.json"), maintenance_runs: readState("maintenance-runs.json"), reflection: readState("reflection-state.json"), review: readReviewState(root) };
 		}) };
 	}, true));
 

@@ -48,7 +48,7 @@ export const Config = Schema.object({
 });
 
 const READ_TOOLS = new Set(["memory_read", "memory_list", "memory_search", "memory_stats", "memory_pending", "memory_expand", "memory_history"]);
-const COMMON_TOOLS = new Set(["memory_read", "memory_list", "memory_search", "memory_stats", "memory_write", "memory_update"]);
+const COMMON_TOOLS = new Set(["memory_read", "memory_list", "memory_search", "memory_stats", "memory_write", "memory_update", "memory_review"]);
 const skillGesture = message => message?.source?.kind === "user" && message.content.some(block => block.type === "text" && /(^|\s)\/memory(?=\s|$)/.test(block.text));
 
 function apply(ctx, config = {}) {
@@ -127,6 +127,7 @@ function apply(ctx, config = {}) {
 	}
 	disposers.push(wireEvents(ctx, cfg, {
 		resolveRoot,
+		canWrite: agent => allowedAccess(agent) === "write" && states.get(agent)?.access !== "read",
 		onMaintenanceRunner(runner) { maintenance = runner; },
 		maintenanceTools(namespace) { return buildTools(ctx, { ...cfg, defaultNamespace: namespace, autoNamespace: false }); },
 		onSkillResult(exec, result) {
@@ -176,7 +177,7 @@ function apply(ctx, config = {}) {
 		name: "memory_maintenance_activate",
 		description: "独立维护子任务使用派发的 maintenance_id 激活受限工具。",
 		parameters: { maintenance_id: { type: "string", required: true } },
-		output: { schema: { type: "object", additionalProperties: true, properties: { activated: { type: "boolean", required: true }, already: { type: "boolean", required: true }, tools: { type: "array", items: { type: "string" }, required: true } } }, render: (_args, value) => [{ type: "text", text: value.tools.join(", ") }] },
+		output: { schema: { type: "object", additionalProperties: true, properties: { activated: { type: "boolean", required: true }, already: { type: "boolean", required: true }, tools: { type: "array", items: { type: "string" }, required: true } } }, render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }] },
 		execute: async (args, exec) => maintenance.activate(exec.agent, args.maintenance_id),
 	}));
 	if (!cfg.progressive) for (const def of allTools) ctx.tools.register(def);

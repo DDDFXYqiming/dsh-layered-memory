@@ -4,9 +4,9 @@ import { rewriteFile, hashText, readEntries, META_FILE, PENDING_DIR } from "./st
 
 export const REFLECTION_STATE_FILE = "reflection-state.json";
 export const REFLECTION_OUTCOME = {
-	NO_ACTION: "no_action", NEEDS_REVIEW: "needs_review", DONE: "done", FAILED: "failed",
+	NO_ACTION: "no_action", NEEDS_REVIEW: "needs_review", REVIEWED: "reviewed", WAITING_EVIDENCE: "waiting_evidence", FAILED: "failed",
 };
-export const SETTLED_OUTCOMES = new Set(["no_action", "done"]);
+export const SETTLED_OUTCOMES = new Set(["no_action", "reviewed", "waiting_evidence"]);
 
 function readOptional(path, fallback = "") {
 	try { return readFileSync(path, "utf8"); }
@@ -17,8 +17,7 @@ function markdownNames(path) {
 	catch (error) { if (error.code === "ENOENT") return []; throw error; }
 }
 
-// One content revision for scanning, notification and model maintenance. Provenance,
-// access counts, timestamps and reports do not change the semantic memory version.
+// 来源事件、访问次数和维护报告不改变正文版本。
 export function computeContentRevision(root) {
 	const parts = readEntries(root).map(entry => [entry.kind, entry.key, entry.revision]);
 	parts.push(["index.txt", readOptional(join(root, "index.txt"))]);
@@ -48,7 +47,7 @@ export function collectReflectionSignals(root) {
 	return { sops, pending: markdownNames(join(root, PENDING_DIR)).length, indexChars: readOptional(join(root, "index.txt")).trimEnd().length };
 }
 
-// Thresholds request a program scan; only its actionable result may request a model.
+// 数量触发扫描；索引压力另由持久化语义审阅作业决定是否调用模型。
 export function reflectionBuckets(signals, cfg = {}) {
 	const buckets = [];
 	if (cfg.reflectPendingThreshold > 0 && signals.pending >= cfg.reflectPendingThreshold) buckets.push("pending");
@@ -57,14 +56,14 @@ export function reflectionBuckets(signals, cfg = {}) {
 	return buckets;
 }
 export function isSettledRevision(state, revision) {
-	return state.revision === revision && SETTLED_OUTCOMES.has(state.outcome);
+	return state.scanVersion === 2 && state.revision === revision && !state.review?.ready && SETTLED_OUTCOMES.has(state.outcome);
 }
 export function decideReflection({ enabled, cooled, state, revision, signals, cfg }) {
 	const buckets = reflectionBuckets(signals, cfg);
 	if (!enabled) return { notify: false, reason: "disabled", buckets };
 	if (!cooled) return { notify: false, reason: "cooldown", buckets };
-	if (isSettledRevision(state, revision)) return { notify: false, reason: "settled", buckets };
-	if (state.notifiedRevision === revision) return { notify: false, reason: "already-notified", buckets };
+	if (!state.review?.ready && isSettledRevision(state, revision)) return { notify: false, reason: "settled", buckets };
+	if (state.notifiedRevision === revision && state.notifiedReviewRevision === state.review?.revision) return { notify: false, reason: "already-notified", buckets };
 	if (!state.actionable?.needsModelReview) return { notify: false, reason: "no-action", buckets };
 	return { notify: true, reason: "triggered", buckets };
 }
@@ -72,11 +71,10 @@ export function recordMaintainOutcome(root, report) {
 	const actionable = report.actionable;
 	const revision = computeContentRevision(root);
 	const previous = readReflectionState(root);
-	const reviewed = previous.reviewedRevision === revision && SETTLED_OUTCOMES.has(previous.outcome);
-	const changed = (report.dedupe?.removed?.length || 0) + (report.dedupe?.merged?.length || 0);
+	const reviewed = previous.scanVersion === 2 && previous.reviewedRevision === revision;
 	return writeReflectionState(root, {
-		revision,
-		outcome: reviewed ? previous.outcome : actionable.needsModelReview ? "needs_review" : changed ? "done" : "no_action",
+		scanVersion: 2, revision, review: report.review,
+		outcome: actionable.needsModelReview ? "needs_review" : report.review?.waiting ? "waiting_evidence" : reviewed ? "reviewed" : "no_action",
 		actionable,
 		lastScanAt: report.runAt || new Date().toISOString(),
 		lastCounts: { sops: report.stats.sops, pending: report.stats.pending, indexChars: report.index.index_chars_actual ?? report.index.index_chars },

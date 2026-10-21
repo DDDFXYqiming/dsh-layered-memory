@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteFileSync } from "./atomic-write.js";
-import { recordMaintainOutcome, recordMaintainFailure } from "./reflection.js";
+import { recordMaintainOutcome, recordMaintainFailure, readReflectionState, computeContentRevision } from "./reflection.js";
+import { syncReview } from "./review.js";
 import { ARCHIVE_DIR, readEntries, readMeta, computeNamespaceStats, pendingNames, loadAccess, entryHeat, withNsWriteLock, reconcileEntries } from "./store.js";
 import { syncIndex, readIndex, indexChars, L1_MAX_CHARS_DEFAULT } from "./l1index.js";
 import { exactNormalize, tokenize, jaccard } from "./similarity.js";
@@ -77,9 +78,13 @@ export function runMaintain(root, maxChars = L1_MAX_CHARS_DEFAULT, opts = {}) {
 			const stats = computeNamespaceStats(root, entries);
 			const cold = findColdEntries(root, { ...opts, days: opts.coldReviewDays ?? COLD_REVIEW_DAYS, entries });
 			const counts = { pending: pendingNames(root).length, conflicts: dedupe.conflicts.length, exact_duplicates: dedupe.exactDuplicates.length, near_duplicates: dedupe.nearDuplicates.length, merge_candidates: mergeCandidates.length };
-			const reasons = Object.keys(counts).filter(key => counts[key] > 0);
+			const review = syncReview(root, { overLimit: index.over_limit, entries });
+			const previous = readReflectionState(root);
+			const reviewed = previous.scanVersion === 2 && previous.reviewedRevision === computeContentRevision(root);
+			const reasons = reviewed ? [] : Object.keys(counts).filter(key => counts[key] > 0);
+			if (review.ready) reasons.push("semantic_review");
 			const report = {
-				runAt: new Date().toISOString(), consistency, stats, cold,
+				runAt: new Date().toISOString(), consistency, stats, cold, review,
 				index: { ...index, index_chars_actual: indexChars(readIndex(root)) },
 				dedupe: { ...dedupe, nearDuplicates: dedupe.nearDuplicates.slice(0, NEAR_DUPE_REPORT_LIMIT) },
 				mergeCandidates: mergeCandidates.slice(0, NEAR_DUPE_REPORT_LIMIT),

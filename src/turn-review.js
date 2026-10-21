@@ -48,7 +48,7 @@ export function wireTurnReview(ctx, cfg, io) {
 			content: [{ type: "text", text: [
 				"[记忆收尾检查] 本轮在此检查一次。结合刚完成的任务，核对相关旧记忆是否被本轮已验证的事实推翻，或是否获得了值得保留的可复用信息。工具成功返回只是证据线索，不自动代表事实成立。",
 				"遵守用户当前的读写授权。只检查与本轮任务有关的记忆；已有条目先 memory_read({entry,full:true})，再用 memory_update 修正，填写实际验证的 evidence_call_ids，并使用读到的 if_revision。新知识先检索再决定是否创建。",
-				"已经正确记录的内容无需重复写入；证据不足时保留原文，没有值得更新的信息即可结束。沿用当前任务上下文，不重新执行已完成的任务。",
+				"已发现明确冲突但暂时无法完成更新时，可用 memory_review({entry,reason,evidence_call_ids}) 留下具体待办和证据；只有泛泛怀疑时保留原文。已经正确记录的内容无需重复写入，没有值得更新的信息即可结束，沿用当前任务上下文。",
 				`本轮读取的条目：${JSON.stringify(activity.memories)}。最近成功工具的证据引用：${JSON.stringify(activity.evidence)}。`,
 			].join("\n") }],
 		});

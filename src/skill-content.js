@@ -19,6 +19,7 @@ export const SKILL_CONTENT = `${L0_TEMPLATE}
 - memory_write({namespace?,kind:"fact"|"sop",topic,content,evidence,evidence_call_ids?})：只创建新条目，返回entry。
 - memory_update({entry,content,evidence?,evidence_call_ids?,related?})：只更新已有条目，自动保留当前版本；保留原显示标题。
 - memory_expand({entry})：展开该版本的源事件；有后续页时按返回指针继续。
+- memory_review({entry,reason,evidence_call_ids})：已发现明确冲突而暂时无法完成更新时登记复核；提供本会话真实验证调用，维护任务会收到对应证据片段。
 
 新实测证据填写实际验证调用的 evidence_call_ids；来源的session和seq由宿主记录。只调整措辞且没有新证据时沿用原来源。related使用entry数组。
 
@@ -37,5 +38,5 @@ export const SKILL_CONTENT = `${L0_TEMPLATE}
 
 ## 维护
 
-notify模式按内容变化提供可行动事项；auto模式使用独立子代理和明确调用/写入/时间预算。相似度候选需阅读原文确认，归档前指出替代条目。只读到尾页不算读完全文；修改前读取同一revision完整内容。没有待办时结束，不为达到条目数目标而合并。
+任务收尾结合本轮证据检查相关记忆，先纠正旧事实，再考虑新知识。notify模式提供可行动事项；auto模式使用独立子代理按保存的进度分批处理索引压力及明确冲突，受调用/写入/时间预算限制。相似度候选需阅读原文确认，归档前指出替代条目。只读到尾页不算读完全文；修改前读取同一revision完整内容。没有待办时结束，不为达到条目数目标而合并。
 `;

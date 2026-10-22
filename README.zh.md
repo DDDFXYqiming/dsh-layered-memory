@@ -84,7 +84,7 @@ memory_rollback({entry, snapshot_id: "填一个返回的快照 id"})
     autoPending: false
     turnReviewEnabled: true
     turnReviewMinEvidence: 6
-    turnReviewCooldownMinutes: 30
+    maintenanceCooldownMinutes: 30
     reflectionMode: notify
 ```
 
@@ -92,7 +92,7 @@ memory_rollback({entry, snapshot_id: "填一个返回的快照 id"})
 
 `default` 是全局空间，项目索引和默认搜索都把它算进来。字符预算同时管索引条目和手写规则，完整文件仍然可以通过工具读到。宿主用变量传递记忆文本，内容按数据处理，`{{模板括号}}` 会原样保留。
 
-任务收尾核对默认开启，按会话积累去重后的新证据，达到数量与回合门槛且满足冷却间隔后在内部子会话中核对相关记忆，明确的文件改动或失败后成功可提前满足回合条件。存量自动维护由 `reflectionMode: auto` 启用，在原生 fresh-context subagent 上按已保存进度分批整理，并对工具、写入、时间和模型输出设限。细节见[维护指南](docs/automatic-maintenance.zh.md)。
+任务收尾核对默认开启，按会话积累至少三个用户回合的去重新证据，达到数量门槛且满足冷却间隔后在内部子会话中核对相关记忆。存量自动维护由 `reflectionMode: auto` 启用，在原生 fresh-context subagent 上按已保存进度分批整理，并对工具、写入、时间和模型输出设限。两条路径通过 `maintenanceCooldownMinutes` 共用空间级冷却，自动维护自己的写入不算新用户工作。细节见[维护指南](docs/automatic-maintenance.zh.md)。
 
 ## 理解实现
 

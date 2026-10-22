@@ -2,6 +2,16 @@
 
 All notable changes to `@dsh-external/dsh-layered-memory` are documented here.
 
+## [0.10.0-preview.6] - 2026-10-22
+
+- 修正有实际变更的延期维护被展示为普通成功结果的问题；状态栏保留真实变更数，同时显示未完成标记与具体超时或延期原因。
+
+## [0.10.0-preview.5] - 2026-10-22
+
+- 收尾核对与批整理统一使用空间级 `maintenanceCooldownMinutes`，从实际派发台账延续冷却，同一用户回合最多派发一次自动维护。
+- 收尾核对要求至少三个有新证据的用户回合，有界证据窗口保留最近三轮的代表证据；成功显式保存的来源引用也会消费对应证据。
+- 所有自动维护自身写入均排除在日常变更累计之外，批整理按作业归属及实际进度续跑；`memory_maintain({review:true})` 可显式认领存量待办。
+
 ## [0.10.0-preview.4] - 2026-10-22
 
 - 新增可独立启停的“记忆状态”组件（`@dsh-external/dsh-layered-memory-status`），在 Web 输入区底部单行展示当前会话的核对进度、真实变更条目数与上次未完成原因，点击可打开对应原生子会话；GitHub 安装通过两条直接依赖 spec 同时引入主包与 `#path:/lib/status` 子包。

@@ -84,7 +84,7 @@ The bundle includes an independent Memory status component that can be toggled o
     autoPending: false
     turnReviewEnabled: true
     turnReviewMinEvidence: 6
-    turnReviewCooldownMinutes: 30
+    maintenanceCooldownMinutes: 30
     reflectionMode: notify
 ```
 
@@ -92,7 +92,7 @@ Automatic namespaces use persistent workspace identity or canonical root paths. 
 
 The `default` namespace is global. Project indexes and default searches include it. Character budgets cover index entries and manual rules together, while full files stay available through the tools. Host variables carry memory text as data, so literal `{{template brackets}}` survive.
 
-End-of-turn review is enabled by default. It accumulates deduplicated tool evidence per session and starts an internal child session once the evidence threshold, turn count and cooldown interval are met, while a verified file change or tool recovery can satisfy the turn count earlier. Optional batch maintenance runs under `reflectionMode: auto` on native fresh-context subagents with explicit limits on tools, writes, time and model output. See the [maintenance guide](docs/automatic-maintenance.zh.md).
+End-of-turn review is enabled by default. It accumulates deduplicated evidence from at least three user turns and starts an internal child session once the evidence threshold and cooldown are met. Optional batch maintenance runs under `reflectionMode: auto` on native fresh-context subagents with explicit limits on tools, writes, time and model output. Both paths share one namespace cooldown through `maintenanceCooldownMinutes`, and automatic maintenance writes do not count as new user work. See the [maintenance guide](docs/automatic-maintenance.zh.md).
 
 ## Understand the implementation
 

@@ -24,8 +24,10 @@ kind: "package-bundle"
 ## 安装
 
 ```bash
-dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
+dsh plugin --profile web add   github:DDDFXYqiming/dsh-layered-memory   "github:DDDFXYqiming/dsh-layered-memory#path:/lib/status"
 ```
+
+两条 spec 都要装：bundle 贡献两个组件（记忆插件本体与输入区的状态服务）。pnpm 默认阻止传递依赖里的 git 子包（blockExoticSubdeps），所以状态包必须作为直接依赖声明，否则新装只会有第一个组件。
 
 桌面端用它随附的 `dsh` 命令，把 profile 换成 `desktop`。本地开发可以直接链接这个仓库，再让 profile 指向它。`lib/index.js` 只转发导出，实际源码在 `src/`。
 

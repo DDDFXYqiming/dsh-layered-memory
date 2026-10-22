@@ -24,8 +24,10 @@ Layered memory carries facts and operating procedures across sessions in a works
 ## Install
 
 ```bash
-dsh plugin --profile web add github:DDDFXYqiming/dsh-layered-memory
+dsh plugin --profile web add   github:DDDFXYqiming/dsh-layered-memory   "github:DDDFXYqiming/dsh-layered-memory#path:/lib/status"
 ```
+
+Both specifiers are required: the bundle contributes two components (the memory plugin and its input-area status service). pnpm blocks exotic subdependencies, so a nested dependency cannot install the status package; declare it as a direct dependency instead.
 
 Desktop runs the same install through its bundled `dsh` command with the `desktop` profile. For local development, link the repository and point the profile at it. `lib/index.js` only re-exports the source modules in `src/`.
 

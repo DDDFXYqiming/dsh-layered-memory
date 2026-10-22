@@ -13,10 +13,16 @@ function activityItem(record) {
 		namespace: record.namespace,
 		purpose: record.purpose || "batch",
 		status: record.status,
-		childSessionId: record.session || null,
+		sessionId: record.workerId || record.session || null,
+		workerId: record.workerId || null,
+		legacy: !record.workerId && record.provider !== "plugin-worker" && Boolean(record.session),
+		phase: record.phase || null,
 		startedAt: record.startedAt,
 		finishedAt: record.finishedAt || null,
 		changedEntries: changes.size,
+		retainedEntries: (record.entries || []).filter(entry => entry.status === "retained").length,
+		waitingEntries: (record.entries || []).filter(entry => entry.status === "waiting_evidence").length,
+		remainingEntries: record.remaining ? record.remaining.length : null,
 		summary: record.summary || null,
 	};
 }
@@ -49,6 +55,7 @@ export function createActivitySource(ctx, cfg) {
 			running: items.filter(item => item.status === "running" && item.finishedAt === null),
 			latestChanged: finished.find(item => item.changedEntries > 0) || null,
 			latestFailure: ["failed", "deferred"].includes(finished[0]?.status) ? finished[0] : null,
+			records: items,
 		};
 	}
 	function store(state, item) {

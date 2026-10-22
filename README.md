@@ -67,7 +67,7 @@ memory_rollback({entry, snapshot_id: "Choose a returned snapshot id"})
 
 Search covers active entries in the current and global spaces. Pass `include_archived:true` to reach archived content, then read the returned entry. A read reports its line range, total lines, revision, completeness and the next line offset. Global rules and complete indexes remain readable through the `rules`, `index` and `policy` entry kinds.
 
-The bundle includes an independent Memory status component that can be toggled on the plugins page. In the Web UI, a single line below the composer shows review activity, changed entry counts or incomplete review reasons for the current session, and opens the corresponding native child session when clicked.
+The bundle includes an independent Memory status component that can be toggled on the plugins page. A compact line below the Web composer shows current maintenance activity, changed entry counts or incomplete-run reasons. Clicking opens the plugin's detail panel with run records, read-only worker history and a stop control for active maintenance.
 
 ## Configuration
 
@@ -92,7 +92,7 @@ Automatic namespaces use persistent workspace identity or canonical root paths. 
 
 The `default` namespace is global. Project indexes and default searches include it. Character budgets cover index entries and manual rules together, while full files stay available through the tools. Host variables carry memory text as data, so literal `{{template brackets}}` survive.
 
-End-of-turn review is enabled by default. It accumulates deduplicated evidence from at least three user turns and starts an internal child session once the evidence threshold and cooldown are met. Optional batch maintenance runs under `reflectionMode: auto` on native fresh-context subagents with explicit limits on tools, writes, time and model output. Both paths share one namespace cooldown through `maintenanceCooldownMinutes`, and automatic maintenance writes do not count as new user work. See the [maintenance guide](docs/automatic-maintenance.zh.md).
+End-of-turn review is enabled by default. It accumulates deduplicated evidence from at least three user turns and uses a fixed review session once the evidence threshold and cooldown are met. Each parent conversation has at most two maintenance sessions: review uses its current parent model, while batch maintenance requires an explicit `maintenanceLlmProvider` and `maintenanceModel`. Sessions are created on demand and resumed by the same ID, receiving bounded evidence packets and exact source reads; their history can be compacted in place. Optional batch maintenance runs under `reflectionMode: auto` and resumes saved checkpoints. Tool, write, time and output limits reset for each run. Both paths share one namespace cooldown through `maintenanceCooldownMinutes`, and maintenance writes do not count as new user work. Requires DSH 0.2.1-rc.2 or a newer compatible version. See the [maintenance guide](docs/automatic-maintenance.zh.md).
 
 ## Understand the implementation
 

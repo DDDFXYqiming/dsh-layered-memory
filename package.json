@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-layered-memory",
-  "version": "0.10.0-preview.6",
+  "version": "0.10.0-preview.7",
   "description": "DSH 跨会话记忆：项目与全局视图、结构化条目标识、证据溯源、可恢复历史及按需维护。",
   "type": "module",
   "main": "lib/index.js",
@@ -57,34 +57,41 @@
   },
   "engines": {
     "node": ">=22.19",
-    "dsh": ">=0.2.0 <0.3.0"
+    "dsh": ">=0.2.1-rc.2 <0.3.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.0-rc <5 || 4.0.5-alpha.2",
-    "@deepseek-ai/dsh-tools": "* || 0.2.1-alpha.3",
+    "@deepseek-ai/dsh-agent": ">=0.2.1-rc.2 <0.3.0",
+    "@deepseek-ai/dsh-llm": ">=0.2.1-rc.2 <0.3.0",
+    "@deepseek-ai/dsh-session": ">=0.2.1-rc.2 <0.3.0",
+    "@deepseek-ai/dsh-storage-domain": ">=0.2.1-rc.2 <0.3.0",
+    "@deepseek-ai/dsh-subagent": ">=0.2.1-rc.2 <0.3.0",
+    "@deepseek-ai/dsh-tools": ">=0.2.1-rc.2 <0.3.0",
     "@deepseek-ai/schemastery": "* || 3.18.5-alpha.2",
-    "@deepseek-ai/dsh-session-query": "* || 0.2.1-alpha.3",
-    "@deepseek-ai/dsh-typert-protocol": "* || 0.2.1-rc.2"
+    "@deepseek-ai/dsh-session-query": ">=0.2.1-rc.2 <0.3.0",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.2.1-rc.2 <0.3.0"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-llm": "^0.1.6-alpha.2",
-    "@deepseek-ai/dsh-sandbox": "^0.1.6-alpha.2",
-    "@deepseek-ai/dsh-scope": "^0.1.6-alpha.2",
-    "@deepseek-ai/dsh-tools": "^0.1.6-alpha.2",
-    "@deepseek-ai/schemastery": "^3.18.2",
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-agent": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-sandbox": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-scope": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session-query": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-storage-domain": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-subagent": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-typert-protocol": "0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "3.18.5",
     "vitest": "^3.2.7"
-  },
-  "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-session-query": {
-      "optional": true
-    }
   },
   "author": "DDDFXYqiming",
   "homepage": "https://github.com/DDDFXYqiming/dsh-layered-memory#readme",
   "icon": "./icon.svg",
   "dependencies": {
-    "@dsh-external/dsh-layered-memory-status": "file:./lib/status"
+    "@dsh-external/dsh-layered-memory-status": "file:./lib/status",
+    "zod": "^4.4.3"
   },
   "bundleDependencies": [
     "@dsh-external/dsh-layered-memory-status"

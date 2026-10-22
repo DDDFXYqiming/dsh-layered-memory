@@ -12,7 +12,7 @@ import { createActivitySource } from "./activity.js";
 import { readActivation } from "./activation-history.js";
 import { SKILL_NAME, SKILL_DESCRIPTION, SKILL_WHEN_TO_USE, SKILL_CONTENT } from "./skill-content.js";
 
-const inject = ["skills", "tools", "agents", "systemPrompt"];
+const inject = ["skills", "tools", "agents", "agentPresets", "systemPrompt", "sessionQuery", "sessions", "sessionPersistence", "storage", "storageDomain"];
 const accessSchema = () => Schema.union([Schema.const("read"), Schema.const("write")]);
 export const Config = Schema.object({
 	memoryDir: Schema.string().default(""),
@@ -26,7 +26,6 @@ export const Config = Schema.object({
 	turnReviewMinEvidence: Schema.natural().min(1).max(32).default(6),
 	reflectionEnabled: Schema.boolean().default(true),
 	reflectionMode: Schema.union([Schema.const("auto"), Schema.const("notify")]).default("notify"),
-	maintenanceProvider: Schema.string().default("spawn"),
 	maintenanceLlmProvider: Schema.string().default(""),
 	maintenanceModel: Schema.string().default(""),
 	maintenanceReasoningEffort: Schema.string().default(""),
@@ -57,7 +56,7 @@ function apply(ctx, config = {}) {
 	const cfg = Config(Object.fromEntries(Object.entries(config).filter(([, value]) => value !== "")));
 	if (!cfg.memoryDir) cfg.memoryDir = defaultMemDir();
 	const version = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
-	const runtimeInfo = { version, loadedAt: new Date().toISOString(), source: fileURLToPath(import.meta.url), memoryDir: cfg.memoryDir, mode: cfg.reflectionMode, turnReviewEnabled: cfg.turnReviewEnabled, turnReviewDelivery: "caller", turnReviewMinEvidence: cfg.turnReviewMinEvidence, maintenanceCooldownMinutes: cfg.maintenanceCooldownMinutes };
+	const runtimeInfo = { version, loadedAt: new Date().toISOString(), source: fileURLToPath(import.meta.url), memoryDir: cfg.memoryDir, mode: cfg.reflectionMode, turnReviewEnabled: cfg.turnReviewEnabled, turnReviewDelivery: "plugin", turnReviewMinEvidence: cfg.turnReviewMinEvidence, maintenanceCooldownMinutes: cfg.maintenanceCooldownMinutes, maintenanceWorkerLimit: 2 };
 	cfg.runtimeInfo = runtimeInfo;
 	if (Boolean(cfg.maintenanceLlmProvider) !== Boolean(cfg.maintenanceModel)) throw new Error("maintenanceLlmProvider and maintenanceModel must be set together");
 	cfg.heat = { halfLifeDays: cfg.heatHalfLifeDays, recencyWindowMs: cfg.recencyWindowDays * 86400000 };
@@ -75,6 +74,7 @@ function apply(ctx, config = {}) {
 	const disposers = [() => activity.dispose()];
 	const states = new Map();
 	const ensured = new Set();
+	let maintenance;
 	function resolveRoot(cwd) {
 		const namespace = resolveNamespace(cfg, undefined, cwd);
 		const root = nsRoot(cfg.memoryDir, namespace);
@@ -85,18 +85,21 @@ function apply(ctx, config = {}) {
 		}
 		return root;
 	}
+	function scopeFor(agent) {
+		const job = maintenance?.scopeFor(agent);
+		if (job) return { root: job.root, namespace: job.namespace };
+		const cwd = agent?.session.header.cwd;
+		return { root: resolveRoot(cwd), namespace: resolveNamespace(cfg, undefined, cwd) };
+	}
 	resolveRoot();
 	const systemPrompt = ctx.get("systemPrompt");
 	disposers.push(systemPrompt.variable("layered_memory_index", context => {
-		const cwd = context.agent?.session.header.cwd;
-		resolveRoot(cwd);
-		const namespace = resolveNamespace(cfg, undefined, cwd);
+		const { namespace } = scopeFor(context.agent);
 		const { text } = buildCombinedPromptIndex(cfg.memoryDir, namespace, { projectMaxChars: cfg.l1MaxChars, globalMaxChars: cfg.globalL1MaxChars });
 		return text ? `<memory_index source="user-writable">\n${text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")}\n</memory_index>` : "";
 	}));
 	disposers.push(systemPrompt.context({ name: "memory:index", order: 10, text: "{{layered_memory_index}}" }));
 	disposers.push(ctx.skills.register({ name: SKILL_NAME, description: SKILL_DESCRIPTION, whenToUse: SKILL_WHEN_TO_USE, source: "runtime", content: SKILL_CONTENT }));
-	let maintenance;
 	// 只有真正的委派子会话（header.origin === "subagent"）才受 subagentMemoryAccess 约束。
 	// 会话分叉（session.fork）是普通会话的副本：它带 parentSession 表示血缘，但仍是独立运行的根 Agent。
 	const isSubagentSession = agent => agent?.session.header.origin === "subagent";
@@ -119,7 +122,7 @@ function apply(ctx, config = {}) {
 		states.delete(agent);
 	}
 	function activate(agent, mode = "common", access = states.get(agent)?.access || allowedAccess(agent)) {
-		if (maintenance?.owns(agent)) throw new Error("maintenance agents use memory_maintenance_activate");
+		if (maintenance?.owns(agent)) throw new Error("maintenance workers receive memory tools from their active job");
 		if (access === "write" && allowedAccess(agent) !== "write") throw new Error("memory_activate: this agent has read-only memory access");
 		let state = states.get(agent);
 		if (!state) { state = { disposers: new Map(), access }; states.set(agent, state); }
@@ -134,7 +137,7 @@ function apply(ctx, config = {}) {
 		return { activated: true, already, tools: [...state.disposers.keys()], access, mode };
 	}
 	const reviewTurn = createTurnReviewer(ctx, cfg, {
-		scope: agent => ({ root: resolveRoot(agent.session.header.cwd), namespace: resolveNamespace(cfg, undefined, agent.session.header.cwd) }),
+		scope: scopeFor,
 		canWrite: agent => allowedAccess(agent) === "write" && states.get(agent)?.access !== "read" && !maintenance.owns(agent),
 		review: (agent, activity) => maintenance.request(resolveRoot(agent.session.header.cwd), resolveNamespace(cfg, undefined, agent.session.header.cwd), agent, {
 			purpose: "turn_review", trigger: { kind: "automatic", turn: activity.turn, endSeq: activity.endSeq }, activity,
@@ -144,8 +147,12 @@ function apply(ctx, config = {}) {
 		resolveRoot, reviewTurn,
 		onActivity: record => activity.publish(record),
 		canWrite: agent => allowedAccess(agent) === "write" && states.get(agent)?.access !== "read",
-		onMaintenanceRunner(runner) { maintenance = runner; },
-		maintenanceTools(namespace) { return buildTools(ctx, { ...cfg, defaultNamespace: namespace, autoNamespace: false }); },
+		onMaintenanceRunner(runner) { maintenance = runner; ctx.provide("layeredMemoryWorkers", runner.workers); },
+		maintenanceTools(namespace) {
+			return buildTools(ctx, { ...cfg, defaultNamespace: namespace, autoNamespace: false }, {
+				resolveReviewEvidence: (args, exec) => maintenance.scopeFor(exec.agent).evidence.resolveReview(args.evidence_call_ids, exec.signal),
+			});
+		},
 		onSkillResult(exec, result) {
 			if (!result.isError && exec.name === "skill" && exec.arguments.name === "memory" && exec.agent && !maintenance.owns(exec.agent)) activate(exec.agent);
 		},
@@ -154,7 +161,7 @@ function apply(ctx, config = {}) {
 	disposers.push(ctx.on("system-prompt/assemble", async (_assembly, context, next) => {
 		const agent = context.agent;
 		const query = ctx.get("sessionQuery");
-		if (agent && cfg.progressive && query && !restored.has(agent)) {
+		if (agent && cfg.progressive && query && !maintenance.owns(agent) && !restored.has(agent)) {
 			restored.add(agent);
 			const prior = await readActivation(query, agent.session.id);
 			if (prior && !states.has(agent) && !maintenance.owns(agent)) {
@@ -184,13 +191,6 @@ function apply(ctx, config = {}) {
 			return activate(exec.agent, args.mode || "common", args.access || states.get(exec.agent)?.access || allowedAccess(exec.agent));
 		},
 		presentCall: () => ({ card: "generic", title: "激活记忆工具", kind: "execute" }),
-	}));
-	ctx.tools.register(defineTool({
-		name: "memory_maintenance_activate",
-		description: "独立维护子任务使用派发的 maintenance_id 激活受限工具。",
-		parameters: { maintenance_id: { type: "string", required: true } },
-		output: { schema: { type: "object", additionalProperties: true, properties: { activated: { type: "boolean", required: true }, already: { type: "boolean", required: true }, tools: { type: "array", items: { type: "string" }, required: true } } }, render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }] },
-		execute: async (args, exec) => maintenance.activate(exec.agent, args.maintenance_id),
 	}));
 	if (!cfg.progressive) for (const def of allTools) ctx.tools.register(def);
 	console.info(`[dsh-layered-memory] v${version} loaded=${runtimeInfo.loadedAt} source=${runtimeInfo.source} memoryDir=${cfg.memoryDir} mode=${cfg.reflectionMode} autoPending=${cfg.autoPending} access=${cfg.memoryAccess}/${cfg.subagentMemoryAccess}`);

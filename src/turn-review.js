@@ -1,53 +1,36 @@
-import { hashText } from "./store.js";
 import { prepareTurnReview, finishTurnReview } from "./turn-review-state.js";
 import { MEMORY_MUTATIONS } from "./tools.js";
+import { toolResult, verificationEvidence } from "./maintenance-evidence.js";
 
-const CONTROL_TOOLS = new Set(["skill", "todo_write", "render_ui", "validate_dsh_ui", "send_message", "list_agents", "wait_agent", "spawn_teammate", "interrupt_agent", "subagent", "subagent_fork", "present", "ask_user_question", "get_goal", "create_goal", "update_goal", "job_list", "job_kill", "terminal_list", "terminal_open", "terminal_close", "terminal_signal", "working_directory", "create_worktree", "list_subagent_models", "list_mcp_resources", "list_mcp_resource_templates", "bsk_session", "bsk_tabs", "run_code"]);
-const WRITES = new Set(["write", "edit", "apply_patch"]);
 const MEMORY_SAVES = new Set(["memory_write", "memory_update"]);
 
-function canonical(value) {
-	if (Array.isArray(value)) return value.map(canonical);
-	if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])]));
-	return value;
-}
-function resultValue(content) {
-	const text = content.filter(block => block.type === "text").map(block => block.text).join("\n");
-	try { return JSON.parse(text); } catch { return null; }
-}
 function turnActivity(events, turn, endSeq, inheritedEventCount, parentSession) {
 	const end = events.find(event => event.seq === endSeq && event.type === "turn/end");
 	if (end?.data.reason?.kind !== "completed") return null;
 	const start = events.findLastIndex(event => event.type === "turn/start" && event.data.turn === turn && event.seq >= inheritedEventCount && event.seq < endSeq);
 	if (start < 0) return null;
 	const calls = new Map(), memories = new Map(), evidence = [], savedCalls = new Set(), savedSeqs = new Set();
-	const memoryChanges = [], reviewRequests = [];
+	const memoryChanges = [], reviewRequests = [], tasks = [];
 	let userTask = false;
 	function accept(name, args, callId, seq, content, isError, meta) {
 		if (typeof args === "string") args = JSON.parse(args);
-		const value = resultValue(content);
-		const text = content.filter(block => block.type === "text").map(block => block.text).join("\n");
-		const exit = value?.exitCode ?? text.match(/\[exit code: (-?\d+)\]/)?.[1];
-		const failed = isError || exit !== undefined && exit !== null && Number(exit) !== 0 || name === "job_output" && ["failed", "killed"].includes(value?.job?.status);
+		const { value, failed } = toolResult(content, isError, name);
 		if (name === "memory_read" && !failed && !value?.not_found && ["fact", "sop"].includes(args.entry?.kind)) memories.set(JSON.stringify(args.entry), args.entry);
 		if (MEMORY_SAVES.has(name) && !failed) {
 			for (const id of args.evidence_call_ids || []) savedCalls.add(id);
 			if (args.sourceSession === parentSession) for (const sourceSeq of args.sourceSeqs || []) savedSeqs.add(sourceSeq);
 		}
+		if (name === "memory_review" && !failed && value.review.queued) for (const source of value.sources || []) {
+			if (source.sourceSession === parentSession) for (const seq of source.sourceSeqs) savedSeqs.add(seq);
+		}
 		if (MEMORY_MUTATIONS.has(name) && !failed && value.changed) memoryChanges.push({ entry: value.entry, revision: value.revision });
 		if (name === "memory_review" && !failed && value.review.queued && value.review.changed) reviewRequests.push(value.review.id);
-		if (name.startsWith("memory_") || name.startsWith("team_task_") || name.startsWith("schedule_") || CONTROL_TOOLS.has(name)) return;
-		if (failed) { evidence.push({ tool: name, failed: true }); return; }
-		if (["background", "promoted"].includes(value?.kind)) return;
-		if (!content.some(block => block.type !== "text" || block.text.trim())) return;
-		if (name === "job_output" && value && !value.text?.trim()) return;
-		const { description, justification, ...inputs } = args;
-		const actual = name === "job_output" && value ? value.text : value ?? content;
-		evidence.push({ tool: name, call_id: callId, seq, fingerprint: hashText(JSON.stringify(canonical([name, inputs, actual, WRITES.has(name) ? meta ?? null : null]))) });
+		const verified = verificationEvidence(name, args, callId, seq, content, isError, meta);
+		if (verified) evidence.push(verified);
 	}
 	for (const event of events.slice(start + 1)) {
 		if (event.seq >= endSeq) break;
-		if (event.type === "user/message" && event.data.source?.kind === "user") userTask = true;
+		if (event.type === "user/message" && event.data.source?.kind === "user") { userTask = true; tasks.push({ seq: event.seq }); }
 		if (event.type === "tool/call") calls.set(event.data.callId, event.data);
 		if (event.type === "tool/result") {
 			const message = event.data.message, callId = message.source.callId, call = calls.get(callId);
@@ -58,7 +41,7 @@ function turnActivity(events, turn, endSeq, inheritedEventCount, parentSession) 
 			accept(data.name, data.arguments, data.subCallId || data.callId, event.seq, data.content, data.isError, data.meta);
 		}
 	}
-	return userTask ? { turn, endSeq, memories: [...memories.values()], evidence, savedCalls: [...savedCalls], savedSeqs: [...savedSeqs], memoryChanges, reviewRequests } : null;
+	return userTask ? { turn, endSeq, tasks, memories: [...memories.values()], evidence, savedCalls: [...savedCalls], savedSeqs: [...savedSeqs], memoryChanges, reviewRequests } : null;
 }
 
 export function createTurnReviewer(ctx, cfg, io) {

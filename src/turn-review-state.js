@@ -56,8 +56,9 @@ export function prepareTurnReview(root, { parentSession, namespace, activity, en
 				let item = state.pending.find(item => item.fingerprint === event.fingerprint);
 				if (item) {
 					item.sources = [...item.sources, source].slice(-4);
+					item.tasks = [...new Map([...(item.tasks || []), ...activity.tasks].map(task => [task.seq, task])).values()].slice(-4);
 				} else {
-					item = { fingerprint: event.fingerprint, tool: event.tool, turnSeq: activity.endSeq, sources: [source], memories: activity.memories.slice(-16) };
+					item = { fingerprint: event.fingerprint, tool: event.tool, turnSeq: activity.endSeq, sources: [source], memories: activity.memories.slice(-16), tasks: activity.tasks };
 					state.pending.push(item); admitted.add(item.fingerprint);
 				}
 			}
@@ -74,7 +75,9 @@ export function prepareTurnReview(root, { parentSession, namespace, activity, en
 		const id = randomUUID();
 		state.claim = { id, at: now, fingerprints: state.pending.map(item => item.fingerprint) };
 		const memories = new Map(state.pending.flatMap(item => item.memories).map(entry => [JSON.stringify(entry), entry]));
+		const tasks = new Map(state.pending.flatMap(item => item.tasks || []).map(task => [task.seq, task]));
 		return { hasNewEvidence, claim: { id, activity: { turn: activity.turn, endSeq: activity.endSeq, memories: [...memories.values()].slice(-16),
+			tasks: [...tasks.values()],
 			evidence: state.pending.map(item => ({ tool: item.tool, ...item.sources.at(-1) })),
 		} } };
 	});

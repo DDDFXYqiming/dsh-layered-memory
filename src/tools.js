@@ -13,6 +13,7 @@ import { writeMemory, readPending, parsePending, redactSecretLines } from "./mem
 import { enqueueReview, readReviewState } from "./review.js";
 import { runMaintain } from "./maintain.js";
 import { listNamespaces, searchNamespaces } from "./search.js";
+import { readCurrentTurnEvidence, readSuccessfulCallEvidence } from "./maintenance-evidence.js";
 
 export const MEMORY_MUTATIONS = new Set(["memory_write", "memory_update", "memory_accept", "memory_archive", "memory_rollback", "memory_promote"]);
 
@@ -163,25 +164,17 @@ export function buildTools(ctx, cfg, io = {}) {
 			return result(entry, "updated", stored, newEvidence && args.sourceSession === undefined);
 		});
 	}));
-	defs.push(tool("memory_review", "为已发现但尚未解决的新旧事实冲突登记复核。提供确切entry、冲突原因和本会话成功验证工具的call id；宿主保存真实证据片段供维护代理读取。", {
-		entry: refArg, reason: req(str), evidence_call_ids: req(arr(str)),
-	}, { review: req(record) }, async (args, exec) => {
-		if (args.evidence_call_ids.length < 1 || args.evidence_call_ids.length > 4) throw new Error("请提供1至4个验证调用id");
+	defs.push(tool("memory_review", "为尚未解决的新旧事实冲突登记复核。通常只需entry和reason：插件自动绑定当前回合尚未保存的成功验证证据，并返回sources精确引用。已有调用id时可显式选择；先实际验证再登记。", {
+		entry: refArg, reason: req(str), evidence_call_ids: { ...arr(str), description: "可选，1至4个已知成功验证调用id；省略时自动绑定当前回合的真实证据" },
+	}, { review: req(record), sources: req(arr(obj({ sourceSession: req(str), sourceSeqs: req(arr(num)) }))) }, async (args, exec) => {
+		if (args.evidence_call_ids !== undefined && (args.evidence_call_ids.length < 1 || args.evidence_call_ids.length > 4)) throw new Error("evidence_call_ids需要1至4个成功验证调用id");
 		const entry = ref(args.entry), root = rootOf(entry);
-		const { extractSessionEventText } = await import("@deepseek-ai/dsh-session-query");
-		const observation = await ctx.get("sessionQuery").observeSession(exec.agent.session.id, { projectionMode: "none", signal: exec.signal });
-		const evidence = [];
-		try {
-			for (const callId of new Set(args.evidence_call_ids)) {
-				const event = observation.events.findLast(event =>
-					(event.type === "tool/result" && event.data.message.source.callId === callId && !event.data.message.isError) ||
-					(["tool/ptc-dispatch", "tool/code-dispatch"].includes(event.type) && (event.data.subCallId || event.data.callId) === callId && !event.data.isError));
-				if (!event) throw new Error(`本会话未找到成功的证据调用：${callId}`);
-				const text = redactSecretLines(event.type === "tool/result" ? extractSessionEventText(event) : event.data.content.filter(block => block.type === "text").map(block => block.text).join("\n"));
-				evidence.push({ text: text.length > 12000 ? `${text.slice(0, 12000)}\n[证据片段已截断，完整结果见来源事件]` : text, sourceSession: exec.agent.session.id, sourceSeqs: [event.seq] });
-			}
-		} finally { observation[Symbol.dispose](); }
-		return { review: enqueueReview(root, { entry, revision: mustRead(root, entry).revision, reason: redactSecretLines(args.reason), evidence }) };
+		const evidence = io.resolveReviewEvidence
+			? await io.resolveReviewEvidence(args, exec)
+			: args.evidence_call_ids !== undefined
+				? await readSuccessfulCallEvidence(ctx.get("sessionQuery"), exec.agent.session.id, args.evidence_call_ids, exec.signal)
+				: await readCurrentTurnEvidence(ctx.get("sessionQuery"), exec.agent.session.id, exec.signal);
+		return { review: enqueueReview(root, { entry, revision: mustRead(root, entry).revision, reason: redactSecretLines(args.reason), evidence }), sources: evidence.map(({ sourceSession, sourceSeqs }) => ({ sourceSession, sourceSeqs })) };
 	}));
 
 	defs.push(tool("memory_archive", "归档或恢复可见性；归档正文仍可memory_read。replacement可指向已保存的替代entry。", {

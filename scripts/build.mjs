@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, lstatSync, realpathSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, lstatSync, realpathSync, unlinkSync, symlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -15,7 +15,7 @@ const client = read("client/status.js");
 const css = read("client/status.css");
 const statusManifest = {
 	name: STATUS_PACKAGE, version: manifest.version, type: "module", main: "index.js",
-	description: "会话输入区的记忆核对状态与原生子会话详情。", license: manifest.license,
+	description: "会话输入区的记忆维护活动、固定会话与只读历史。", license: manifest.license,
 	exports: { ".": "./index.js", "./client": "./client.js", "./package.json": "./package.json", "./locale/*.json": "./locale/*.json" },
 	files: ["index.js", "status-contract.js", "client.js", "locale", "LICENSE"],
 	peerDependencies: {
@@ -24,7 +24,7 @@ const statusManifest = {
 	},
 	dsh: { client: {
 		platform: "web", immediately: true,
-		inject: ["@deepseek-ai/dsh-api-gateway", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-workspace", "@deepseek-ai/dsh-client-locale"],
+		inject: ["@deepseek-ai/dsh-api-gateway", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-locale"],
 		external: ["@deepseek-ai/dsh-api-gateway/client"],
 	} },
 };
@@ -36,15 +36,18 @@ const artifacts = new Map([
 	["LICENSE", read("LICENSE")],
 ]);
 for (const [language, meta] of Object.entries({
-	zh: { title: "记忆状态", description: "在输入区显示记忆核对进度、真实变更条数与子会话详情。" },
-	en: { title: "Memory status", description: "Memory review activity, changed entry counts, and native child-session details." },
+	zh: { title: "记忆状态", description: "在输入区显示维护进度、真实变更条数、固定会话与只读历史。" },
+	en: { title: "Memory status", description: "Memory maintenance activity, changed entry counts, fixed sessions, and read-only history." },
 })) artifacts.set("locale/" + language + ".json", JSON.stringify({ meta }, null, 2) + "\n");
 
 mkdirSync(output, { recursive: true });
 let linkedOutput = false;
 if (existsSync(bundled)) {
 	if (lstatSync(bundled).isSymbolicLink()) {
-		if (realpathSync(bundled) !== realpathSync(output)) throw new Error("状态依赖链接指向非本项目生成目录");
+		if (realpathSync(bundled) !== realpathSync(output)) {
+			unlinkSync(bundled);
+			symlinkSync(output, bundled, process.platform === "win32" ? "junction" : "dir");
+		}
 		linkedOutput = true;
 	} else if (JSON.parse(readFileSync(join(bundled, "package.json"), "utf8")).name !== STATUS_PACKAGE) {
 		throw new Error("状态依赖目录已有其他包，拒绝覆盖");

@@ -1,9 +1,9 @@
 {
   "name": "@dsh-external/dsh-layered-memory-status",
-  "version": "0.10.0-preview.6",
+  "version": "0.10.0-preview.7",
   "type": "module",
   "main": "index.js",
-  "description": "会话输入区的记忆核对状态与原生子会话详情。",
+  "description": "会话输入区的记忆维护活动、固定会话与只读历史。",
   "license": "MIT",
   "exports": {
     ".": "./index.js",
@@ -20,7 +20,7 @@
   ],
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.0-rc <5 || 4.0.5-alpha.2",
-    "@deepseek-ai/dsh-typert-protocol": "* || 0.2.1-rc.2"
+    "@deepseek-ai/dsh-typert-protocol": ">=0.2.1-rc.2 <0.3.0"
   },
   "dsh": {
     "client": {
@@ -29,7 +29,6 @@
       "inject": [
         "@deepseek-ai/dsh-api-gateway",
         "@deepseek-ai/dsh-client-ui-conversation",
-        "@deepseek-ai/dsh-client-ui-workspace",
         "@deepseek-ai/dsh-client-locale"
       ],
       "external": [

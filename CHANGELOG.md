@@ -2,6 +2,10 @@
 
 All notable changes to `@dsh-external/dsh-layered-memory` are documented here.
 
+## [0.10.0-preview.5]
+
+- 记忆状态客户端 bundle 与宿主服务并入主包：loader 的 client 图按包名归属行，而独立子包在 pnpm 的 tarball 与 link 安装下都拿不到 node_modules 映射（file: 依赖与 bundleDependencies 均不物化映射，2026-10-22 干净目录实测），新鲜安装会让状态 entry 启动即 ERR_MODULE_NOT_FOUND、输入区组件缺失。现单条安装命令即含服务与组件，构建脚本只产出 lib/client.js。
+- 移除 @dsh-external/dsh-layered-memory-status 子包生成与 bundle patch 中的第二条 insert；主包 manifest 增加 dsh.client 与 exports ./client，inject 补 typert 以注册状态服务。
 ## [0.10.0-preview.4]
 
 - 输入区记忆状态按实际内容占宽，空闲时收起，长文在窄窗口内省略显示，保留详情入口与完整提示。

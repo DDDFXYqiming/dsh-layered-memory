@@ -12,6 +12,7 @@ export const MAINTENANCE_HISTORY_FILE = "maintenance-runs.json";
 export const computeReviewRevision = computeContentRevision;
 const READ_TOOLS = new Set(["memory_list", "memory_read", "memory_search", "memory_pending", "memory_stats", "memory_history", "memory_expand"]);
 const WRITE_TOOLS = new Set(["memory_write", "memory_update", "memory_archive", "memory_accept", "memory_index", "memory_discard"]);
+const TURN_TOOLS = new Set(["memory_read", "memory_list", "memory_search", "memory_write", "memory_update", "memory_review"]);
 const req = schema => ({ ...schema, required: true });
 const ENTRY_SCHEMA = { type: "object", additionalProperties: false, properties: { namespace: req({ type: "string" }), kind: req({ type: "string", enum: ["fact", "sop", "pending"] }), key: req({ type: "string" }) } };
 const REVIEW_SCHEMA = { type: "object", additionalProperties: false, properties: { entry: req(ENTRY_SCHEMA), revision: req({ type: "string" }), status: req({ type: "string", enum: ["changed", "retained", "waiting_evidence"] }), reason: req({ type: "string" }) } };
@@ -32,6 +33,10 @@ function acquireLock(root, id) {
 		if (current.id !== id) throw new Error("maintenance lock ownership changed");
 		unlinkSync(path);
 	};
+}
+function readRuns(root) {
+	try { return JSON.parse(readFileSync(join(root, MAINTENANCE_HISTORY_FILE), "utf8")).runs; }
+	catch (error) { if (error.code === "ENOENT") return []; throw error; }
 }
 function saveRun(root, run) {
 	rewriteFile(join(root, MAINTENANCE_HISTORY_FILE), text => {
@@ -71,7 +76,8 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 	let disposed = false;
 	const warn = error => ctx.logger.warn(`[dsh-layered-memory] maintenance: ${error.stack || error}`);
 	function assertLive(job) {
-		if (disposed || job.controller.signal.aborted || !jobs.has(job.id)) throw new Error("maintenance task is no longer active");
+		job.controller.signal.throwIfAborted();
+		if (disposed || !jobs.has(job.id)) throw new Error("maintenance task is no longer active");
 	}
 	function assertUnchanged(job) {
 		if (computeContentRevision(job.root) !== job.expectedRevision) {
@@ -105,9 +111,9 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 		assertLive(job); assertUnchanged(job);
 		if (args.candidates?.some(entry => entry.namespace !== job.namespace)) throw new Error("候选必须属于本空间");
 		const entries = (args.entries || []).map(result => checkResult(job, result));
-		checkpointReview(job.root, { ...args, entries }, job.work);
+		if (!job.turnReview) checkpointReview(job.root, { ...args, entries }, job.work);
 		for (const result of entries) job.results.set(refKey(result.entry), result);
-		job.work = reviewWork(job.root, job.namespace);
+		if (!job.turnReview) job.work = reviewWork(job.root, job.namespace);
 		return { review: job.work, remaining: job.work.jobs.flatMap(task => (task.items || []).filter(item => item.status === "pending").map(item => item.entry)) };
 	}
 	function activate(agent, id) {
@@ -124,7 +130,7 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 			output: { schema: { type: "object", additionalProperties: true }, render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }] },
 			execute: args => checkpoint(job, args),
 		});
-		const defs = [...io.tools(job.namespace).filter(def => READ_TOOLS.has(def.name) || WRITE_TOOLS.has(def.name)), checkpointTool];
+		const defs = [...io.tools(job.namespace).filter(def => job.turnReview ? TURN_TOOLS.has(def.name) : READ_TOOLS.has(def.name) || WRITE_TOOLS.has(def.name)), ...(job.turnReview ? [] : [checkpointTool])];
 		for (const def of defs) {
 			job.disposers.push(agent.ctx.tools.register({
 				...def,
@@ -139,7 +145,16 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 							throw job.controller.signal.reason;
 						}
 						if (args.all_namespaces || (args.namespace && args.namespace !== job.namespace) || (args.entry && args.entry.namespace !== job.namespace)) throw new Error("maintenance is limited to its assigned namespace");
-						const writing = WRITE_TOOLS.has(def.name);
+						const writing = WRITE_TOOLS.has(def.name) || def.name === "memory_review";
+						if (job.turnReview && ["memory_write", "memory_update"].includes(def.name) && args.evidence_call_ids?.length) {
+							const sourceSeqs = args.evidence_call_ids.map(id => {
+								const evidence = job.turnReview.evidence.find(item => item.call_id === id);
+								if (!evidence) throw new Error("收尾更新请引用所提供的父会话验证事件");
+								return evidence.seq;
+							});
+							args = { ...args, sourceSession: job.parentId, sourceSeqs };
+							delete args.evidence_call_ids;
+						}
 						if (writing && job.mutations >= cfg.maintenanceMaxWrites) { job.deferred = true; throw new Error("maintenance write budget reached"); }
 						if (job.work.pressure?.selectionNeeded && (writing || def.name === "memory_read" && ["fact", "sop"].includes(args.entry?.kind))) throw new Error("先浏览激活结果中的完整标题目录并checkpoint候选，再阅读正文");
 						if (["memory_discard", "memory_accept"].includes(def.name)) {
@@ -193,51 +208,61 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 		job.names = defs.map(def => def.name);
 		return { activated: true, already: false, tools: job.names, review: job.work };
 	}
-	async function request(root, namespace, parent, scannedReport) {
+	async function request(root, namespace, parent, scannedReport, turnReview) {
 		if (disposed || roots.has(root) || !parent) return { status: "skipped" };
+		if (turnReview && readRuns(root).some(run => run.purpose === "turn_review" && run.parentSession === parent.session.id && run.endSeq === turnReview.endSeq)) return { status: "skipped" };
 		const previous = io.readState(root);
 		const revision = computeContentRevision(root);
-		if (!hasReviewWork(root) && !scannedReport?.actionable.needsModelReview && previous.scanVersion === 2 && previous.revision === revision && ["reviewed", "no_action", "waiting_evidence"].includes(previous.outcome)) return { status: "skipped" };
+		if (!turnReview && !hasReviewWork(root) && !scannedReport?.actionable.needsModelReview && previous.scanVersion === 2 && previous.revision === revision && ["reviewed", "no_action", "waiting_evidence"].includes(previous.outcome)) return { status: "skipped" };
 		const attempted = Date.parse(previous.agentLastAttemptAt || "");
-		if (Date.now() - attempted < cfg.maintenanceCooldownMinutes * 60000) return { status: "cooldown" };
+		if (!turnReview && Date.now() - attempted < cfg.maintenanceCooldownMinutes * 60000) return { status: "cooldown" };
 		const id = randomUUID();
 		const release = acquireLock(root, id);
 		if (!release) return { status: "busy" };
 		roots.add(root);
 		let job, run, timer;
-		const record = { id, namespace, startedAt: new Date().toISOString(), parentSession: parent.session.id, provider: cfg.maintenanceProvider, status: "scanning", calls: 0, mutations: 0, usage: null };
+		const providerName = turnReview ? "fork" : cfg.maintenanceProvider;
+		const record = { id, namespace, purpose: turnReview ? "turn_review" : "batch", ...(turnReview ? { turn: turnReview.turn, endSeq: turnReview.endSeq } : {}), startedAt: new Date().toISOString(), parentSession: parent.session.id, provider: providerName, status: "scanning", calls: 0, mutations: 0, usage: null };
 		function finish(status, summary) {
-			const review = reviewWork(root, namespace);
+			const review = turnReview ? { jobs: [], ready: false, waiting: 0 } : reviewWork(root, namespace);
 			Object.assign(record, { status, summary, finishedAt: new Date().toISOString(), calls: job?.calls || 0, mutations: job?.mutations || 0, session: job?.agentId || null, usage: usage.get(job?.session?.id) || null,
 				entries: [...(job?.results.values() || [])], changes: [...(job?.changes || [])], remaining: review.jobs.flatMap(task => (task.items || []).filter(item => item.status === "pending").map(item => item.entry)), reviewRevision: review.revision });
 			saveRun(root, record);
-			io.writeState(root, { scanVersion: 2, revision: computeContentRevision(root), ...(["reviewed", "waiting_evidence"].includes(status) ? { reviewedRevision: computeContentRevision(root) } : {}),
+			if (!turnReview) io.writeState(root, { scanVersion: 2, revision: computeContentRevision(root), ...(["reviewed", "waiting_evidence"].includes(status) ? { reviewedRevision: computeContentRevision(root) } : {}),
 				review: { ready: review.ready, waiting: review.waiting, revision: review.revision }, outcome: status === "failed" ? "failed" : status === "deferred" ? "needs_review" : status, agentStatus: status, agentLastFinishedAt: record.finishedAt, agentLastAttemptAt: record.startedAt, agentSession: record.session, agentCalls: record.calls, agentMutations: record.mutations, agentSummary: summary, agentUsage: record.usage, agentError: status === "failed" ? summary : null });
 			console.info(`[dsh-layered-memory] maintenance ${JSON.stringify(record)}`);
 			return { status, run: record };
 		}
 		try {
-			const report = scannedReport || io.maintain(root);
+			const report = turnReview ? { actionable: { needsModelReview: true, reasons: ["turn_review"] } } : scannedReport || io.maintain(root);
 			if (!report.actionable.needsModelReview) return finish("no_action", "程序扫描没有需要模型处理的事项");
 			const service = ctx.get("subagents");
-			const provider = service?.getProvider(cfg.maintenanceProvider);
+			const provider = service?.getProvider(providerName);
 			const activationApi = typeof service?.startActivation === "function";
-			if (!provider || provider.inheritsParentContext !== false || !provider.capabilities.outputSchema || !provider.capabilities.agentOptions
-				|| (activationApi ? typeof provider.prepareContinuable !== "function" : !provider.capabilities.toolFilter)) {
-				throw new Error(`maintenance provider '${cfg.maintenanceProvider}' must support fresh local context, restricted tools, outputSchema and agentOptions`);
+			if (!provider || provider.inheritsParentContext !== Boolean(turnReview) || !provider.capabilities.outputSchema || !provider.capabilities.agentOptions
+				|| (activationApi ? typeof provider.prepareContinuable !== "function" : Boolean(turnReview) || !provider.capabilities.toolFilter)) {
+				throw new Error(`维护提供方 ${providerName} 不支持本次任务要求的上下文与原生受限子代理接口`);
 			}
 			const agentOptions = { maxTokens: cfg.maintenanceMaxTokens };
-			if (cfg.maintenanceModel) Object.assign(agentOptions, { provider: cfg.maintenanceLlmProvider, model: cfg.maintenanceModel });
-			if (cfg.maintenanceReasoningEffort) agentOptions.reasoningEffort = cfg.maintenanceReasoningEffort;
+			if (!turnReview && cfg.maintenanceModel) Object.assign(agentOptions, { provider: cfg.maintenanceLlmProvider, model: cfg.maintenanceModel });
+			if (!turnReview && cfg.maintenanceReasoningEffort) agentOptions.reasoningEffort = cfg.maintenanceReasoningEffort;
 			record.requestedModel = agentOptions;
 			record.status = "running";
 			saveRun(root, record);
-			io.writeState(root, { agentStatus: "running", agentLastAttemptAt: record.startedAt, agentError: null });
-			job = { id, root, namespace, parentId: parent.session.id, controller: new AbortController(), expectedRevision: computeContentRevision(root), calls: 0, mutations: 0, reads: new Map(), readVersions: new Map(), changes: new Map(), results: new Map(), work: reviewWork(root, namespace), saved: new Set(), links: new Map(), queue: Promise.resolve(), disposers: [], agentId: null, session: null, names: [], childId: activationApi ? `memory-maintenance-${id}` : null };
+			if (!turnReview) io.writeState(root, { agentStatus: "running", agentLastAttemptAt: record.startedAt, agentError: null });
+			job = { id, root, namespace, parentId: parent.session.id, controller: new AbortController(), expectedRevision: computeContentRevision(root), calls: 0, mutations: 0, reads: new Map(), readVersions: new Map(), changes: new Map(), results: new Map(), turnReview, work: turnReview ? { jobs: [], ready: false, waiting: 0 } : reviewWork(root, namespace), saved: new Set(), links: new Map(), queue: Promise.resolve(), disposers: [], agentId: null, session: null, names: [], childId: activationApi ? `memory-maintenance-${id}` : null };
 			jobs.set(id, job);
 			timer = setTimeout(() => { job.deferred = true; job.controller.abort(new Error("maintenance timeout")); }, cfg.maintenanceTimeoutSeconds * 1000);
 			timer.unref();
-			const text = [
+			const text = turnReview ? [
+				"你是已完成用户任务的内部记忆核对分支，继承的主任务已经交付。仅核对该任务的已验证事实及相关记忆。结果通过结构化返回交给插件。",
+				`先调用 memory_maintenance_activate({maintenance_id:${JSON.stringify(id)}})。空间 ${namespace}；最多 ${cfg.maintenanceMaxCalls} 次工具调用、${cfg.maintenanceMaxWrites} 次变更。`,
+				"已有条目先完整读取当前版本，再决定是否更新；仅当本轮真实证据推翻旧事实时纠正原条目。已有内容和来源正确时保留，新知识先检索再判断可复用性。",
+				"遵守原用户任务的读写约束；核对本轮相关内容即可。没有新信息时直接结构化完成，entries为空。缺少证据时保留原文，明确冲突可用memory_review登记。",
+				`事实来源属于父会话 ${parent.session.id}。写入新证据使用该 sourceSession 和下面验证事件的 sourceSeqs；也可使用所列 evidence_call_ids，插件会绑定回父会话。`,
+				`本轮相关条目及成功工具线索（工具成功不自动代表结论成立）：${JSON.stringify(turnReview)}`,
+				"完整读取后修改的既有条目，在entries中返回{entry,revision:读取时原版本,status:changed,reason}；读过且保留可记retained。最后返回{status:complete或deferred,summary,entries,remaining:[]}。",
+			].join("\n") : [
 				"你负责独立的记忆维护，只处理指定命名空间。",
 				`先调用 memory_maintenance_activate({maintenance_id:${JSON.stringify(id)}})。命名空间 ${namespace}；最多 ${cfg.maintenanceMaxCalls} 次工具调用、${cfg.maintenanceMaxWrites} 次变更。`,
 				"激活结果 review 包含持久化作业、完整标题目录和可读证据短包。先浏览全部标题，索引作业需选1至8个最值得核查的候选，调用 memory_maintenance_checkpoint({candidates,selectionReason}) 保存选择，再逐个读取正文。已有候选则接续剩余项。",
@@ -253,7 +278,7 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 			].join("\n");
 			if (activationApi) {
 				run = await service.startActivation({
-					provider: cfg.maintenanceProvider, childId: job.childId, label: "记忆自动整理", delivery: "caller", signal: job.controller.signal,
+					provider: providerName, childId: job.childId, label: turnReview ? "本轮记忆核对" : "记忆自动整理", delivery: "caller", signal: job.controller.signal,
 					request: { parent, prompt: [{ type: "text", text }], outputSchema: RESULT_SCHEMA, agentOptions },
 				});
 				// 新接口的 signal 只负责发布前取消；发布后的超时由精确 activation 的 dispose 负责。
@@ -282,9 +307,9 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 			for (const [key, changes] of job.changes) {
 				if (changes[0].before !== null && job.results.get(key)?.status !== "changed") throw new Error("已修改条目缺少结构化 changed 结果");
 			}
-			const status = outcome.status === "deferred" || progress.review.ready ? "deferred" : progress.review.waiting ? "waiting_evidence" : "reviewed";
+			const status = outcome.status === "deferred" || progress.review.ready ? "deferred" : progress.review.waiting ? "waiting_evidence" : turnReview && !job.mutations ? "unchanged" : "reviewed";
 			const finished = finish(status, outcome.summary);
-			io.maintain(root);
+			if (!turnReview) io.maintain(root);
 			return finished;
 		} catch (error) {
 			warn(error);
@@ -303,6 +328,8 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 	}
 	return {
 		request, activate,
+		requestTurn(root, namespace, parent, activity) { return request(root, namespace, parent, undefined, activity); },
+		isBatch(agent) { return [...jobs.values()].some(job => !job.turnReview && (job.agentId === agent?.id || job.childId === agent?.id)); },
 		owns(agent) { return [...jobs.values()].some(job => job.agentId === agent?.id || job.childId === agent?.id); },
 		namespaceFor(agent) { return [...jobs.values()].find(job => job.agentId === agent?.id)?.namespace ?? null; },
 		dispose() { disposed = true; stopCreated(); stopUsage(); for (const job of jobs.values()) job.controller.abort(new Error("maintenance plugin disposed")); },

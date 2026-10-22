@@ -1,11 +1,9 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { rewriteFile, hashText, readEntries, META_FILE, PENDING_DIR } from "./store.js";
+import { readReviewState } from "./review.js";
 
 export const REFLECTION_STATE_FILE = "reflection-state.json";
-export const REFLECTION_OUTCOME = {
-	NO_ACTION: "no_action", NEEDS_REVIEW: "needs_review", REVIEWED: "reviewed", WAITING_EVIDENCE: "waiting_evidence", FAILED: "failed",
-};
 export const SETTLED_OUTCOMES = new Set(["no_action", "reviewed", "waiting_evidence"]);
 
 function readOptional(path, fallback = "") {
@@ -58,22 +56,33 @@ export function reflectionBuckets(signals, cfg = {}) {
 export function isSettledRevision(state, revision) {
 	return state.scanVersion === 2 && state.revision === revision && !state.review?.ready && SETTLED_OUTCOMES.has(state.outcome);
 }
-export function decideReflection({ enabled, cooled, state, revision, signals, cfg }) {
-	const buckets = reflectionBuckets(signals, cfg);
-	if (!enabled) return { notify: false, reason: "disabled", buckets };
-	if (!cooled) return { notify: false, reason: "cooldown", buckets };
-	if (!state.review?.ready && isSettledRevision(state, revision)) return { notify: false, reason: "settled", buckets };
-	if (state.notifiedRevision === revision && state.notifiedReviewRevision === state.review?.revision) return { notify: false, reason: "already-notified", buckets };
-	if (!state.actionable?.needsModelReview) return { notify: false, reason: "no-action", buckets };
-	return { notify: true, reason: "triggered", buckets };
+function computeWorkRevision(root, report) {
+	const review = readReviewState(root);
+	const versions = new Map(readEntries(root).map(entry => [JSON.stringify([entry.kind, entry.key]), entry.revision]));
+	const entryVersion = (kind, key) => [kind, key, versions.get(JSON.stringify([kind, key])) ?? null];
+	const sorted = rows => rows.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+	const jobs = [review.pressure, ...review.conflicts].filter(job => job && job.status !== "complete").map(job => [
+		job.id, job.kind, job.status, job.items === null ? null : sorted(job.items.map(item => [item.entry.kind, item.entry.key, item.revision, item.status])),
+		job.evidence || [],
+	]);
+	const candidates = [
+		...(report.dedupe?.conflicts || []).map(item => ["conflict", entryVersion(item.kind, item.name)]),
+		...(report.dedupe?.exactDuplicates || []).map(item => ["exact", sorted([entryVersion(item.kind, item.a), entryVersion(item.kind, item.b)])]),
+		...(report.dedupe?.nearDuplicates || []).map(item => ["near", sorted([entryVersion(item.kind, item.a), entryVersion(item.kind, item.b)])]),
+		...(report.mergeCandidates || []).map(item => ["merge", sorted([entryVersion(item.kind, item.a), entryVersion(item.kind, item.b)])]),
+	];
+	const pending = markdownNames(join(root, PENDING_DIR)).map(name => [name, hashText(readOptional(join(root, PENDING_DIR, name)))]);
+	return hashText(JSON.stringify([sorted(jobs), sorted(candidates), pending]));
 }
 export function recordMaintainOutcome(root, report) {
 	const actionable = report.actionable;
 	const revision = computeContentRevision(root);
 	const previous = readReflectionState(root);
 	const reviewed = previous.scanVersion === 2 && previous.reviewedRevision === revision;
+	const workRevision = computeWorkRevision(root, report);
 	return writeReflectionState(root, {
-		scanVersion: 2, revision, review: report.review,
+		scanVersion: 2, revision, review: report.review, workRevision,
+		...(workRevision !== previous.workRevision ? { workChangedAt: report.runAt || new Date().toISOString() } : {}),
 		outcome: actionable.needsModelReview ? "needs_review" : report.review?.waiting ? "waiting_evidence" : reviewed ? "reviewed" : "no_action",
 		actionable,
 		lastScanAt: report.runAt || new Date().toISOString(),

@@ -7,7 +7,7 @@ import { NEAR_DUPE_THRESHOLD, MERGE_CANDIDATE_THRESHOLD, MIN_TOKENS_FOR_FUZZY, C
 import { L1_MAX_CHARS_DEFAULT, buildCombinedPromptIndex } from "./l1index.js";
 import { buildTools } from "./tools.js";
 import { wireEvents } from "./events.js";
-import { wireTurnReview } from "./turn-review.js";
+import { createTurnReviewer } from "./turn-review.js";
 import { readActivation } from "./activation-history.js";
 import { SKILL_NAME, SKILL_DESCRIPTION, SKILL_WHEN_TO_USE, SKILL_CONTENT } from "./skill-content.js";
 
@@ -55,7 +55,7 @@ function apply(ctx, config = {}) {
 	const cfg = Config(Object.fromEntries(Object.entries(config).filter(([, value]) => value !== "")));
 	if (!cfg.memoryDir) cfg.memoryDir = defaultMemDir();
 	const version = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
-	const runtimeInfo = { version, loadedAt: new Date().toISOString(), source: fileURLToPath(import.meta.url), memoryDir: cfg.memoryDir, mode: cfg.reflectionMode, turnReviewEnabled: cfg.turnReviewEnabled };
+	const runtimeInfo = { version, loadedAt: new Date().toISOString(), source: fileURLToPath(import.meta.url), memoryDir: cfg.memoryDir, mode: cfg.reflectionMode, turnReviewEnabled: cfg.turnReviewEnabled, turnReviewDelivery: "caller" };
 	cfg.runtimeInfo = runtimeInfo;
 	if (Boolean(cfg.maintenanceLlmProvider) !== Boolean(cfg.maintenanceModel)) throw new Error("maintenanceLlmProvider and maintenanceModel must be set together");
 	cfg.heat = { halfLifeDays: cfg.heatHalfLifeDays, recencyWindowMs: cfg.recencyWindowDays * 86400000 };
@@ -125,18 +125,18 @@ function apply(ctx, config = {}) {
 		for (const def of selected) if (!state.disposers.has(def.name)) state.disposers.set(def.name, agent.ctx.tools.register(def));
 		return { activated: true, already, tools: [...state.disposers.keys()], access, mode };
 	}
+	const reviewTurn = createTurnReviewer(ctx, cfg, {
+		canWrite: agent => allowedAccess(agent) === "write" && states.get(agent)?.access !== "read" && !maintenance.owns(agent),
+		review: (agent, activity) => maintenance.requestTurn(resolveRoot(agent.session.header.cwd), resolveNamespace(cfg, undefined, agent.session.header.cwd), agent, activity),
+	});
 	disposers.push(wireEvents(ctx, cfg, {
-		resolveRoot,
+		resolveRoot, reviewTurn,
 		canWrite: agent => allowedAccess(agent) === "write" && states.get(agent)?.access !== "read",
 		onMaintenanceRunner(runner) { maintenance = runner; },
 		maintenanceTools(namespace) { return buildTools(ctx, { ...cfg, defaultNamespace: namespace, autoNamespace: false }); },
 		onSkillResult(exec, result) {
 			if (!result.isError && exec.name === "skill" && exec.arguments.name === "memory" && exec.agent && !maintenance.owns(exec.agent)) activate(exec.agent);
 		},
-	}));
-	disposers.push(wireTurnReview(ctx, cfg, {
-		canWrite: agent => allowedAccess(agent) === "write" && states.get(agent)?.access !== "read" && !maintenance.owns(agent),
-		activate: agent => activate(agent),
 	}));
 	const restored = new WeakSet();
 	disposers.push(ctx.on("system-prompt/assemble", async (_assembly, context, next) => {
@@ -173,7 +173,7 @@ function apply(ctx, config = {}) {
 		},
 		presentCall: () => ({ card: "generic", title: "激活记忆工具", kind: "execute" }),
 	}));
-	if (cfg.reflectionMode === "auto") ctx.tools.register(defineTool({
+	if (cfg.turnReviewEnabled || cfg.reflectionMode === "auto") ctx.tools.register(defineTool({
 		name: "memory_maintenance_activate",
 		description: "独立维护子任务使用派发的 maintenance_id 激活受限工具。",
 		parameters: { maintenance_id: { type: "string", required: true } },

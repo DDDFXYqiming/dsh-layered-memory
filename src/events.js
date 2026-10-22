@@ -18,6 +18,7 @@ export function wireEvents(ctx, cfg, io) {
 		readState: readReflectionState, writeState: writeReflectionState, slugify, entryExists, entryContentRevision,
 		maintain: root => runMaintain(root, cfg.l1MaxChars, cfg.maintainOpts),
 		tools: namespace => io.maintenanceTools(namespace),
+		onActivity: io.onActivity,
 	});
 	io.onMaintenanceRunner(maintenance);
 	const sessions = new Map();

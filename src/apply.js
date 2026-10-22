@@ -8,6 +8,7 @@ import { L1_MAX_CHARS_DEFAULT, buildCombinedPromptIndex } from "./l1index.js";
 import { buildTools } from "./tools.js";
 import { wireEvents } from "./events.js";
 import { createTurnReviewer } from "./turn-review.js";
+import { createActivitySource } from "./activity.js";
 import { readActivation } from "./activation-history.js";
 import { SKILL_NAME, SKILL_DESCRIPTION, SKILL_WHEN_TO_USE, SKILL_CONTENT } from "./skill-content.js";
 
@@ -22,6 +23,8 @@ export const Config = Schema.object({
 	autoNamespace: Schema.boolean().default(true),
 	autoPending: Schema.boolean().default(false),
 	turnReviewEnabled: Schema.boolean().default(true),
+	turnReviewMinEvidence: Schema.natural().min(1).max(32).default(6),
+	turnReviewCooldownMinutes: Schema.natural().default(30),
 	reflectionEnabled: Schema.boolean().default(true),
 	reflectionMode: Schema.union([Schema.const("auto"), Schema.const("notify")]).default("notify"),
 	maintenanceProvider: Schema.string().default("spawn"),
@@ -55,20 +58,22 @@ function apply(ctx, config = {}) {
 	const cfg = Config(Object.fromEntries(Object.entries(config).filter(([, value]) => value !== "")));
 	if (!cfg.memoryDir) cfg.memoryDir = defaultMemDir();
 	const version = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
-	const runtimeInfo = { version, loadedAt: new Date().toISOString(), source: fileURLToPath(import.meta.url), memoryDir: cfg.memoryDir, mode: cfg.reflectionMode, turnReviewEnabled: cfg.turnReviewEnabled, turnReviewDelivery: "caller" };
+	const runtimeInfo = { version, loadedAt: new Date().toISOString(), source: fileURLToPath(import.meta.url), memoryDir: cfg.memoryDir, mode: cfg.reflectionMode, turnReviewEnabled: cfg.turnReviewEnabled, turnReviewDelivery: "caller", turnReviewMinEvidence: cfg.turnReviewMinEvidence, turnReviewCooldownMinutes: cfg.turnReviewCooldownMinutes };
 	cfg.runtimeInfo = runtimeInfo;
 	if (Boolean(cfg.maintenanceLlmProvider) !== Boolean(cfg.maintenanceModel)) throw new Error("maintenanceLlmProvider and maintenanceModel must be set together");
 	cfg.heat = { halfLifeDays: cfg.heatHalfLifeDays, recencyWindowMs: cfg.recencyWindowDays * 86400000 };
 	cfg.maintainOpts = { nearDupeThreshold: cfg.nearDupeThreshold, mergeCandidateThreshold: cfg.mergeCandidateThreshold, minTokensForFuzzy: cfg.minTokensForFuzzy, heat: cfg.heat, coldReviewDays: cfg.coldReviewDays };
 	const workspaceRoots = new Map();
 	cfg.workspaceRootFor = cwd => workspaceRoots.get(cwd) || cwd;
+	const activity = createActivitySource(ctx, cfg);
+	ctx.provide("layeredMemoryActivity", activity);
 	async function prepareWorkspace(agent) {
 		const cwd = agent.session.header.cwd;
 		if (!cfg.autoNamespace || cfg.defaultNamespace || !cwd || workspaceRoots.has(cwd)) return;
 		const workspace = await ctx.get("workspaces")?.resolveByPath(cwd);
 		workspaceRoots.set(cwd, workspace?.path || cwd);
 	}
-	const disposers = [];
+	const disposers = [() => activity.dispose()];
 	const states = new Map();
 	const ensured = new Set();
 	function resolveRoot(cwd) {
@@ -126,11 +131,13 @@ function apply(ctx, config = {}) {
 		return { activated: true, already, tools: [...state.disposers.keys()], access, mode };
 	}
 	const reviewTurn = createTurnReviewer(ctx, cfg, {
+		scope: agent => ({ root: resolveRoot(agent.session.header.cwd), namespace: resolveNamespace(cfg, undefined, agent.session.header.cwd) }),
 		canWrite: agent => allowedAccess(agent) === "write" && states.get(agent)?.access !== "read" && !maintenance.owns(agent),
 		review: (agent, activity) => maintenance.requestTurn(resolveRoot(agent.session.header.cwd), resolveNamespace(cfg, undefined, agent.session.header.cwd), agent, activity),
 	});
 	disposers.push(wireEvents(ctx, cfg, {
 		resolveRoot, reviewTurn,
+		onActivity: record => activity.publish(record),
 		canWrite: agent => allowedAccess(agent) === "write" && states.get(agent)?.access !== "read",
 		onMaintenanceRunner(runner) { maintenance = runner; },
 		maintenanceTools(namespace) { return buildTools(ctx, { ...cfg, defaultNamespace: namespace, autoNamespace: false }); },

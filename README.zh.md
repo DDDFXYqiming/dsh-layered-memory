@@ -79,6 +79,8 @@ memory_rollback({entry, snapshot_id: "填一个返回的快照 id"})
     subagentMemoryAccess: read
     autoPending: false
     turnReviewEnabled: true
+    turnReviewMinEvidence: 6
+    turnReviewCooldownMinutes: 30
     reflectionMode: notify
 ```
 
@@ -86,7 +88,11 @@ memory_rollback({entry, snapshot_id: "填一个返回的快照 id"})
 
 `default` 是全局空间，项目索引和默认搜索都把它算进来。字符预算同时管索引条目和手写规则，完整文件仍然可以通过工具读到。宿主用变量传递记忆文本，内容按数据处理，`{{模板括号}}` 会原样保留。
 
-相关用户任务完成后，内部核对分支默认利用该任务上下文和证据纠正旧事实或保存新经验，结果留在维护记录中；`turnReviewEnabled: false` 可关闭。独立自动维护由 `reflectionMode: auto` 启用，使用原生 fresh-context subagent，并限制工具调用、写入、时间和模型输出。细节见[维护指南](docs/automatic-maintenance.zh.md)。
+收尾核对按会话积累新证据：默认至少 6 条，跨 3 个有新证据的用户回合后启动；明确的文件改动或失败后成功可以提前满足回合条件，冷却间隔仍为 30 分钟。重复结果和已绑定来源保存到记忆的证据会去重。内部核对利用任务上下文纠正旧事实或保存新经验，`turnReviewEnabled: false` 可关闭。独立自动维护由 `reflectionMode: auto` 启用，使用原生 fresh-context subagent，并限制工具调用、写入、时间和模型输出。细节见[维护指南](docs/automatic-maintenance.zh.md)。
+
+## 查看维护状态
+
+插件包含“分层记忆”和可独立启停的“记忆状态”组件。Web 输入区的一行状态显示正在核对、真实变更条数或上次未完成标记，悬浮提示包含失败原因；点击可打开对应原生子会话。状态按当前会话更新，详细过程保存在维护记录中。
 
 ## 理解实现
 

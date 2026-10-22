@@ -172,7 +172,7 @@ export function buildTools(ctx, cfg) {
 		try {
 			for (const callId of new Set(args.evidence_call_ids)) {
 				const event = observation.events.findLast(event =>
-					(event.type === "tool/result" && event.data.message.source.callId === callId && !event.data.message.source.isError) ||
+					(event.type === "tool/result" && event.data.message.source.callId === callId && !event.data.message.isError) ||
 					(["tool/ptc-dispatch", "tool/code-dispatch"].includes(event.type) && (event.data.subCallId || event.data.callId) === callId && !event.data.isError));
 				if (!event) throw new Error(`本会话未找到成功的证据调用：${callId}`);
 				const text = redactSecretLines(event.type === "tool/result" ? extractSessionEventText(event) : event.data.content.filter(block => block.type === "text").map(block => block.text).join("\n"));

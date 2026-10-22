@@ -14,7 +14,7 @@ export async function readActivation(sessionQuery, sessionId) {
 		for (const event of observation.events) {
 			if (event.seq < observation.inheritedEventCount) continue;
 			if (event.type === "tool/call") calls.set(event.data.callId, event.data);
-			if (event.type === "tool/result" && !event.data.message.source.isError) {
+			if (event.type === "tool/result" && !event.data.message.isError) {
 				const call = calls.get(event.data.message.source.callId);
 				if (call) accept(call.name, call.arguments);
 			}

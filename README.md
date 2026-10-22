@@ -85,7 +85,11 @@ Automatic namespaces use persistent workspace identity or canonical root paths. 
 
 The `default` namespace is global. Project indexes and default searches include it. Character budgets cover index entries and manual rules together, while full files stay available through the tools. Host variables carry memory text as data, so literal `{{template brackets}}` survive.
 
-Automatic model maintenance is optional. It runs on native fresh-context subagents with explicit limits on tools, writes, time and model output. When maintenance finds nothing actionable, it finishes without spending a model call. See the [maintenance guide](docs/automatic-maintenance.zh.md).
+End-of-turn review accumulates fresh evidence per session: by default, six items across three user turns, with a 30-minute dispatch interval. A verified change or recovery can satisfy the turn requirement earlier. Repeated results and evidence already saved to memory are deduplicated. Completed reviews consume their evidence; unfinished reviews retain it for later work. Independent batch maintenance uses native fresh-context subagents with limits on tools, writes, time and output. See the [maintenance guide](docs/automatic-maintenance.zh.md).
+
+## Maintenance status
+
+The plugin includes an independent Memory status component. A single line below the Web composer shows review activity, actual changed entry counts, and the last incomplete review. Its tooltip includes the failure reason, and clicking opens the corresponding native child session.
 
 ## Understand the implementation
 

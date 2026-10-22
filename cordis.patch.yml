@@ -3,5 +3,3 @@
 - insert:
     - id: dsh-layered-memory
       name: '@dsh-external/dsh-layered-memory'
-    - id: dsh-layered-memory-status
-      name: '@dsh-external/dsh-layered-memory-status'

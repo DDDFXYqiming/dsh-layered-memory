@@ -2,321 +2,149 @@
 
 All notable changes to `@dsh-external/dsh-layered-memory` are documented here.
 
-## [0.10.0-preview.4]
+## [0.10.0-preview.4] - 2026-10-22
 
-- 输入区记忆状态按实际内容占宽，空闲时收起，长文在窄窗口内省略显示，保留详情入口与完整提示。
+- 新增可独立启停的“记忆状态”组件（`@dsh-external/dsh-layered-memory-status`），在 Web 输入区底部单行展示当前会话的核对进度、真实变更条目数与上次未完成原因，点击可打开对应原生子会话；GitHub 安装通过两条直接依赖 spec 同时引入主包与 `#path:/lib/status` 子包。
+- 状态组件按实际内容占宽，空闲时收起零占位，窄视口内单行省略长文并保留完整悬浮提示与详情入口；会话切换与历史浏览时释放旧订阅并淘汰缓存。
+- 任务收尾核对按会话与空间积累工具证据指纹，默认至少 6 条新证据、覆盖 3 个有效回合、派发间隔至少 30 分钟；重复结果与已绑定来源保存的证据自动去重，明确的文件改动或同工具失败后成功可提前满足回合条件。
+- 派发冷却与证据消费分离，完整结束后消费该批证据，失败、超时或延期时保留待处理证据并记录派发冷却。
+- 按宿主 `message.isError` 与进程退出码识别失败工具调用，保留错误语义，冲突复核仅接受成功调用证据。
+- 维护结案版本由宿主根据真实读取与写入回执推导，分别核验新增条目与已有条目修改。
 
-## [0.10.0-preview.3]
+## [0.9.1] - 2026-10-22
 
-- 按宿主实际的工具失败字段判断证据与激活结果，失败调用保留错误语义。
-- 派发冷却与证据消费分开记录，未完成核对保留待处理证据，完整结束后再消费。
-- 状态行说明上次未完成，并在提示中显示对应原因。
-- 会话切换释放状态订阅，浏览历史时同样执行状态缓存淘汰。
+- 任务收尾核对采用原生 `fork` 子会话继承已完成任务上下文，通过 `caller` 交付在内部保存结果，主会话保留用户任务的回答。
+- 收尾触发限定为有相关证据的真实用户任务，纯状态查询、闲聊、插件轮次和只读访问保持原样，事实证据绑定父会话。
+- `notify` 模式仅在状态台账中记录可查询待办，待办身份独立于全库内容修订；`auto` 模式保留独立分批执行与预算续跑。
 
-## [0.10.0-preview.2]
+## [0.9.0] - 2026-10-21
 
-- 新增独立“记忆状态”组件，在输入区显示运行阶段与真实变更条目数，并提供原生子会话详情入口。
-- 收尾核对默认按会话积累至少6条新证据，跨3个有效回合或有明确操作成果后启动，派发间隔至少30分钟；重复结果和已沉淀证据去重。
-- 结案版本依据来自宿主的真实读取与写入回执，新增条目和已有条目分别核验。
-- 状态组件作为标准 bundled 依赖随主包交付，可独立启停。
-
-## [0.9.1]
-
-- 任务收尾核对采用原生 fork 继承已完成任务上下文，通过 caller 交付在内部保存结果，主会话保留用户任务的回答。
-- 收尾触发限定为有相关证据的真实用户任务；纯状态查询、闲聊、插件轮次和只读访问保持原样，事实证据绑定父会话。
-- notify 模式仅记录可查询待办，待办身份独立于全库内容修订；auto 保留独立分批执行与预算续跑。
-
-## [0.9.0]
-
-- 主模型通过官方 `agent/turn-stopping` 钩子进行相关记忆收尾检查；检查标记随会话事件保存，同一轮恢复后继续去重。
+- 新增任务收尾记忆核对机制，在真实用户任务完成后检查相关记忆与新证据。
 - 索引压力触发独立的语义审阅，维护代理保存候选与逐条处理结果，预算耗尽后从剩余进度继续。
-- 新增 `memory_review`，将确切条目与本轮验证证据交给维护代理；缺少证据的事项等待相关变化。
+- 新增 `memory_review`，将确切条目与当前会话验证证据交给维护代理复核，缺少证据的事项等待相关变化。
 - 程序扫描与模型审阅分别记录，保留有独立价值的内容，并按日常条目变更累计触发后续整理。
 
 ## [0.8.2] - 2026-10-17
 
-### 变更（按 DSH 官方插件规范补齐元数据与文档）
-- package.json 增加 `engines.dsh` 兼容范围与 `dsh.manifestVersion` 格式标识，补齐 `author` 与 `homepage`。
+- `package.json` 增加 `engines.dsh` 兼容范围与 `dsh.manifestVersion` 格式标识，补齐 `author` 与 `homepage`。
 - 新增 `locale/en.json` 与 `locale/zh.json` 提供插件管理页的展示标题与描述，`exports` 与 `files` 同步登记。
-- 新增 `icon.svg`，36×36 画布、自包含几何。
-- `README.md` 改为英文、`README.zh.md` 改为中文，按官方结构补齐概述、目录、实现机制、模型体验、已知限制与开发者备注；删除内容重复的 `README.en.md`。
+- 新增 `icon.svg`，采用 36x36 自包含几何图标。
+- `README.md` 与 `README.zh.md` 按官方插件文档结构整理中英文说明。
 
 ## [0.8.1] - 2026-10-15
 
-- 兼容 DSH 0.2.1-alpha.3 的托管子代理接口，自动维护使用精确保留的子会话身份和 caller 结果交付。
-- 子会话发布前安装继承工具过滤和执行守卫，保留结构化结果出口，激活后仍受原有空间、调用和修改预算约束。
-- 新版发布后的维护超时通过 activation.dispose 终止子任务；旧版 start 接口继续兼容。
+- 兼容 DSH 0.2.1-alpha.3 的托管子代理接口，自动维护使用保留身份的子会话和 `caller` 结果交付。
+- 子会话发布前安装继承工具过滤和执行守卫，保留结构化结果出口，激活后仍受空间、调用和修改预算约束。
+- 维护超时通过 `activation.dispose` 终止子任务，同时保留旧版 `start` 接口兼容。
 
 ## [0.8.0] - 2026-10-13
 
-- 工具统一使用 `{namespace, kind, key}`，创建与更新分开；列表和检索返回值可直接用于后续操作，SOP 更新保留原标题。
-- 新增明确归属的成对历史快照、历史列表与指定版本恢复；恢复前保存当前版本。
-- 正文、元数据、索引和管理操作统一使用命名空间写锁；快照或元数据错误直接报告，避免继续覆盖。
-- 归档全文可读，恢复可见性统一去横幅；按类型读取同名 fact/SOP；分页提供 complete、revision 和精确行范围。
-- 当前项目与 global 共同提供目录和检索，注入字符预算覆盖手写规则；L1 通过宿主变量作为数据渲染。
-- 自动空间使用工作区/规范化路径身份，提供显式迁移并保留来源。
-- 溯源覆盖普通调用与旧/新 PTC 子调用，证据按具体调用绑定；来源随内容版本保存。
-- common/manage 与 read/write 分层，普通子代理默认只读，维护任务使用专用受限入口。
-- 程序维护统一 actionable 报告，减少重复扫描；候选支持精炼接受和显式丢弃。
-- 自动维护只对可行动事项发起真实子任务，提供模型、输出、调用、修改和时间预算，保存执行历史及宿主usage。
-- 状态工具报告实际版本、路径、namespace、存储分项和维护结果；文档补充真实宿主加载与端到端验收流程。
-- 发布包包含文档与模板，排除源码备份；CI检查源码语法与打包内容。
-
-验收：实际安装的DSH 0.2.0-rc.2已完成标准/PTC读写恢复、旧快照、双宿主重叠写入、故障保留、全局/迁移/候选/预算、只读子代理与独立自动维护；恢复日常记忆目录后已再次读取与程序维护。日志汇总器支持DSH追加的多帧Zstandard会话。
-
-工具协议变化：旧的 `entry_type` 和裸 `name/topic` 定位改为 entry；write只创建，update只更新。既有Markdown数据保留，项目空间显式迁移。
+- 工具统一使用 `{namespace, kind, key}`，创建与更新分开，列表和检索返回值可直接用于后续操作，SOP 更新保留原标题。
+- 新增明确归属的成对历史快照、历史列表与指定版本恢复，恢复前保存当前版本。
+- 正文、元数据、索引和管理操作统一使用命名空间写锁，快照或元数据错误直接报告。
+- 归档全文可读，恢复可见性统一移除归档横幅；按类型读取同名 fact 与 SOP；分页提供 `complete`、`revision` 和精确行范围。
+- 当前项目与 `default` 全局空间共同提供目录和检索，注入字符预算覆盖手写规则，L1 通过宿主变量按数据渲染。
+- 自动空间使用工作区或规范化路径身份，提供显式迁移并保留来源目录。
+- 溯源覆盖普通调用与 PTC 子调用，证据按具体调用绑定，来源随内容版本保存。
+- 工具按 `common` / `manage` 与 `read` / `write` 分层，普通子代理默认只读，维护任务使用专用受限入口。
+- 程序维护生成统一 `actionable` 报告，候选支持精炼接受和显式丢弃。
+- 自动维护仅对可行动事项发起真实子任务，提供模型、输出、调用、修改和时间预算，保存执行历史及宿主 usage。
+- `memory_stats` 报告实际版本、路径、命名空间、存储分项和维护结果。
 
 ## [0.7.1] - 2026-09-29
 
-修复（关联指针规范化 + 遗留文件隔离）
-
-- **related 写入侧规范化**：关联指针的持久化形态是条目 key（fact 的 section 名 / sop 的文件裸名），此前按原样字符串入库，`sops/xxx.md` 这类路径写法会让关联解析永远落空（读取侧按裸 key 匹配）。write/update/accept 共用的 `writeMemory` 单点在入库前剥掉 `sops/`（或 `sops\`）前缀与 `.md` 后缀；其余形式原样保留，不做存在性校验——跨命名空间与尚未创建的条目都是合法关联目标。
-- **遗留 `memory_stats.json` 自动隔离**：该文件是早期版本的访问统计落点，现版本统计在 `file_access_stats.json`，旧文件已无读写路径，留在库里只会误导人工翻库。`ensureNamespaceLayout`（启动与所有工具路径共用的初始化入口）发现它时改名为 `memory_stats.json.legacy`（保底可读，不删除）；隔离目标已存在时删除新出现的遗留件；隔离失败静默跳过，绝不阻断记忆库初始化。
+- `related` 写入侧规范化，在入库前剥离 `sops/` 前缀与 `.md` 后缀，统一保存条目裸 key，支持跨命名空间与前置关联。
+- 初始化布局时自动将遗留的 `memory_stats.json` 改名为 `memory_stats.json.legacy`，与现行 `file_access_stats.json` 分离。
 
 ## [0.7.0] - 2026-09-25
 
-包名对齐 DeepSeek Harness 社区插件命名约定，`dsh-layered-memory` 更名为 `@dsh-external/dsh-layered-memory`，bundle patch 的 `name` 同步更新。条目 id 保持 `dsh-layered-memory`，既有 patch 配置照常匹配；profile 依赖键改用新包名后重新安装。
+- 包名对齐社区插件命名约定，更名为 `@dsh-external/dsh-layered-memory`，bundle patch 同步更新，条目 id 保持 `dsh-layered-memory`。
 
 ## [0.6.9] - 2026-09-25
 
-修复（交叉审查闭环：误归档、工作区隔离、并发丢写与正文-证据版本一致性）
-
-背景：对基线 `1fc5e56` 的交叉审查用 19 个边界反例复现出四类问题——检索归一化把不同事实判成重复并隐藏、自动命名空间取服务进程启动目录而不是会话工作区、单文件 CAS 之外的「一轮多文件写」仍有丢更新窗口、evidence 与溯源元数据可以绕过正文校验且与正文版本错位。本次按「先防错误写入/错误隐藏/错误选库，再补接口语义」两批落地；所有新约束都只加在会改变「哪些记忆可见、内容是否被换掉」的判据上，正常写入、读取、整理的路径保持原样。
-
-**第一批：防错误写入、错误隐藏、错误选库、并发丢写**
-
-- **去重判定与检索归一化彻底分离**：新增 `exactNormalize()`（只统一换行、去行尾空白与尾部空行，不折叠大小写与正文空白——路径、命令、参数里的大小写与空格是语义）。自动处理只针对同名同内容的重复 section（`upsertFact` 无损合并，多余段先快照）；同名不同内容记 `conflicts` 候选；跨条目内容一致（逐字节相同或归一化后相同）记 `exactDuplicates` 候选，不再自动归档——不同主题名在陈述不同对象的事实，正文一样不代表第二条可以被第一条替代。
-- **evidence 校验收口到所有持久化字段**：证据逐行引用编码（每行 `> `，首行保留 `> 证据: `），含 `## ` 的证据行不再可能被解析成新的 fact section；evidence 与 related 里的疑似密钥自动脱敏为 `[redacted:<pattern>]`（真实证据不陪葬），正文保持响亮拒写；topic 同样过密钥判据。
-- **会话感知命名空间**：`resolveNamespace(cfg, explicit, cwd)` 以会话工作区为准——工具从 `exec.agent.session.header.cwd` 取，prompt 注入从 assembly 的 `context.agent` 取，事件从 `session` 取；显式参数与 `defaultNamespace` 的优先级不变。纯中文/符号目录名不再塌进 `default`（跨项目串库），改用完整路径短 hash 命名空间；旧 `default` 库不迁移。
-- **命名空间写锁 `withNsWriteLock()`**：保护「读取 → 快照 → 正文 → meta → 索引」整轮多文件写（`writeMemory`、archive、rollback、promote、维护），锁内重新读取再计算；同进程可重入，死亡进程/超时的陈旧锁可回收，等待超预算响亮抛错、绝不静默丢写。锁只在实际提交期间持有（毫秒级），不跨模型思考与维护子任务。
-- **名字防护**：SOP slug 折叠碰撞拦截（`Build.A` 与 `Build-A` 映射到同一文件时拒绝覆盖并指路改名；同名不同大小写按宽松归一放行）；保留名（`readme`/`license`/`index`/`l1`/`索引`）写入侧统一拒绝——这些名字写进去也列不出来、读不到。
-
-**第二批：接口语义**
-
-- **正文与元数据成对快照/恢复**：`snapshotEntry()` 同步写 `.meta.json` sidecar（当时的 evidence/sourceSession/sourceSeqs/related/createdAt）；`memory_rollback` 成对恢复，老快照缺 sidecar 时返回 `meta_restored: false` 并保持现状；`memory_archive` 归档前先给当前版本建快照（返回 `history`），「更新 → 归档 → 回滚」不再丢中间版本。
-- **unarchive 与 rollback 分离**：`memory_archive({ unarchive: true })` 只恢复可见性（解除隐藏、剥掉归档横幅，内容不动）；恢复历史版本仍归 `memory_rollback`。
-- **写入即激活**：write/update/accept 覆盖已归档条目时 `archived` 同步复位，与横幅剥离后的新正文保持一致，消除「无横幅却仍隐身」。
-- **related 空数组语义**：未提供参数继承旧关联，明确传 `[]` 清空旧关联。
-- **memory_update 来源契约**：新增 `sourceSession`/`sourceSeqs` 参数——新实测结论传新来源；仅整理措辞时沿用原来源，「证据已换、来源仍旧」的组合给出提示（不阻断）。
-- **自动维护边界**：「必须先读全文再改」挂到是否覆盖已有内容（`memory_write`/`memory_accept` 撞上已有条目才要求，新条目自由写；`memory_read` 截断读取不算读完整）；归档需要具体的「源条目 → 替代条目」依据（替代条目已写入且在其 `related` 中关联源条目，或 `memory_archive` 显式传 `replacement`），写过任意一条别的记忆不再能换到归档资格。
-- **memory_read 分段**：超过约 1.6 万字符的条目默认返回 outline（标题+行号）+ 首尾片段，带 `truncated`/`revision`/`next`；`full: true` 取全文，`from_line`/`to_line` 精确续读。短条目照旧一次完整返回。
-- **memory_expand 事件预算**：单事件文本上限 4000、合计 12000 字符，超出按事件截断并显式标注（替代此前一刀切的 2000 字符截尾）。
-- **L1 注入视图每层保底**：先为每个非空层保留「前缀 + 总条数」的最小入口行，再把剩余预算按层分配给逐条名字与分类聚合；极端预算下层不再整行消失，压缩标注统一可见。
-
-口径修正：`syncIndex` 的「无变化重写」注释改为真实收益（避免维护自激与 revision 抖动）；skill 读取路由改为「已知名字直接 read、不知道名字就 search、要浏览目录才 list」。
-
-回归：新增 `test/v069.test.mjs`（14 例：证据编码与脱敏、写入即激活、related 语义、快照成对恢复、来源契约、碰撞与保留名、分段读取、L1 保底、会话命名空间、写锁、可用性回归），两组去重旧口径断言更新为候选语义。全量 125 项通过（vitest 105 + node --test 20）。
-
-配置语义变化：无。新增工具参数均为可选，默认行为仅在「会错误隐藏条目或写坏内容」的判据上收紧。
+- 去重判定与检索归一化分离，自动合并仅针对同名同内容的重复段落，同名不同内容记为 `conflicts` 候选，跨条目同内容记为 `exactDuplicates` 候选。
+- 证据逐行引用编码并对疑似密钥自动脱敏为 `[redacted:<pattern>]`，正文与标题包含疑似密钥时拒绝写入。
+- 命名空间解析以会话工作区为准，非 ASCII 目录名使用完整路径短哈希，避免跨项目落入同一空间。
+- 新增命名空间写锁 `withNsWriteLock`，保护读取、快照、正文、元数据与索引的整轮多文件写入，支持陈旧锁回收。
+- 拦截 SOP 文件名归一化碰撞与保留名写入。
+- 快照同步保存 `.meta.json`，`memory_rollback` 成对恢复正文与元数据，`memory_archive` 归档前先保存当前快照。
+- `memory_archive({unarchive:true})` 仅恢复可见性与剥离归档横幅，历史版本恢复归 `memory_rollback`。
+- 覆盖已归档条目时同步复位 `archived` 状态；`related` 传空数组可清空关联，省略则继承旧关联。
+- `memory_update` 支持显式传入 `sourceSession` 与 `sourceSeqs` 更新来源，仅整理措辞时沿用原来源。
+- 修改已有条目要求先完整读取对应版本，归档需指明已保存的替代条目。
+- `memory_read` 支持按字符预算与行号分段读取；`memory_expand` 支持按事件分页与字符上限返回。
+- L1 注入视图为每个非空层保留最小入口行后再分配剩余字符预算。
 
 ## [0.6.8] - 2026-09-20
 
-修复（维护边界、注入视图与溯源可复核性；承接 0.6.7 的自主整理 `reflectionMode: auto`）
-
-背景：相似度是候选信号，不是等价性证明。原有的内容级近重复去重会在词元集合 Jaccard 越过阈值时直接归档后遇到的条目，而词元集合表达不了否定、参数值与操作顺序——三组合成反例（端口 8080 改 9090、认证 enabled 改 disabled、步骤顺序对调）都能越过阈值。同时，L1 索引注入模型时按前缀截断，处在尾部的 `[RULES]` 会先被丢弃且不留痕迹；溯源补全写入的又是 `turn/end` 事件序号，展开后只能看到「回合结束」这一空壳事件。
-
-- **模糊相似度不再自动归档**：`dedupeEntries()` 只归档归一化内容 hash 完全一致的重复项；内容级近重复（默认 Jaccard 0.85）改记为 `report.dedupe.nearDuplicates` 候选（上限 20 组，按相似度排序），由受限整理子任务或人工确认后再合并。子任务提示词同步声明该边界，并把候选并入其程序报告。
-- **注入视图改为结构化预算**（新增 `buildPromptIndex()`）：索引未超预算时逐字透传；超预算时头部与规则段（`[RULES]`）完整保留，条目逐条保留到预算耗尽、其余按分类入口聚合并带条数（如 `dsh(12)`），末尾追加显式压缩标注并指回 `index.txt` 与 `memory_list` / `memory_search`。折叠只作用于注入视图，磁盘索引仍为全量。
-- **溯源改记本回合的工具结果事件**：`turn/end` 写入 `sourceSeqs` 的改为本回合 `tool/result` 事件序号（上限 400 条）；宿主未提供该事件时退回原行为。`memory_expand` 因此能取回证明该条目的实测输出，而不是回合结束事件。
-- **检索两处收口**：复合标识符在保留整体词元的同时额外索引拆分后的子词——`dsh-layered-memory` 既能被完整名字命中，也能被 `layered memory` 命中；`memory_search` 摘录改为围绕命中位置取窗口，命中位于正文后段时不再返回一段无关的开头。
-- 回归：新增 `test/v068.test.mjs`（7 例：逐字透传、分组入口、规则段完整、极端预算、注入接线），`test/v05.test.mjs` 增补三组语义反例、精确去重与检索用例，`test/v06.test.mjs` 增补溯源优先级用例。全量 110 项通过（vitest 90 + node --test 20）。
-
-配置语义变化：`nearDupeThreshold` 现在表示「近重复候选」阈值，不再触发自动归档。
+- 内容级近重复改为生成 `nearDuplicates` 候选，不再根据分词 Jaccard 相似度直接自动归档。
+- 新增结构化注入预算视图，超预算时完整保留头部与 `[RULES]` 规则段，其余条目按分类聚合，磁盘索引保持全量。
+- 溯源自动记录回合内的 `tool/result` 事件序号，使 `memory_expand` 直接取回工具验证输出。
+- 检索索引同时保留复合词整体与拆分子词，搜索摘录围绕命中位置截取窗口。
 
 ## [0.6.6] - 2026-09-19
 
-修复（反思提醒：从「存量阈值」改为「内容版本 + 维护终态」，2026-09-19 专项审查闭环）
-
-背景：0.6.2/0.6.3 修通了此前被宿主重入守卫挡住的提醒投递，却没有同时修「什么时候不该再提醒」。判定只看 `pending` / 活跃 SOP / 索引字符的存量阈值，既不消费维护结果，也没有「这批内容已经检查过」的状态。于是健康记忆库（数十条互不重复的 SOP）一旦越过 `reflectSopsThreshold`，就会在新会话、重载与并行会话里反复把维护请求塞进当前任务。本次按专项审查（基线 `3729dfe`）的 12 项探针落地修复。
-
-- **新增命名空间级反思状态 `src/reflection.js`**（落盘 `reflection-state.json`）：`revision`（内容指纹）+ `outcome`（`no_action` / `needs_review` / `done` / `failed`）+ `notifiedRevision`。指纹只取 `facts.md`、`index.txt`、`memory-meta.json`、`sops/*.md`、`pending/*.md` 的体积与 mtime，**排除** `turn-state.json`、访问热度、报告时间戳这类自写字段（否则每检查一次就把自己标脏，重新自激）。`no_action` 是有效终态：同一 revision 已有终态结论时静默，已通知过同一 revision 也静默。
-- **维护结果回写**：`runMaintain()` 收尾调用 `recordMaintainOutcome()`，自动周期维护与手动 `memory_maintain` 共用同一份消警依据；失败单独记 `failed`（允许冷却后重试），不会被误判成「已检查过」。
-- **冷却前置 + 廉价短路**：先判开关与冷却，再读状态、再做内容扫描。此前每轮 `turn/end` 都要遍历 SOP 并逐条 `isArchived`（每条重读整份 `memory-meta.json`，几十条 SOP 的一轮判定就是几十次全量解析），冷却期内也一样。
-- **投递前二次复核**：排队中的提醒在真正投递前重读状态——插件已 dispose、该版本已被维护终结、或已通知过同一版本时直接丢弃，修掉「维护先跑完、旧提醒后送达」。
-- **定时任务纳入生命周期**：`setTimeout` / `setImmediate` 句柄统一登记，插件清理时取消。此前卸载后已排队的提醒与周期维护仍会执行。
-- **新增 `reflectionEnabled` 总开关**（默认 `true`）：关闭后只停「主动向会话投递整理请求」，不影响 L1 注入、检索、读取、主动写入与手动维护。此前没有真开关——`maintainEveryTurns=0` 只关周期维护，`autoPending=false` 只关自动候选分支，`reflectSopsThreshold=0` 反而是恒真。
-- **阈值 0 语义修正**：`reflectSopsThreshold: 0` / `reflectPendingThreshold: 0` 现在是「关闭该判据」，不再恒满足。
-- **提醒文本显式标注来源**：加「（插件自动提醒，非用户消息；与当前任务无关时可忽略）」，并对「没有重叠项就无需处理」给出终态说明。标注是辅助，确定性抑制由状态机负责——不改 `role`，宿主 `Agent.inject` 的契约就是 `UserMessage`。
-- **`readMeta` 读取缓存**：键为 `size:mtime:ino`，写入方显式失效。`memory-meta.json` 达数百 KB 时，热路径不再逐条全量 `JSON.parse`。
-- 回归：`test/v066.test.mjs`（11 例）覆盖审查 R1/R3/R4/R6/R7/R8/R9/R10/R12 场景与新增开关、缓存、指纹稳定性。全量 73/73 绿。
+- 新增命名空间级反思状态 `reflection-state.json`，按内容版本与维护结果去重，排除自写统计文件造成的状态抖动。
+- 程序维护与手动维护共用状态回写，冷却检查前置，并为 `memory-meta.json` 增加按文件指纹失效的读取缓存。
+- 定时任务纳入插件生命周期清理，新增 `reflectionEnabled` 总开关，阈值设为 0 时表示关闭对应判据。
 
 ## [0.6.5] - 2026-09-18
 
-修复（0.6.4 归档横幅的检索副作用）
-
-- 0.6.4 把归档横幅写进正文后，`memory_search` 的 160 字符摘录会以横幅开头——实测 `c-drive-cleanup-20260917` 的摘录前 60 字符全是"已归档…历史快照…"，真正的内容只剩约 100 字符；同时索引里还多了"已归档/历史快照"这类与内容无关的 token，会污染 BM25 命中。现在检索侧统一先 `stripArchiveBanner()`（索引文本与摘录都剥），归档状态继续由返回值里的 `archived` 字段表达。横幅仍保留在文件正文里，供直接读文件/read 的人看到。
+- 检索索引与搜索摘录统一剥离归档横幅，避免横幅文本占用摘录窗口或干扰关键词匹配。
 
 ## [0.6.4] - 2026-09-18
 
-修复（归档可见性 + 元数据补登记，来自第二轮记忆库语义体检）
-
-- **归档正文会误导读者**：`memory_archive` 只把条目从 L1 索引隐藏，正文照旧留在 `facts.md` / `sops/*.md`。归档只改标志位，正文原样留在文件里，人工读文件或 `memory_search` 命中的读者会把历史快照当成现行事实。现在归档时在正文首部写一行自解释横幅（`> [已归档 YYYY-MM-DD] 历史快照：已不在 L1 索引中…`）；fact 走 `upsertFact` 保留 section 结构，SOP 横幅插在 `#` 标题行之后。任何再次写入（write / update / accept / rollback）都会先 `stripArchiveBanner`，取消归档不会残留过期标记。
-- **条目缺 meta 记录**：`facts.md` 的 `##` section 与 `sops/*.md` 中可能存在 `memory-meta.json` 完全没有记录的条目（旧版本迁移、examples 种子、跨机导入）——这部分条目没有 updatedAt 与证据追踪，冷条目复核只能报 `age_days=null`。新增 `backfillMeta()`：只补「存在性 + 文件 mtime」并标 `backfilled: true`，**不把正文里的证据行抄进 `evidence`**（那会把别处的验证冒充成本次验证，违反行动验证公理）。插件加载期自动补登记并 log 条数；`memory_index` 也会顺带补并在返回值里报告 `backfilled` 列表。幂等，无缺失时不写文件。
+- 归档条目在文件正文头部写入归档标识横幅，再次写入、更新或恢复时自动剥离。
+- 加载期与重建索引时自动为缺少元数据记录的既有条目补齐存在性与文件修改时间。
 
 ## [0.6.3] - 2026-09-18
 
-修复（Agent Teams 多会话交互 + 反思注入 payload 形状）
-- 背景：开启官方 `dsh-experimental-agent-team-profile` / `-web-profile` 后，同一进程内会并发存在 N 个 teammate 会话（`session.header.parentSession` 非空），它们各自发 `turn/end`。增量审查实测确认下列后果。
-- **轮次计数被 teammate 灌水**：`bumpTurnCounter` 是无类别过滤的全局持久计数，`maintainEveryTurns=20` 的语义被稀释为「全进程 20 次 turn/end」，N 个 teammate 时提前约 N 倍触发，且触发者可能是 teammate。现只对交互（无 parentSession）会话 +1；headless 一次性会话与无 header 的旧调用形状仍计入（原语义保留）。
-- **反思注入不分会话类别**：`agents.get(sessionId)` 对 teammate 会话同样命中（宿主强制 `agent.id === session.id`），一旦注入可用，每个 teammate 首轮都会收到「请去改共享记忆」的提示，诱导只读型 teammate 写共享记忆库。现与计数同源，只对交互会话注入。
-- **注入 payload 不合宿主 `UserMessage` 形状**：宿主 `Agent.inject` 只做 `inbox.splice`、完全不校验形状，此前缺 `id`/`role` 的字面量不会抛错，而是把一条畸形 user 消息直接落进会话历史。现补 `id`（`randomUUID`）+ `role: "user"`。不用 `dsh-llm` 的 `createUserMessage`——它在本仓仅 devDependency，运行时 import 会引入未声明依赖。
-- **周期维护在 append 同步发布窗口内执行**：`runMaintain` 实测一次约 1.26s（去重 O(n²) + 重写 index.txt + 写报告），此前直接跑在观察器同步段，拖长该窗口并与其它观察器的重入守卫相邻。现移到 `setImmediate`，并加 10 分钟最短间隔节流，避免多会话密集 turn/end 时同一阈值被重复排队。
-- **静默失败补诊断**：反思判定通过但 `agent` 缺失 / `inject` 不可调用时此前无任何输出（这正是「修复已装但宿主未重启 → 功能看起来死了」难以自证的原因）。现补一次性 `warnOnce("reflect-skip", ...)`，打印 pending/sops/index/autoPending/cooldown 全部判据值。
-- 回归：`test/v063.test.mjs`（teammate 不计数不注入 + 交互会话计数并注入 + payload 带 id/role；无 header 旧形状仍算交互）。全量 58/58 绿。
+- 轮次计数仅统计无 `parentSession` 的主会话，避免子代理并发稀释触发周期。
+- 周期维护移入异步阶段执行并增加最短间隔节流。
 
 ## [0.6.2] - 2026-09-18
 
-修复（反思注入撞宿主重入守卫）
-- turn/end 观察器在宿主 `Session.append` 发布窗口内同步调用 `agent.inject`，必抛 `session append cannot reenter while another append is being published`。该失败自 0.1.6 宿主起就存在（0.6.0 被整段空 catch 静默吞掉，反思提醒实际从未送达；0.6.1 按审查项 N7 拆防护后转为响亮 warnOnce，即用户可见的告警堆栈）。
-- 修法：inject 延迟到下一宏任务（`setTimeout 0`）让本次发布先收口；期间 agent 若被 dispose 仍由 warnOnce 接住；`reflectionState` 冷却标记保持同步更新，不重复调度。回归 `test/v062.test.mjs`（同步阶段零调用 + 下一宏任务送达 + 冷却不重发，56/56 全绿）。
+- 会话回合结束后的异步动作延后到发布窗口外执行，避免重入 `Session.append`。
 
 ## [0.6.1] - 2026-09-18
 
-一句话：官方规范审查（report-20260918-layered-memory）4 MAJOR + 14 MINOR 全量闭环——输出契约恢复类型化投影、注入面校验缺口收口、热路径去同步 spawn、静默失败全部点名。
-
-### Fixed
-- **M1 `memory_maintain` 在老库上整包失败（已知 bug 清除）**：`createdAt` 缺失/非法时 `age_days` 为 Infinity（`Math.round` 后仍非有限），宿主判结果「not lossless JSON」整包拒收。根因消毒为 null（`heat` 同法），出口包装 `pruneUndefined` 升级为「undefined 键剥离 + 非有限数→null」，从类上根治。
-- **M4 `memory_rollback` fact 路径幽灵 section 注入**：此前唯一绕过 topic 控制字符校验的 `## ` 写入口——`"x\n## evil"` 经 slugify 可命中同前缀历史快照并注入 facts.md、随 syncIndex 进入每轮 L1 系统上下文。现复用写入侧单源 `assertSafeTopic`（rollback/archive/expand/promote/accept 全部收口），并对回滚快照正文的 `"## "` 行做纵深拒绝。
-- N1 `casRewrite` 竞争分支 `rmSync` 未导入：ReferenceError 被空 catch 吞掉且永久泄漏 `.facts.md.tmp-*`。补导入、catch 点名错误类型、新增竞争清理回归（阴性对照验证）。
-- N7 `turn/end` 约 70 行大空 catch 拆分为解析/溯源/蒸馏/维护/反思五段各自防护 + `warnOnce` 一次性 console.warn；`agent.inject` 单独 try/catch 防已 dispose 的 agent，失败不再连带跳过 reflectionState 更新。
-- N12 `writePending` 落盘前对重试序列错误/结果尾部过 `detectSecret`（与 accept 侧同一函数），命中整段替换为 `[redacted:<pattern>]`——凭证不再先进盘后被拦。
-- N13 `snapshotEntry` 失败不再静默返回 `""`：返回 `{ path, error }`，`writeMemory` 把「快照失败，旧版本未保留：<原因>」汇入 advisories 首条（覆盖写仍继续，拒写才会丢新数据；strict 抛错配置未引入，见下）。
-- N11 重试序列候选接受为 fact 的死路组合：accept 路径把候选正文 `"## "` 行自动降级 `"### "`（仅接受路径；正式写入侧硬约束不变）。
-- N4 `maintainEveryTurns`/`reflectPendingThreshold`/`reflectSopsThreshold`/`reflectCooldownTurns` 提为 `Schema.natural()`（非负整数），-1/2.5 等无效值在插件加载期响亮失败。
-- N10 CHANGELOG 陈旧 `[Unreleased]` 节整体并入 0.6.0（矛盾表述按现行行为修订），该节删除。
-
-### Added
-- **M2 输出契约（PTC 可编程性）**：14 个 `memory_*` 工具 output.schema 从裸开放对象恢复为「稳定字段声明（properties + required）+ `additionalProperties: true` 保持开放」——声明字段获得类型投影，新增字段不再因漂移拒收；`normalizeMeta`/expand 的 `sourceSeqs` 归一 number[] 兜底老库垃圾值。
-- M3 性能：`detectNamespace` 进程内 memoize（key=cwd，TTL 新配置 `namespaceCacheTtlMs` 默认 60s、0 关闭），autoNamespace 默认路径不再每轮 prompt 装配/每次工具执行同步 spawn git；命名空间布局 ensure 移出逐轮求值路径（每个 root 一次；工具写路径仍显式 ensure）。
-- N5 `coldReviewDays` 入 Config 并穿透 maintainOpts；`L1_MAX_CHARS_DEFAULT` 导出常量单源（N6，原 12288 字面量散落 4 处）。
-- N8 `memory_expand` 遵守 `exec.signal`（readSession 前后各查 aborted）。
-- I7 5 个同步 execute 统一 async；I9 read/list/search/stats/pending 声明 `isConcurrencySafe`。
-- I4 `memory_activate` 重复激活返回 `{activated:true, already:true, tools:[…14]}` 可判定规范值（此前与失败同形），schema 补 `already` 声明。
-- 回归测试 `test/v061.test.mjs` 16 例（M1-M4、M2 契约含宿主 validateJsonSchemaValue 实测、M3 缓存零 spawn、N4/N6/N11/N12/N13、I4）。39→55 全绿。
-
-### Changed
-- N14 按官方 framework/service 语义修 inject 矛盾：`sessionQuery` 移出 inject（可选依赖=使用点 ctx.get + 「服务不可用」规范值降级）；`agents`/`systemPrompt` 保留必需并删除永不可达的 `Boolean(agents)`/`if (sysPrompt)` 死分支；旧「未 inject 时 ctx.get 恒 undefined」注释基于旧版 cordis（4.0.2 源码注释明确 get 无 inject 要求），已更正。
-- N2 删除零 import 的 `@deepseek-ai/dsh-system-prompt` peer（运行期 ctx 服务不需要包级依赖，缩小私有 peer 解析面）；N3 files 补 `CHANGELOG.md`（README 链接不再成安装产物死链，pack 19→20 文件）。
-- I5 反思注入归因 `source.plugin` 由 skill 名 `memory` 改为插件名 `layered-memory`。
-- I6 `memory_maintain` 工具描述从生效配置动态拼接阈值，并修正 v0.6 已废除的「按热度压缩 L1」陈旧表述。
-- N9 README（中英）配置样例补全 6 个缺项字段并登记本轮新字段；I1/I2/I3 陈旧版本注释与 skill 存储布局重复行修正。
-
-### 审查发现处置豁免记录（判据不适用 / 策略取舍）
-- N5 展示常量：冷条目 limit=10、合并候选 slice(0,20)、search 钳位 1..50 非「不同部署可能不同值」的调优参数，按报告允许注明保留。
-- N8 豁免面：其余工具为毫秒级同步文件操作（同 tick 原子完成，取消无从更快）与 `runMaintain` 长同步循环（JS 不可抢占），维持不检查 signal。
-- N13 strict 配置（快照失败抛错拒写）未引入：拒写会同时丢新数据，响亮 advisory 是现取舍。
-- I8 tsc --noEmit 不适用（纯 JS 仓库，无 tsconfig；语法=node --check、行为=vitest 双门禁）；引入 checkJs 属工具链大改，超出修复轮范围。
-- I9 timeoutMs（maintain 大库协作预算）为非规范要求项，本轮未引入。
-- I10 报告基线漂移说明：本轮全部修复基于 main c789dfe（审查基线 4d0ffd0 的 CI 后代，src/lib/test/docs 零差异）。
-
-### Verification
-- `npm test`（pnpm build + vitest）55/55 绿；`node --check` 全部 src/*.js + lib/index.js 通过；`npm pack --dry-run` 20 文件含 CHANGELOG.md；M1/N1/M4 关键回归做过去除修复的阴性对照。
+- 清理非有限数值字段，确保工具输出满足宿主 lossless JSON 校验。
+- 统一收口标题与快照回滚的控制字符及二级标题注入校验。
+- 补齐候选落盘前的凭据脱敏与快照失败提示。
+- 为全部 `memory_*` 工具恢复带稳定字段声明的开放输出 schema，并为只读工具声明并发安全标记。
+- 为命名空间检测增加进程内 TTL 缓存，减少重复子进程调用。
+- `memory_expand` 支持响应调用取消信号，`memory_activate` 重复调用返回 `already: true`。
 
 ## [0.6.0] - 2026-09-16
 
-一句话：把「自动治理」重新喂回语义与守恒——L1 不再隐藏任何条目，覆盖写不再丢历史，公理由代码兜底。
-
-### Fixed
-- **`memory_write` 静默覆盖且不留历史（数据丢失级）**：所有覆盖写（write/update/accept/promote 复用）统一在写入前把旧版本快照到 `.history/`，返回体新增 `history` 与 `advisories`。此前只有显式 `memory_update` 会快照，而模型默认用 write。实测：本会话 3 次 write 若撞名即无痕覆盖。
-- **同名 section 折叠**：`upsertFact` 此前只替换第一个同名段，第二个永久隐身且互相覆盖 meta；现在多余段先各自落 `.history/` 快照再折叠为一条（`action: "merged"`）。同时拒绝 fact 正文里的 `"## "` 行——它是幽灵 section 的来源（运行时实测 10+ 条）。
-- **L1「写完即隐身」**：`maxIndexLines` 行数预算 + 热度裁剪整体废除。AUTO 段改为每层一行、`" | "` 全量列出活跃条目，预算单位换成字符数（与注入熔断 `l1MaxChars` 同源，默认 8192→12288）。旧机制实测把 88/104 条事实与 49/59 个 SOP 挤成不可见，而 `entryHeat` 的 recency 加分（=1）在有真实访问计数的老条目前必然排不进去，所以 CHANGELOG 声称的"写完即隐身已修"从未成立。
-- **前缀抖动**：索引内容未变化时不再重写 `index.txt`（此前每次维护都按热度重排 → system prompt 前缀变化，打碎缓存）。
-- **`agent/disposed` 丢缓冲**：dispose 前先把已捕获未消费的重试序列落 `pending/`（此前直接 delete，候选静默蒸发）。
-- **`memory_promote` 证据旁路**：源条目无证据时不再用 `"promoted from namespace:X"` 占位串过关，改为新增 `evidence` 参数 + 缺失即拒绝。
-- **脏命名空间**：`detectNamespace()` 在用户主目录下工作不再产出以用户名命名的空间（运行时实测残留 `39795/`、时间戳目录、`selftest*`、`headless`）。
-- **文档-代码漂移**：CHANGELOG 声称的"写入后立即 bump 热度"与实现（写≠读）矛盾，随热度退出 L1 决策一并消解；README 的 `memory_stats.json`/裁剪段落同步为实际行为。
-
-### Added
-- **写入侧硬约束（公理落地为代码）**：疑似密钥明文（sk-/AKIA/GitHub token/PEM/Bearer/长 base64，纯 hex 哈希不误伤）直接拒写；topic 控制字符校验补正（`` 转义写错会让 `f` 字符误判）。
-- **L0 判据回显**：`memory_write` 返回体附 `advisories`（topic 超长/含日期或 commit/撞名提示走 update/L1 超预算），把方法论放到决策点，借鉴 GA 的"写入动作同屏注入 L0"。
-- **溯源自动补全**：`memory_write` 成功后由 `turn/end` 回写 `sourceSession`/`sourceSeqs`。实测此前 142 条记忆里 141 条 `sourceSeqs` 为空，`memory_expand` 形同虚设。
-- **冷条目复核**：`memory_maintain` 新增 `cold` 段（创建 >90 天且衰减热度 <0.5），让热度遥测有真实消费者；只报告不动数据。
-- **L0 模板新增「L1 词数 ROI 判据」**：存在性指针 vs 行为规则、反直觉触发词判定、改名优于加描述、禁值存储（源自 GA `memory_cleanup_sop.md` 的策展方法论）。
-- 回归测试 `test/v06.test.mjs` 9 例（快照、正文 `##` 拒绝、密钥拒写、promote 证据、dup 折叠、索引幂等不重写、autoPending 默认关、dispose 落盘、溯源回写）；旧压缩用例改写为"超预算仍全量列出"契约。39/39 绿。
-
-### Changed
-- `autoPending` 默认 `true → false`。实测 6 天累积 108 条候选、archive 仅 7 文件（消费≈0），抽样内容全是工具用法噪声（TS 引号解析错、未知工具名、未读先写）。沉淀主路径回到主动 `memory_write`；`memory_pending`/`memory_accept` 保留给人工登记。
-- 配置项 `maxIndexLines` 移除（无 profile 使用），L1 预算统一为 `l1MaxChars`。`memory_index`/`memory_list`/`memory_maintain` 返回体相应改为 `index_chars`/`rewritten`/`facts_listed` 等。
-- 反思注入的 `overPending` 项仅在 `autoPending` 开启时生效；`overIndex` 改为字符预算判定。
-
-### Breaking
-- 配置项 `maxIndexLines` 删除；`memory_maintain` 报告的 `compress` 段改为 `index` + `cold`。L1 语义变化：不再存在"被裁剪的条目"，因此 `memory_search` 的"找回隐藏条目"用途自然消失（检索本身不变）。
-
-### 并入自陈旧 [Unreleased]（N10：0.5.2→0.6.0 期间已交付，0.6.1 审查修复轮折叠；原节整体删除）
-- 跨进程更新丢失防护（CAS 读改写三段关窗：tmp 暂存 → rename 前一刻复核基座 → rename 后回读兜底；EPERM 退避每轮再复核；持续冲突超 3s 预算响亮抛错绝不静默丢。实测 40 进程错峰写 3×40/40 收敛）。`index.txt` 与热度/turn 计数维持直写（可随时重建 / 可容忍漂移）。
-- 持久化全部改为原子写（`atomic-write.js` 同目录 tmp + rename，21 处写点）；Windows rename 瞬态 EPERM/EACCES/EBUSY ≤15 次递增退避 + 抖动重试。
-- `memory_update` 不再以占位串 `memory_update（历史更新）` 伪造 evidence 落库（与 write/accept 一致硬性要求证据）。
-- `sopNames()` 保留名过滤（README/LICENSE/index 不计入 L3 统计、索引与合并候选）；`memory-meta.json` 首建补 `createdAt`、更新保留原创建时间。
-- L1 注入面防护：注入前控制字符剥离 + 长度熔断（与 `l1MaxChars` 同源，默认 12288——旧节「≤8KB」表述按现行修订）+ `<memory_index source="user-writable">` sentinel；含换行/控制字符的 topic 拒写。
-- 移除死代码 `ensureIndexRule`；README/SKILL 的 `memory_stats.json` 更正为实际写出的 `maintenance-report.json`；`events.js` 键混用假设注释钉死。
-- 该节中与 v0.6 现行行为矛盾的「写入后立即 bump 热度」「超限时两层至少各保留一个指针并显示隐藏数量」等条目（旧压缩机制）不予保留——热度只服务冷条目复核、L1 全量列出不裁剪。
+- 覆盖写操作在落盘前统一将旧版本快照保存到 `.history/`，同名重复 fact 段落先保存快照再合并。
+- L1 磁盘索引全量列出活跃条目，预算统一按 `l1MaxChars` 字符数管理，内容未变化时不重复改写索引文件。
+- 插件卸载前将未消费的重试候选落盘，`memory_promote` 要求有效证据。
+- 写入侧拒绝疑似明文密钥，并在返回体中提供命名与预算提示。
+- `memory_maintain` 增加冷条目复核线索，`autoPending` 默认改为 `false`。
+- 文件持久化统一采用同目录临时文件加原子重命名，并为跨进程读写增加冲突重试。
 
 ## [0.5.2] - 2026-08-21
 
-### Fixed
-- **`memory_pending` 列表摘要失效**：渲染逻辑取"候选内容最后一行"的前 120 字符，而末行通常是空行 → 列表看起来只有文件名。新增 `pendingSummary`：按优先级提取 `kind=`、`错误尾部`、`成功结果尾部`、"本回合有 N 个…"统计行或首个非空正文行（带 `[kind]` 前缀，上限 160 字符）。`pendingSummary` 已导出供测试引用。
-- **`memory_read` 的 related 指针显示 `undefined（未找到）`**：`resolveRelated` 是死代码（只定义未调用），`meta.related` 原样字符串数组被 render 当对象读。修复：execute 时生成 `meta.related_states`（`[{name,state}]`，state∈active/archived/missing），`meta.related` 保持历史字符串数组契约不变（既有测试断言语义保留）；`formatRelated` 兼容两种形态。
-- **L3 读取出现重复一级标题**：写入模板自动加 `# 标题`，若 content 首行自带同名标题则文件有两行标题。新增 `stripLeadingTitle`：循环删除与 topic/slug 同名的首部标题行（含紧随空行），正文其他一级标题不动。
-- **pnpm 11 预检拦截 `pnpm test`**：`verify-deps-before-run` 的 `.npmrc` kebab 写法对 pnpm 11 无效，run 前依赖检查尝试解析 peer 链中的私有包 `@deepseek-ai/dsh-type-meta`（registry 404）。修复：`pnpm-workspace.yaml` 顶层声明 `verifyDepsBeforeRun: false`（实测生效）；README 记录兜底 `./node_modules/.bin/vitest run`。
-
-### Added
-- Regression 测试 ×3：related_states 解析（含归档后状态翻转）、L3 重复标题 strip、pendingSummary 提取优先级。
-
-### Verification
-- `pnpm test` 27/27 green（10 + 17；含新增 3 例）；`dsh --profile headless` 隔离 CLI 全量自测（selftest-cli 命名空间，10 个工具闭环 write/read/search/list/update/archive/rollback/expand/index/stats/maintain/pending）RESULT: PASS。
+- 改进 `memory_pending` 候选列表摘要提取与 `memory_read` 的关联条目状态展示。
+- 写入 SOP 时自动剥离正文首部重复的一级标题。
 
 ## [0.5.1] - 2026-08-21
 
-### Fixed
-- **memory_write 输出被 output schema 拒绝**：压缩路径返回 `index.facts_hidden` / `index.sops_hidden` 未在 schema 声明（`additionalProperties: false`），宿主工具运行器报 `value.index.facts_hidden is not a declared property`。
-- **memory_update 输出 lossless JSON 违规**：`history: historyPath || undefined` 在无历史快照时产生显式 `undefined` 键，被 JSON 序列化丢弃后判为不可无损往返。
-
-### Changed
-- **全量瘦身：删除全部输出校验声明（净删 236 行）**。14 个工具的 output schema 塌缩为宿主编译器允许的最小开放形态 `{ type: "object", additionalProperties: true }`——校验层从此只保证结果可传输，不再约束内容；任何字段漂移都不可能拒绝写入。render 展示层与 `pruneUndefined` 出口消毒保留（递归剥离显式 `undefined` 键，从根上消除 lossless JSON 违规这一类问题）。
-- 死码 `similarity.shingles`（零引用）一并删除；schema 一致性回归测试替换为无损 JSON 往返回归（覆盖 memory_write 压缩路径与 memory_update 无历史快照路径）。
+- 放宽工具输出 schema 的额外属性限制，并在返回前递归剥离 `undefined` 键。
 
 ## [0.5.0] - 2026-08-21
 
-### Added
-- **`memory_search`（BM25 全文检索）**：覆盖 L2 facts / L3 sops / 归档条目，`all_namespaces` 跨库检索——L1 被裁剪的隐藏条目从此可主动找回。分词为 ASCII 词 + 单数字 + CJK bigram（无模型）。
-- **内容级近重复去重**：分词集合 Jaccard ≥0.85 判近重复（同事实微编辑版本）自动归档并保留 citation；过短内容（<12 词元）只走精确 hash，防误判。
-- **内容级合并候选**：`memory_maintain` 的合并候选改为内容 Jaccard ≥0.45 报告（旧版按文件名分词配对，实测全部误报）；名称重叠仅作提示字段。
-- **`memory_promote`**：跨命名空间提升记忆（项目局部经验 → 全局 default），源条目归档保留可回溯。
-- **记忆链接（related）**：`memory_write`/`memory_update`/`memory_accept` 支持关联条目，`memory_read` 回显关联指针与状态。
-- **写入即压缩**：`memory_write` 检测到 L1 超限立即按热度压缩（贪心装入、逐步真实行数核算，含空层占位行）；告警只在压缩后仍超限时出现一次。
-- **热度衰减**：访问计数按 14 天半衰衰减（`{count, lastAt}` v2 格式，旧版纯数字自动迁移）；写入不再计入热度（写≠读）；新建 7 天 recency 保护保留。
-- **阈值反思注入**：废除每 10 轮固定提醒；pending≥`reflectPendingThreshold`(5) / SOP≥`reflectSopsThreshold`(40) / 索引超限时注入带具体内容的整理请求（10 轮冷却）。
-- **turn 计数持久化**：`turn-state.json` 跨会话累计，headless 一次性会话也能触发周期维护。
-
-### Changed
-- **auto-pending 重做**：只捕获「同工具先失败后成功」的重试序列（含错误/结果尾部摘要）写入 pending；普通成功调用不再产生垃圾候选。
-- **源码化**：单文件 65.7KB `lib/index.js` 拆分为 `src/` 11 个模块（templates/similarity/store/l1index/memory-ops/maintain/search/tools/events/apply/skill-content），`lib/index.js` 变为薄出口；修复文件头 v0.3 与 package.json 0.4.0 的版本漂移。
-- **移除 SKILL.md**：dsh 插件不是 skill；runtime skill 内容内联至 `src/skill-content.js`。
-- 测试从 10 个扩展到 23 个（新增相似度/近重复/合并候选/检索/写入即压缩/关联/promote/重试序列/热度衰减覆盖）。
-
-### Fixed
-- 压缩预算核算修复：空层占位行（`[L3] （空）`）此前不计入预算，导致压缩结果可能仍超限 1 行（v0.4 遗留）。
+- 新增 `memory_search`（BM25 全文检索，支持跨空间与归档检索）与 `memory_promote`（跨空间提升记忆）。
+- `memory_write`、`memory_update`、`memory_accept` 支持 `related` 条目关联。
+- 访问热度采用半衰期衰减，`autoPending` 仅捕获同工具先失败后成功的重试序列。
+- 源码拆分为 `src/` 下的独立模块，由 `lib/index.js` 统一导出。
 
 ## [0.4.0] - 2026-08-16
 
-### Added
-- `memory_stats` 工具：统计 L2/L3/pending/archived/大小。
-- `memory_maintain` 工具：去重、压缩 L1 索引、生成统计、产出可合并 SOP 候选。
-- 自动维护：`maintainEveryTurns` 配置（默认 20），turn/end 低频率触发 `runMaintain`。
-- 测试与 CI：vitest 单元测试 + GitHub Actions（build/test/headless smoke）。
-- `dsh-plugin` 关键词与发布工程化基础。
-
-### Changed
-- 命名空间隔离：存储布局支持 `<memoryDir>/<namespace>/...`，`default` 兼容旧根目录。
-- 溯源/审计：`memory-meta.json` 记录 `sourceSession` / `sourceSeqs` / `createdAt` / `updatedAt` / `evidence`。
-- 自动蒸馏：turn/end 将成功工具调用写入 `pending/` 候选区，`memory_accept` 确认后入正式记忆。
-- 冲突/过期：`memory_update`（supersede）、`memory_archive`、`memory_rollback`，旧版本保留在 `.history/` / `archive/`。
-- `memory_expand`：通过 `ctx.sessionQuery` 展开原始 session 事件。
-
-### Fixed
-- `memory_archive` 后 `memory_read` 不再返回已归档内容：归档记忆只保留在 `archive/` / meta 中，可通过 `memory_rollback` 恢复，但常规 `memory_read` 返回 `not_found`。
+- 新增 `memory_stats`、`memory_maintain`、`memory_update`、`memory_archive`、`memory_rollback` 与 `memory_expand`。
+- 支持 `<memoryDir>/<namespace>/` 命名空间隔离与 `memory-meta.json` 溯源元数据记录。
 
 ## [0.1.0] - 2026-08-14
 
-### Added
-- 初始版本：L1 索引注入 + L2 facts + L3 sops + 行动验证写入。
+- 初始版本，支持 L1 索引注入、L2 facts、L3 sops 与行动验证写入。

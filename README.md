@@ -27,9 +27,9 @@ Layered memory carries facts and operating procedures across sessions in a works
 dsh plugin --profile web add   github:DDDFXYqiming/dsh-layered-memory   "github:DDDFXYqiming/dsh-layered-memory#path:/lib/status"
 ```
 
-Both specifiers are required: the bundle contributes two components (the memory plugin and its input-area status service). pnpm blocks exotic subdependencies, so a nested dependency cannot install the status package; declare it as a direct dependency instead.
+Both specifiers are required because the bundle contributes two components (the memory plugin and its input-area status service). pnpm blocks exotic subdependencies, so a nested dependency cannot install the status package; declare it as a direct dependency instead.
 
-Desktop runs the same install through its bundled `dsh` command with the `desktop` profile. For local development, link the repository and point the profile at it. `lib/index.js` only re-exports the source modules in `src/`.
+Desktop runs the same install through its bundled `dsh` command with the `desktop` profile. For local development, run `npm run build`, link the repository and `lib/status`, and point the profile at them. `lib/index.js` only re-exports the source modules in `src/`.
 
 ## Use
 
@@ -63,9 +63,11 @@ memory_rollback({entry, snapshot_id: "Choose a returned snapshot id"})
 | Archive and restore visibility | memory_archive |
 | Share and migrate | memory_promote, memory_namespace |
 | Process candidates | memory_pending, memory_accept, memory_discard |
-| Inspect and maintain | memory_stats, memory_index, memory_maintain |
+| Inspect and maintain | memory_stats, memory_index, memory_maintain, memory_review |
 
 Search covers active entries in the current and global spaces. Pass `include_archived:true` to reach archived content, then read the returned entry. A read reports its line range, total lines, revision, completeness and the next line offset. Global rules and complete indexes remain readable through the `rules`, `index` and `policy` entry kinds.
+
+The bundle includes an independent Memory status component that can be toggled on the plugins page. In the Web UI, a single line below the composer shows review activity, changed entry counts or incomplete review reasons for the current session, and opens the corresponding native child session when clicked.
 
 ## Configuration
 
@@ -80,6 +82,9 @@ Search covers active entries in the current and global spaces. Pass `include_arc
     memoryAccess: write
     subagentMemoryAccess: read
     autoPending: false
+    turnReviewEnabled: true
+    turnReviewMinEvidence: 6
+    turnReviewCooldownMinutes: 30
     reflectionMode: notify
 ```
 
@@ -87,11 +92,7 @@ Automatic namespaces use persistent workspace identity or canonical root paths. 
 
 The `default` namespace is global. Project indexes and default searches include it. Character budgets cover index entries and manual rules together, while full files stay available through the tools. Host variables carry memory text as data, so literal `{{template brackets}}` survive.
 
-End-of-turn review accumulates fresh evidence per session: by default, six items across three user turns, with a 30-minute dispatch interval. A verified change or recovery can satisfy the turn requirement earlier. Repeated results and evidence already saved to memory are deduplicated. Completed reviews consume their evidence; unfinished reviews retain it for later work. Independent batch maintenance uses native fresh-context subagents with limits on tools, writes, time and output. See the [maintenance guide](docs/automatic-maintenance.zh.md).
-
-## Maintenance status
-
-The plugin includes an independent Memory status component. A single line below the Web composer shows review activity, actual changed entry counts, and the last incomplete review. Its tooltip includes the failure reason, and clicking opens the corresponding native child session.
+End-of-turn review is enabled by default. It accumulates deduplicated tool evidence per session and starts an internal child session once the evidence threshold, turn count and cooldown interval are met, while a verified file change or tool recovery can satisfy the turn count earlier. Optional batch maintenance runs under `reflectionMode: auto` on native fresh-context subagents with explicit limits on tools, writes, time and model output. See the [maintenance guide](docs/automatic-maintenance.zh.md).
 
 ## Understand the implementation
 
@@ -131,10 +132,11 @@ The indexes sit in a stable prefix, so an unchanged snapshot reuses the provider
 
 ## Known Limitations and Deferred Work
 
-- **Index folding hides detail** — when the project or global index exceeds its character budget, entries are folded and descriptions are trimmed. The full body stays available through `memory_read`, but an agent that reads only the index sees less than the file contains.
-- **Maintenance spends model calls** — `reflectionMode` other than `notify` and `autoPending: true` can start fresh-context subagents. Each run costs tokens, and the budget limits are per run rather than per session.
-- **Namespace identity is path based** — automatic namespaces derive from workspace identity or canonical root path. Moving a project to another path creates a different namespace until it is migrated explicitly.
-- **Tool access is per session** — the memory tools exist only after `memory_activate`. A session that never activates memory cannot see or write entries.
+- **Index folding hides detail**, when the project or global index exceeds its character budget, entries are folded and descriptions are trimmed. The full body stays available through `memory_read`, but an agent that reads only the index sees less than the file contains.
+- **Maintenance spends model calls**, internal end-of-turn reviews and `reflectionMode: auto` runs invoke subagents that consume tokens. `autoPending: true` records retry candidates on disk for later review. Budget limits apply per maintenance run rather than per session.
+- **Namespace identity is path based**, automatic namespaces derive from workspace identity or canonical root path. Moving a project to another path creates a different namespace until it is migrated explicitly.
+- **Tool access is per session**, loading the memory skill, calling `memory_activate` or entering a maintenance session mounts the corresponding tools. The directory index is provided in context, while entry bodies are read through tools.
+- **Index rewrites on budget overflow**, when an index exceeds its limit, the engine rewrites the index file and marks `over_limit`, which can reorder listed entries. Callers should read entry counts from storage metadata rather than from the folded prompt view.
 
 ### Dev Note
 

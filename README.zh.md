@@ -27,9 +27,9 @@ kind: "package-bundle"
 dsh plugin --profile web add   github:DDDFXYqiming/dsh-layered-memory   "github:DDDFXYqiming/dsh-layered-memory#path:/lib/status"
 ```
 
-两条 spec 都要装：bundle 贡献两个组件（记忆插件本体与输入区的状态服务）。pnpm 默认阻止传递依赖里的 git 子包（blockExoticSubdeps），所以状态包必须作为直接依赖声明，否则新装只会有第一个组件。
+两条 spec 都要装，因为 bundle 贡献两个组件（记忆插件本体与输入区的状态服务）。pnpm 默认阻止传递依赖里的 git 子包（blockExoticSubdeps），所以状态包必须作为直接依赖声明，否则新装只会有第一个组件。
 
-桌面端用它随附的 `dsh` 命令，把 profile 换成 `desktop`。本地开发可以直接链接这个仓库，再让 profile 指向它。`lib/index.js` 只转发导出，实际源码在 `src/`。
+桌面端用它随附的 `dsh` 命令，把 profile 换成 `desktop`。本地开发先执行 `npm run build`，再直接链接这个仓库与 `lib/status`，并让 profile 指向它们。`lib/index.js` 只转发导出，实际源码在 `src/`。
 
 ## 使用
 
@@ -63,9 +63,11 @@ memory_rollback({entry, snapshot_id: "填一个返回的快照 id"})
 | 归档与恢复可见性 | memory_archive |
 | 共享与迁移 | memory_promote、memory_namespace |
 | 处理候选 | memory_pending、memory_accept、memory_discard |
-| 状态与维护 | memory_stats、memory_index、memory_maintain |
+| 状态与维护 | memory_stats、memory_index、memory_maintain、memory_review |
 
 搜索默认只看当前空间和全局空间的活跃条目。要翻归档内容就传 `include_archived:true`，再用返回的 entry 去读。读取结果会给出行范围、总行数、revision、是否完整以及下一行位置。全局规则和完整索引通过 `rules`、`index`、`policy` 三种 entry 读取。
+
+主包随附可独立启停的“记忆状态”组件。Web 输入区底部的一行状态按当前会话显示正在核对、真实变更条数或上次未完成原因，点击可打开对应的原生子会话。
 
 ## 配置
 
@@ -90,11 +92,7 @@ memory_rollback({entry, snapshot_id: "填一个返回的快照 id"})
 
 `default` 是全局空间，项目索引和默认搜索都把它算进来。字符预算同时管索引条目和手写规则，完整文件仍然可以通过工具读到。宿主用变量传递记忆文本，内容按数据处理，`{{模板括号}}` 会原样保留。
 
-收尾核对按会话积累新证据：默认至少 6 条，跨 3 个有新证据的用户回合后启动；明确的文件改动或失败后成功可以提前满足回合条件，冷却间隔仍为 30 分钟。重复结果和已绑定来源保存到记忆的证据会去重。内部核对利用任务上下文纠正旧事实或保存新经验，`turnReviewEnabled: false` 可关闭。独立自动维护由 `reflectionMode: auto` 启用，使用原生 fresh-context subagent，并限制工具调用、写入、时间和模型输出。细节见[维护指南](docs/automatic-maintenance.zh.md)。
-
-## 查看维护状态
-
-插件包含“分层记忆”和可独立启停的“记忆状态”组件。Web 输入区的一行状态显示正在核对、真实变更条数或上次未完成标记，悬浮提示包含失败原因；点击可打开对应原生子会话。状态按当前会话更新，详细过程保存在维护记录中。
+任务收尾核对默认开启，按会话积累去重后的新证据，达到数量与回合门槛且满足冷却间隔后在内部子会话中核对相关记忆，明确的文件改动或失败后成功可提前满足回合条件。存量自动维护由 `reflectionMode: auto` 启用，在原生 fresh-context subagent 上按已保存进度分批整理，并对工具、写入、时间和模型输出设限。细节见[维护指南](docs/automatic-maintenance.zh.md)。
 
 ## 理解实现
 
@@ -135,9 +133,9 @@ L1 索引在磁盘上保存完整的活跃目录。组装上下文时，项目�
 ## 已知限制与暂缓工作
 
 - **折叠会藏起细节**，项目索引或全局索引超出字符预算时，条目被折叠、描述被截短。完整正文还能通过 `memory_read` 拿到，但只看索引的 agent 看到的东西比文件里少。
-- **维护要花模型调用**，内部收尾核对继承任务上下文并消耗模型调用；`reflectionMode: auto` 使用独立子代理。`autoPending` 收集候选，候选的处理方式由维护模式决定。预算按单次维护运行计算。
+- **维护要花模型调用**，内部收尾核对与 `reflectionMode: auto` 都会启动子代理并消耗模型调用。`autoPending: true` 将失败后恢复的调用序列记入候选区。预算按单次维护运行计算，不按整个会话累计。
 - **命名空间靠路径识别**，自动命名空间来自工作区身份或者规范化根路径。项目挪到别的路径就会变成另一个空间，除非显式迁移。
-- **工具按会话生效**，读取记忆技能、调用 `memory_activate` 或进入收尾检查时激活相应工具。目录索引随上下文提供，正文通过工具读取。
+- **工具按会话生效**，加载 `memory` 技能、调用 `memory_activate` 或进入维护子会话时挂载相应工具。目录索引随上下文提供，正文通过工具读取。
 - **索引超预算会被改写**，超出上限时引擎重写索引文件并标记 `over_limit`，条目列表可能被重新编排。写入方看到的条目数量不能当成文件里真实条目的数量。
 
 ### 开发者备注

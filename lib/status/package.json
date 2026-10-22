@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-layered-memory-status",
-  "version": "0.10.0-preview.4",
+  "version": "0.10.0-preview.6",
   "type": "module",
   "main": "index.js",
   "description": "会话输入区的记忆核对状态与原生子会话详情。",

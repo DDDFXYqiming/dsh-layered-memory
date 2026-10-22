@@ -24,7 +24,6 @@ export const Config = Schema.object({
 	autoPending: Schema.boolean().default(false),
 	turnReviewEnabled: Schema.boolean().default(true),
 	turnReviewMinEvidence: Schema.natural().min(1).max(32).default(6),
-	turnReviewCooldownMinutes: Schema.natural().default(30),
 	reflectionEnabled: Schema.boolean().default(true),
 	reflectionMode: Schema.union([Schema.const("auto"), Schema.const("notify")]).default("notify"),
 	maintenanceProvider: Schema.string().default("spawn"),
@@ -58,7 +57,7 @@ function apply(ctx, config = {}) {
 	const cfg = Config(Object.fromEntries(Object.entries(config).filter(([, value]) => value !== "")));
 	if (!cfg.memoryDir) cfg.memoryDir = defaultMemDir();
 	const version = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
-	const runtimeInfo = { version, loadedAt: new Date().toISOString(), source: fileURLToPath(import.meta.url), memoryDir: cfg.memoryDir, mode: cfg.reflectionMode, turnReviewEnabled: cfg.turnReviewEnabled, turnReviewDelivery: "caller", turnReviewMinEvidence: cfg.turnReviewMinEvidence, turnReviewCooldownMinutes: cfg.turnReviewCooldownMinutes };
+	const runtimeInfo = { version, loadedAt: new Date().toISOString(), source: fileURLToPath(import.meta.url), memoryDir: cfg.memoryDir, mode: cfg.reflectionMode, turnReviewEnabled: cfg.turnReviewEnabled, turnReviewDelivery: "caller", turnReviewMinEvidence: cfg.turnReviewMinEvidence, maintenanceCooldownMinutes: cfg.maintenanceCooldownMinutes };
 	cfg.runtimeInfo = runtimeInfo;
 	if (Boolean(cfg.maintenanceLlmProvider) !== Boolean(cfg.maintenanceModel)) throw new Error("maintenanceLlmProvider and maintenanceModel must be set together");
 	cfg.heat = { halfLifeDays: cfg.heatHalfLifeDays, recencyWindowMs: cfg.recencyWindowDays * 86400000 };
@@ -102,7 +101,11 @@ function apply(ctx, config = {}) {
 	// 会话分叉（session.fork）是普通会话的副本：它带 parentSession 表示血缘，但仍是独立运行的根 Agent。
 	const isSubagentSession = agent => agent?.session.header.origin === "subagent";
 	const allowedAccess = agent => cfg.memoryAccess === "read" || (isSubagentSession(agent) && cfg.subagentMemoryAccess === "read") ? "read" : "write";
-	const allTools = buildTools(ctx, cfg).map(def => READ_TOOLS.has(def.name) ? def : {
+	const allTools = buildTools(ctx, cfg, {
+		requestMaintenance: (namespace, exec, report) => maintenance.request(nsRoot(cfg.memoryDir, namespace), namespace, exec.agent, {
+			purpose: "batch", trigger: { kind: "manual", callId: exec.callId }, report,
+		}),
+	}).map(def => READ_TOOLS.has(def.name) ? def : {
 		...def,
 		execute(args, exec) {
 			if (allowedAccess(exec.agent) !== "write" || states.get(exec.agent)?.access === "read") throw new Error(`${def.name}: this agent has read-only memory access`);
@@ -133,7 +136,9 @@ function apply(ctx, config = {}) {
 	const reviewTurn = createTurnReviewer(ctx, cfg, {
 		scope: agent => ({ root: resolveRoot(agent.session.header.cwd), namespace: resolveNamespace(cfg, undefined, agent.session.header.cwd) }),
 		canWrite: agent => allowedAccess(agent) === "write" && states.get(agent)?.access !== "read" && !maintenance.owns(agent),
-		review: (agent, activity) => maintenance.requestTurn(resolveRoot(agent.session.header.cwd), resolveNamespace(cfg, undefined, agent.session.header.cwd), agent, activity),
+		review: (agent, activity) => maintenance.request(resolveRoot(agent.session.header.cwd), resolveNamespace(cfg, undefined, agent.session.header.cwd), agent, {
+			purpose: "turn_review", trigger: { kind: "automatic", turn: activity.turn, endSeq: activity.endSeq }, activity,
+		}),
 	});
 	disposers.push(wireEvents(ctx, cfg, {
 		resolveRoot, reviewTurn,
@@ -180,7 +185,7 @@ function apply(ctx, config = {}) {
 		},
 		presentCall: () => ({ card: "generic", title: "激活记忆工具", kind: "execute" }),
 	}));
-	if (cfg.turnReviewEnabled || cfg.reflectionMode === "auto") ctx.tools.register(defineTool({
+	ctx.tools.register(defineTool({
 		name: "memory_maintenance_activate",
 		description: "独立维护子任务使用派发的 maintenance_id 激活受限工具。",
 		parameters: { maintenance_id: { type: "string", required: true } },

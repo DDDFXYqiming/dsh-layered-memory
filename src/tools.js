@@ -14,6 +14,8 @@ import { enqueueReview, readReviewState } from "./review.js";
 import { runMaintain } from "./maintain.js";
 import { listNamespaces, searchNamespaces } from "./search.js";
 
+export const MEMORY_MUTATIONS = new Set(["memory_write", "memory_update", "memory_accept", "memory_archive", "memory_rollback", "memory_promote"]);
+
 const str = { type: "string" }, bool = { type: "boolean" }, num = { type: "integer" };
 const req = schema => ({ ...schema, required: true });
 const obj = properties => ({ type: "object", additionalProperties: false, properties });
@@ -82,7 +84,7 @@ export function pendingSummary(content) {
 	return content.split(/\r?\n/).map(line => line.trim()).find(line => line && !line.startsWith("#") && !line.startsWith("- source"))?.slice(0, 180) ?? "";
 }
 
-export function buildTools(ctx, cfg) {
+export function buildTools(ctx, cfg, io = {}) {
 	const nsOf = (args, exec) => resolveNamespace(cfg, args.namespace, exec.agent.session.header.cwd);
 	const rootOf = entry => nsRoot(cfg.memoryDir, entry.namespace);
 	const cap = cfg.l1MaxChars ?? L1_MAX_CHARS_DEFAULT;
@@ -225,14 +227,15 @@ export function buildTools(ctx, cfg) {
 		});
 	}));
 
-	defs.push(tool("memory_maintain", "扫描重复、冲突、pending及冷条目，整理索引和元数据一致性。actionable列出需要语义复核的实际待办。", { namespace: namespaceArg }, {
-		namespace: req(str), report: req(record),
+	defs.push(tool("memory_maintain", "扫描记忆一致性和待办。review=true时主动认领并整理待办，等待模型维护结果；默认仅返回程序扫描。", { namespace: namespaceArg, review: bool }, {
+		namespace: req(str), report: req(record), maintenance: record,
 	}, async (args, exec) => {
 		const namespace = nsOf(args, exec), root = nsRoot(cfg.memoryDir, namespace);
-		return withNsWriteLock(root, () => {
+		const report = withNsWriteLock(root, () => {
 			ensureNamespaceLayout(root);
-			return { namespace, report: runMaintain(root, cap, { ...cfg.maintainOpts, nearDupeThreshold: cfg.nearDupeThreshold, mergeCandidateThreshold: cfg.mergeCandidateThreshold, minTokensForFuzzy: cfg.minTokensForFuzzy, coldReviewDays: cfg.coldReviewDays }) };
+			return runMaintain(root, cap, { ...cfg.maintainOpts, nearDupeThreshold: cfg.nearDupeThreshold, mergeCandidateThreshold: cfg.mergeCandidateThreshold, minTokensForFuzzy: cfg.minTokensForFuzzy, coldReviewDays: cfg.coldReviewDays });
 		});
+		return { namespace, report, ...(args.review ? { maintenance: await io.requestMaintenance(namespace, exec, report) } : {}) };
 	}));
 
 	defs.push(tool("memory_stats", "查看所有空间的条目、历史、pending及最近维护状态。namespace可限定单个空间。", { namespace: namespaceArg }, {

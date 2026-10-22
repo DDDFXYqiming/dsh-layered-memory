@@ -4,9 +4,9 @@ import { runMaintain } from "./maintain.js";
 import { writePending } from "./memory-ops.js";
 import { createMaintenanceRunner } from "./maintenance-agent.js";
 import { hasReviewWork, recordOrdinaryChange } from "./review.js";
+import { MEMORY_MUTATIONS } from "./tools.js";
 
 const MUTATIONS_WITH_SOURCE = new Set(["memory_write", "memory_update", "memory_accept"]);
-const MEMORY_MUTATIONS = new Set([...MUTATIONS_WITH_SOURCE, "memory_archive", "memory_rollback", "memory_promote"]);
 function resultText(result) { return (result.content || []).filter(block => block.type === "text").map(block => block.text).join("\n").replace(/\s+/g, " ").slice(0, 600); }
 function resultCallId(event) {
 	if (event.type === "tool/result") return event.data.callId || event.data.message?.source?.callId || event.data.message?.tool_call_id;
@@ -15,7 +15,7 @@ function resultCallId(event) {
 
 export function wireEvents(ctx, cfg, io) {
 	const maintenance = createMaintenanceRunner(ctx, cfg, {
-		readState: readReflectionState, writeState: writeReflectionState, slugify, entryExists, entryContentRevision,
+		writeState: writeReflectionState, slugify, entryExists, entryContentRevision,
 		maintain: root => runMaintain(root, cfg.l1MaxChars, cfg.maintainOpts),
 		tools: namespace => io.maintenanceTools(namespace),
 		onActivity: io.onActivity,
@@ -44,7 +44,7 @@ export function wireEvents(ctx, cfg, io) {
 		if (!write) return;
 		state.writes.delete(callId);
 		const root = nsRoot(cfg.memoryDir, write.entry.namespace);
-				const refs = write.evidenceCallIds.map(id => state.calls.get(id)?.seq);
+		const refs = write.evidenceCallIds.map(id => state.calls.get(id)?.seq);
 		const missing = write.evidenceCallIds.filter((_, i) => refs[i] === undefined);
 		const sourceSeqs = [...new Set([...refs.filter(seq => seq !== undefined), eventSeq])];
 		setEntryMeta(root, write.entry.kind, write.entry.key, previous => previous?.sourceCallId === callId ? { sourceSession: session.id, sourceSeqs, sourceCallId: callId, missingEvidenceCallIds: missing } : null);
@@ -59,7 +59,7 @@ export function wireEvents(ctx, cfg, io) {
 			const previousEvent = state.calls.get(exec.callId);
 			if (previousEvent?.seq !== undefined) bindSource(session, exec.callId, previousEvent.seq);
 		}
-		if (!result.isError && MEMORY_MUTATIONS.has(exec.name) && result.value?.changed && result.value.entry && !maintenance.isBatch(exec.agent)) {
+		if (!result.isError && MEMORY_MUTATIONS.has(exec.name) && result.value?.changed && result.value.entry && !maintenance.owns(exec.agent)) {
 			recordOrdinaryChange(nsRoot(cfg.memoryDir, result.value.entry.namespace), { entry: result.value.entry, revision: result.value.revision });
 		}
 		if (!cfg.autoPending || maintenance.owns(exec.agent) || exec.name.startsWith("memory_")) return;
@@ -80,19 +80,23 @@ export function wireEvents(ctx, cfg, io) {
 		writePending(io.resolveRoot(session.header.cwd), { sourceSession: session.id, sourceSeqs, retries, reason: `本次捕获 ${retries.length} 个失败后成功序列，需确认是否有可复用经验。` });
 		state.captured = [];
 	}
-	async function scanNamespace(session, root, periodic) {
+	async function scanNamespace(session, root, periodic, activity, allowDispatch) {
 		const state = readReflectionState(root);
 		const revision = computeContentRevision(root);
 		const reviewReady = hasReviewWork(root);
 		if (!periodic && !reviewReady && isSettledRevision(state, revision)) return;
 		const signals = collectReflectionSignals(root);
 		if (!periodic && !reviewReady && !reflectionBuckets(signals, cfg).length && state.outcome !== "needs_review") return;
-		const report = runMaintain(root, cfg.l1MaxChars, cfg.maintainOpts);
-		if (!cfg.reflectionEnabled || cfg.reflectionMode !== "auto" || !report.actionable.needsModelReview) return;
 		const namespace = resolveNamespace(cfg, undefined, session.header.cwd);
+		const trigger = activity ? { kind: "automatic", turn: activity.turn, endSeq: activity.endSeq } : null;
+		const origin = activity ? { parentSession: session.id, trigger,
+			memoryChanges: activity.memoryChanges.filter(item => item.entry.namespace === namespace), reviewRequests: activity.reviewRequests,
+		} : undefined;
+		const report = runMaintain(root, cfg.l1MaxChars, { ...cfg.maintainOpts, origin });
+		if (!allowDispatch || !activity || !cfg.reflectionEnabled || cfg.reflectionMode !== "auto" || !report.actionable.needsModelReview) return;
 		const agent = ctx.get("agents").get(session.id);
 		if (!agent || !io.canWrite(agent)) return;
-		await maintenance.request(root, namespace, agent, report);
+		await maintenance.request(root, namespace, agent, { purpose: "batch", trigger, activity, report });
 	}
 	disposers.push(ctx.on("session/event", (session, event) => {
 		const state = stateFor(session);
@@ -112,16 +116,18 @@ export function wireEvents(ctx, cfg, io) {
 		schedule("turn maintenance", async () => {
 			const agent = ctx.get("agents").get(session.id);
 			if (!agent) return;
-			await io.reviewTurn(agent, event.data.turn, event.seq);
+			const reviewed = await io.reviewTurn(agent, event.data.turn, event.seq);
 			if (disposed) return;
+			const activity = reviewed?.activity;
 			const periodic = cfg.maintainEveryTurns > 0 && totalTurns % cfg.maintainEveryTurns === 0;
 			if (!periodic && !cfg.reflectionEnabled) return;
 			const previous = namespaceScans.get(root) || { turn: -Infinity, at: -Infinity };
 			const cooled = totalTurns - previous.turn >= cfg.reflectCooldownTurns;
-			const automaticWork = cfg.reflectionEnabled && cfg.reflectionMode === "auto" && hasReviewWork(root);
-			if (!automaticWork && ((!periodic && !cooled) || Date.now() - previous.at < 600000)) return;
+			const changed = activity && (activity.memoryChanges.length || activity.reviewRequests.length);
+			const automaticWork = cfg.reflectionEnabled && cfg.reflectionMode === "auto" && activity?.hasNewEvidence && hasReviewWork(root);
+			if (!changed && !automaticWork && ((!periodic && !cooled) || Date.now() - previous.at < 600000)) return;
 			namespaceScans.set(root, { turn: totalTurns, at: Date.now() });
-			await scanNamespace(session, root, periodic);
+			await scanNamespace(session, root, periodic, activity, !reviewed?.result?.run?.dispatchedAt);
 		});
 	}));
 	disposers.push(ctx.on("agent/disposed", ({ agent }) => {

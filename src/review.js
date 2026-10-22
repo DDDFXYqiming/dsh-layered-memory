@@ -83,25 +83,35 @@ function refresh(state, entries) {
 	}
 	settle(state, entries);
 }
-function summary(state) {
-	const jobs = [state.pressure, ...state.conflicts].filter(Boolean);
+function summary(state, workIds) {
+	const jobs = [state.pressure, ...state.conflicts].filter(job => job && (!workIds || workIds.includes(job.id)));
+	const pressure = jobs.find(job => job.kind === "index_pressure");
 	return {
 		ready: jobs.some(job => job.status === "pending"),
 		waiting: jobs.filter(job => job.status !== "complete").reduce((n, job) => n + (job.items || []).filter(item => item.status === "waiting_evidence").length, 0),
 		ordinaryChanges: Object.keys(state.ordinaryChanges).length,
-		pressure: state.pressure && { id: state.pressure.id, status: state.pressure.status, selectionNeeded: state.pressure.items === null },
-		conflicts: state.conflicts.filter(job => job.status !== "complete").map(job => ({ id: job.id, status: job.status, entry: job.items[0].entry })),
+		pressure: pressure ? { id: pressure.id, status: pressure.status, selectionNeeded: pressure.items === null } : null,
+		conflicts: jobs.filter(job => job.kind === "evidence_conflict" && job.status !== "complete").map(job => ({ id: job.id, status: job.status, entry: job.items[0].entry })),
 		revision: hashText(JSON.stringify(jobs)),
 	};
 }
 
-export function syncReview(root, { overLimit, entries = readEntries(root) }) {
+export function syncReview(root, { overLimit, entries = readEntries(root), origin }) {
 	return update(root, state => {
 		refresh(state, entries);
 		state.overLimit = overLimit;
 		if (overLimit && (!state.pressure || state.pressure.status === "complete" && Object.keys(state.ordinaryChanges).length >= REVIEW_CHANGE_THRESHOLD)) {
 			if (state.pressure) state.completedPressure.push(state.pressure);
-			state.pressure = { id: randomUUID(), kind: "index_pressure", status: "pending", createdAt: now(), items: null, reviewed: [] };
+			state.pressure = { id: randomUUID(), kind: "index_pressure", status: "pending", createdAt: now(), items: null, reviewed: [], ...(origin?.memoryChanges.length ? { ownerSession: origin.parentSession, trigger: origin.trigger } : {}) };
+		}
+		if (origin) {
+			const changed = new Set(origin.memoryChanges.map(item => keyOf(item.entry)));
+			for (const job of [state.pressure, ...state.conflicts].filter(job => job?.status === "pending")) {
+				if (origin.reviewRequests.includes(job.id) || job.items?.some(item => changed.has(keyOf(item.entry)))) {
+					job.ownerSession = origin.parentSession;
+					job.trigger = origin.trigger;
+				}
+			}
 		}
 		return summary(state);
 	});
@@ -141,7 +151,8 @@ export function enqueueReview(root, { entry, reason, evidence = [], revision }) 
 			if (!job.evidence.some(item => JSON.stringify(item) === JSON.stringify(source))) job.evidence.push(source);
 		}
 		const item = job.items[0];
-		if (!job.status || previousEvidence !== hashText(JSON.stringify(job.evidence)) || item.revision !== current.revision) {
+		const changed = !job.status || previousEvidence !== hashText(JSON.stringify(job.evidence)) || item.revision !== current.revision;
+		if (changed) {
 			item.revision = current.revision; item.status = job.evidence.length ? "pending" : "waiting_evidence";
 			item.reason = reason; job.reason = reason; job.status = item.status;
 			for (const candidate of state.pressure?.status === "complete" ? [] : state.pressure?.items || []) {
@@ -149,21 +160,47 @@ export function enqueueReview(root, { entry, reason, evidence = [], revision }) 
 			}
 		}
 		settle(state, readEntries(root));
-		return { queued: true, id: job.id, status: job.status, entry, revision: current.revision };
+		return { queued: true, changed, id: job.id, status: job.status, entry, revision: current.revision };
 	});
 }
 
-export function reviewWork(root, namespace) {
+function workView(state, entries, namespace, workIds) {
+	const attach = item => ({ ...item, entry: { namespace, ...item.entry } });
+	const jobs = [state.pressure, ...state.conflicts].filter(job => job && job.status !== "complete" && (!workIds || workIds.includes(job.id))).map(job => ({
+		...job, items: job.items?.map(attach) ?? null, reviewed: job.reviewed.map(attach),
+	}));
+	return { ...summary(state, workIds), jobs, candidateLimit: REVIEW_CANDIDATE_LIMIT,
+		catalog: jobs.some(job => job.kind === "index_pressure" && job.items === null) ? entries.filter(entry => !entry.meta.archived).map(entry => ({ entry: { namespace, ...refOf(entry) }, title: entry.title, revision: entry.revision })) : [],
+	};
+}
+
+export function reviewWork(root, namespace, workIds) {
 	return update(root, state => {
 		const entries = readEntries(root);
 		refresh(state, entries);
-		const attach = item => ({ ...item, entry: { namespace, ...item.entry } });
-		const jobs = [state.pressure, ...state.conflicts].filter(job => job && job.status !== "complete").map(job => ({
-			...job, items: job.items?.map(attach) ?? null, reviewed: job.reviewed.map(attach),
-		}));
-		return { ...summary(state), jobs, candidateLimit: REVIEW_CANDIDATE_LIMIT,
-			catalog: state.pressure?.items === null ? entries.filter(entry => !entry.meta.archived).map(entry => ({ entry: { namespace, ...refOf(entry) }, title: entry.title, revision: entry.revision })) : [],
-		};
+		return workView(state, entries, namespace, workIds);
+	});
+}
+
+export function claimReviewWork(root, namespace, { parentSession, trigger, activity, runs }) {
+	return update(root, state => {
+		const entries = readEntries(root);
+		refresh(state, entries);
+		const manual = trigger.kind === "manual";
+		const selected = [];
+		for (const job of [state.pressure, ...state.conflicts].filter(job => job?.status === "pending")) {
+			if (manual) {
+				job.ownerSession = parentSession;
+				job.trigger = trigger;
+			}
+			if (job.ownerSession !== parentSession) continue;
+			const fresh = JSON.stringify(job.trigger) === JSON.stringify(trigger);
+			const previous = runs.findLast(run => run.workIds?.includes(job.id));
+			const unattempted = !previous || JSON.stringify(previous.workTriggers[job.id]) !== JSON.stringify(job.trigger);
+			const continuing = activity?.hasNewEvidence && (unattempted || previous.progressedWorkIds.includes(job.id));
+			if (manual || fresh || continuing) selected.push(job.id);
+		}
+		return workView(state, entries, namespace, selected);
 	});
 }
 

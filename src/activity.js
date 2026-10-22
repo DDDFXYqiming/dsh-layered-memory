@@ -48,7 +48,7 @@ export function createActivitySource(ctx, cfg) {
 			revision: state.revision,
 			running: items.filter(item => item.status === "running" && item.finishedAt === null),
 			latestChanged: finished.find(item => item.changedEntries > 0) || null,
-			latestFailure: finished[0]?.status === "failed" ? finished[0] : null,
+			latestFailure: ["failed", "deferred"].includes(finished[0]?.status) ? finished[0] : null,
 		};
 	}
 	function store(state, item) {

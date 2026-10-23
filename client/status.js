@@ -1,5 +1,7 @@
 export function createStatusClient(require, styles) {
 	const React = require("react");
+	const { createPortal } = require("react-dom");
+	const { Button, SegmentedControl, IconCloseOutlineRegular, IconWarningOutlineRegular, useAnchoredPosition, useDismissOnOutsidePointer } = require("@deepseek-ai/dsh-client-ui-primitives");
 	const { RemoteSnapshotStream, RemoteStreamCarrierError } = require("@deepseek-ai/dsh-api-gateway/client");
 	const h = React.createElement;
 	async function resultValue(request) {
@@ -91,7 +93,7 @@ export function createStatusClient(require, styles) {
 			run.waitingEntries ? h("span", null, t("waitingCount", { count: run.waitingEntries })) : null,
 			run.remainingEntries ? h("span", null, t("remainingCount", { count: run.remainingEntries })) : null);
 	}
-	function ActivityPanel({ open, snapshot, controls, panelRef, panelId, t }) {
+	function ActivityPanel({ open, snapshot, controls, panelRef, panelId, position, onClose, t }) {
 		const [workers, setWorkers] = React.useState([]);
 		const [workersError, setWorkersError] = React.useState(null);
 		const [refresh, setRefresh] = React.useState(0);
@@ -140,67 +142,61 @@ export function createStatusClient(require, styles) {
 			finally { setStopping(null); }
 		}
 		function stopButton(worker) {
-			return worker?.canStop ? h("button", { type: "button", className: "lm-stop", disabled: Boolean(stopping), onClick: () => stop(worker), "data-memory-stop": worker.purpose }, stopping === worker.id ? t("stopping") : t("stop")) : null;
+			return worker?.canStop ? h(Button, { variant: "ghost", size: "sm", className: "lm-stop", disabled: Boolean(stopping), onClick: () => stop(worker), "data-memory-stop": worker.purpose }, stopping === worker.id ? t("stopping") : t("stop")) : null;
 		}
 		function runBody(run) {
 			return h(React.Fragment, null, h(Counts, { run, t }), run.summary ? h("p", { className: "lm-run-summary" }, run.summary) : null);
 		}
 		const worker = workers.find(value => value.id === workerId);
 		const finished = snapshot?.records.filter(run => run.finishedAt !== null) || [];
-		return h("div", { ref: panelRef, id: panelId, popover: "auto", role: "dialog", "aria-label": t("activity"), className: "lm-activity-panel", "data-memory-details": true },
-			h("header", { className: "lm-activity-heading" }, h("strong", null, t("activity")), h("button", { type: "button", className: "lm-close", onClick: () => panelRef.current.hidePopover(), title: t("close"), "aria-label": t("close") }, "×")),
-			h("nav", { className: "lm-activity-tabs", "aria-label": t("activity") },
-				h("button", { type: "button", "aria-pressed": workerId === null, onClick: () => setWorkerId(null) }, t("runs")),
-				...workers.map(value => h("button", { key: value.purpose, type: "button", disabled: !value.id, title: value.id || t("notStarted"), "aria-pressed": workerId !== null && workerId === value.id, "data-memory-worker": value.purpose, "data-memory-worker-id": value.id, onClick: () => setWorkerId(value.id) },
-					h("span", { className: "lm-worker-dot", "data-state": value.status, "aria-hidden": true }), t(value.purpose === "turn_review" ? "reviewWorker" : "batchWorker")))),
+		const view = workerId || "runs";
+		const tabsId = panelId + "-views";
+		return h("div", { ref: panelRef, id: panelId, role: "dialog", "aria-label": t("activity"), className: "lm-activity-panel", "data-memory-details": true, style: position || { visibility: "hidden", left: 0, top: 0 } },
+			h("header", { className: "lm-activity-heading" },
+				h("span", { className: "lm-activity-title" }, h(Brain), t("activity")),
+				h(Button, { variant: "ghost", size: "sm", className: "lm-close", onClick: onClose, "aria-label": t("close") }, h(IconCloseOutlineRegular, { size: 14 }))),
+			h("div", { className: "lm-activity-rule", "aria-hidden": true }),
+			h(SegmentedControl, {
+				id: tabsId, value: view, label: t("activity"), className: "lm-activity-tabs",
+				onChange: value => setWorkerId(value === "runs" ? null : value),
+				options: [{ value: "runs", label: t("runs") }, ...workers.map(value => ({ value: value.id || value.purpose, label: t(value.purpose === "turn_review" ? "reviewWorker" : "batchWorker"), disabled: !value.id, title: value.id ? undefined : t("notStarted") }))],
+			}),
 			workersError ? h("p", { className: "lm-activity-error", role: "alert" }, workersError) : null,
 			stopError ? h("p", { className: "lm-activity-error", role: "alert" }, stopError) : null,
+			h("div", { className: "lm-activity-body", role: "tabpanel", id: tabsId + "-" + view + "-panel", "aria-labelledby": tabsId + "-" + view },
 			workerId === null ? h("div", { className: "lm-activity-content" },
 				snapshot?.running.length ? h("section", { className: "lm-current-runs" }, h("h3", null, t("current")), ...snapshot.running.map(run => h("article", { key: run.id, className: "lm-current-run", "data-memory-run": run.id, "data-phase": run.phase },
 					h("div", { className: "lm-run-heading" }, h("strong", null, t(run.purpose === "turn_review" ? "review" : "batch")), h("span", { className: "lm-run-state" }, t(run.phase ? "phase-" + run.phase : "state-running")), stopButton(workers.find(value => value.runId === run.id))), runBody(run)))) : null,
 				finished.length ? h("section", null, h("h3", null, t("runs")), ...finished.map(run => h("details", { key: run.id, className: "lm-finished-run", open: run.id === snapshot.latestFailure?.id, "data-memory-run": run.id, "data-run-status": run.status },
 					h("summary", null, h("span", null, t(run.purpose === "turn_review" ? "review" : "batch")), h("span", { className: "lm-run-state", "data-state": run.status }, t("state-" + run.status)), run.changedEntries ? h("span", { className: "lm-run-state" }, t("changedCount", { count: run.changedEntries })) : null, h("time", { dateTime: run.finishedAt, title: run.finishedAt }, time(run.finishedAt)), run.legacy ? h("span", { className: "lm-legacy", title: run.sessionId }, t("legacy")) : null), runBody(run)))) : !snapshot?.running.length ? h("p", { className: "lm-activity-empty" }, t("empty")) : null)
 				: h(React.Fragment, null,
-					h("div", { className: "lm-history-heading" }, h("span", null, t(worker.phase ? "phase-" + worker.phase : "state-" + worker.status)), stopButton(worker), h("button", { type: "button", onClick: () => setHistoryRevision(value => value + 1), disabled: history.busy }, t("refresh"))),
+					h("div", { className: "lm-history-heading" }, h("span", null, t(worker.phase ? "phase-" + worker.phase : "state-" + worker.status)), stopButton(worker), h(Button, { variant: "ghost", size: "sm", onClick: () => setHistoryRevision(value => value + 1), disabled: history.busy }, t("refresh"))),
 					h("div", { className: "lm-activity-content lm-history", "data-memory-history": workerId },
-						history.page?.hasPrevious ? h("button", { type: "button", className: "lm-history-older", disabled: history.busy, onClick: loadOlder }, t("older")) : null,
+						history.page?.hasPrevious ? h(Button, { variant: "ghost", size: "sm", className: "lm-history-older", disabled: history.busy, onClick: loadOlder }, t("older")) : null,
 						history.error ? h("p", { className: "lm-activity-error", role: "alert" }, history.error) : null,
 						history.busy ? h("p", { className: "lm-activity-empty", role: "status" }, t("loading")) : null,
 						...((history.page?.rows || []).map(row => row.kind === "assistant" ? h("article", { key: row.id, className: "lm-history-message", "data-memory-history-row": row.id }, h("div", { className: "lm-history-label" }, t("trace-" + row.kind), row.at ? h("time", { dateTime: row.at }, time(row.at)) : null), h("div", { className: "lm-history-body" }, row.text))
 							: h("details", { key: row.id, className: "lm-history-event", "data-memory-history-row": row.id }, h("summary", null, t("trace-" + row.kind), row.at ? h("time", { dateTime: row.at }, time(row.at)) : null), h("pre", { className: "lm-history-body" }, row.text)))),
 						!history.busy && history.page && !history.page.rows.length ? h("p", { className: "lm-activity-empty" }, t("historyEmpty")) : null,
-						h("div", { ref: historyEnd }))));
+						h("div", { ref: historyEnd })))));
 	}
 	function MemoryStatus({ activityStore, controls, t }) {
 		const buttonRef = React.useRef(null);
 		const panelRef = React.useRef(null);
 		const panelId = React.useId();
 		const [open, setOpen] = React.useState(false);
-		React.useLayoutEffect(() => {
-			if (!open) return;
-			const button = buttonRef.current;
-			const panel = panelRef.current;
-			const place = () => {
-				const anchor = button.getBoundingClientRect();
-				const width = panel.getBoundingClientRect().width;
-				panel.style.left = Math.max(12, Math.min(anchor.left + (anchor.width - width) / 2, document.documentElement.clientWidth - width - 12)) + "px";
-				panel.style.bottom = window.innerHeight - anchor.top + 8 + "px";
-				panel.style.maxHeight = Math.min(560, anchor.top - 20) + "px";
-			};
-			place();
-			const observer = new ResizeObserver(place);
-			observer.observe(button);
-			observer.observe(panel);
-			window.addEventListener("resize", place);
-			window.addEventListener("scroll", place, true);
-			return () => { observer.disconnect(); window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true); };
-		}, [open]);
+		const position = useAnchoredPosition({ open, anchorRef: buttonRef, panelRef, side: "top", gap: 8, margin: 12 });
+		useDismissOnOutsidePointer(buttonRef, open, setOpen, panelRef);
 		React.useEffect(() => {
-			const panel = panelRef.current;
-			const toggle = event => setOpen(event.newState === "open");
-			panel.addEventListener("toggle", toggle);
-			return () => panel.removeEventListener("toggle", toggle);
-		}, []);
+			if (!open) return;
+			const keydown = event => { if (event.key === "Escape") setOpen(false); };
+			const click = event => {
+				if (!buttonRef.current?.contains(event.target) && !panelRef.current?.contains(event.target)) setOpen(false);
+			};
+			document.addEventListener("keydown", keydown);
+			document.addEventListener("click", click, true);
+			return () => { document.removeEventListener("keydown", keydown); document.removeEventListener("click", click, true); };
+		}, [open]);
 		const value = React.useSyncExternalStore(activityStore.subscribe, activityStore.getSnapshot);
 		const snapshot = value.snapshot;
 		const running = snapshot?.running[0];
@@ -224,11 +220,11 @@ export function createStatusClient(require, styles) {
 			h("span", { className: "lm-status-seat", "data-memory-status": value.error ? "unavailable" : running ? "running" : failure ? "failed" : waiting ? "waiting" : stopped ? "stopped" : item ? item.changedEntries ? "changed" : "reviewed" : snapshot ? "idle" : "loading" },
 				h(clickable ? "button" : "span", {
 					className: "lm-status-line" + (running && !value.error ? " is-running" : "") + (isFailure ? " is-failed" : ""),
-					...(clickable ? { ref: buttonRef, type: "button", onClick: () => panelRef.current.togglePopover(), "aria-haspopup": "dialog", "aria-expanded": open, "aria-controls": panelId } : {}),
+					...(clickable ? { ref: buttonRef, type: "button", onClick: () => setOpen(!open), "aria-haspopup": "dialog", "aria-expanded": open, "aria-controls": panelId } : {}),
 					title, "aria-label": title,
 				}, h(Brain), h("span", { className: "lm-status-text", role: "status", "aria-live": "polite" }, label),
-					isFailure ? h("span", { className: "lm-status-failure", "aria-hidden": true }, "!") : clickable ? h("span", { className: "lm-status-details", "aria-hidden": true }, "⌃") : null)),
-			h(ActivityPanel, { open, snapshot, controls, panelRef, panelId, t }));
+					isFailure ? h(IconWarningOutlineRegular, { className: "lm-status-failure", size: 14 }) : null)),
+			open && createPortal(h(ActivityPanel, { open, snapshot, controls, panelRef, panelId, position, onClose: () => setOpen(false), t }), document.body));
 	}
 	return {
 		inject: ["remote"],

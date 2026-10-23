@@ -84,6 +84,11 @@ memory_rollback({entry, snapshot_id: "填一个返回的快照 id"})
     autoPending: false
     turnReviewEnabled: true
     turnReviewMinEvidence: 6
+    turnReviewReasoningEffort: ''
+    maintenanceMaxTokens: 16384
+    maintenanceMaxCalls: 64
+    maintenanceMaxWrites: 6
+    maintenanceTimeoutSeconds: 300
     maintenanceCooldownMinutes: 30
     reflectionMode: notify
 ```
@@ -92,7 +97,11 @@ memory_rollback({entry, snapshot_id: "填一个返回的快照 id"})
 
 `default` 是全局空间，项目索引和默认搜索都把它算进来。字符预算同时管索引条目和手写规则，完整文件仍然可以通过工具读到。宿主用变量传递记忆文本，内容按数据处理，`{{模板括号}}` 会原样保留。
 
-任务收尾核对默认开启，按会话积累至少三个用户回合的去重新证据，达到数量门槛且满足冷却间隔后交给固定核对会话。每个父对话最多两个维护会话：核对沿用当前父模型，存量整理通过 `maintenanceLlmProvider` 与 `maintenanceModel` 明确配置模型。两个会话首次按需创建，以后恢复原 ID；输入由增量证据包与精确来源补读组成，历史按需压缩。存量自动维护由 `reflectionMode: auto` 启用，并按保存进度分批推进。调用、写入、时间和输出预算每次重新计算；两条路径通过 `maintenanceCooldownMinutes` 共用空间级冷却，维护自己的写入不算新用户工作。需要 DSH 0.2.1-rc.2 或更新的兼容版本，细节见[维护指南](docs/automatic-maintenance.zh.md)。
+任务收尾核对默认开启，首次派发需要至少三个用户回合的去重新证据，达到数量门槛并满足冷却间隔。每个父对话最多两个维护会话：核对沿用当前父模型，存量整理通过 `maintenanceLlmProvider` 与 `maintenanceModel` 明确配置模型。`turnReviewReasoningEffort` 可单独指定核对思考档，留空则沿用父会话。存量自动维护由 `reflectionMode: auto` 启用。两条路径通过 `maintenanceCooldownMinutes` 共用空间级冷却，维护自己的写入不算新用户工作。
+
+成功写入立即记账保存。完成工具先校验条目，再结束维护代理；提交有误时返回具体条目和修正方式，代理可在本轮继续处理。工作调用额度用完后仍可保存检查点和提交完成结果。超时或取消会结束本轮并保留已保存进度；有新证据且冷却到期后，未完成核对可以继续，无需重新凑满首次派发门槛。固定会话会收到前次结果、剩余工作及版本仍有效的已保存条目。
+
+默认每轮最多 64 次工作调用、6 次写入和 300 秒，每次模型响应最多输出 16384 tokens。存量 profile 中显式填写的数值会继续覆盖升级后的默认值。同一版本的分页读取会累计，修改时只检查目标条目的版本，无关条目的变化不会中止整轮维护。需要 DSH 0.2.1-rc.2 或更新的兼容版本，细节见[维护指南](docs/automatic-maintenance.zh.md)。
 
 ## 理解实现
 

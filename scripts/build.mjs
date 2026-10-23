@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, lstatSync, realpathSync, unlinkSync, symlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, lstatSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -41,20 +41,15 @@ for (const [language, meta] of Object.entries({
 })) artifacts.set("locale/" + language + ".json", JSON.stringify({ meta }, null, 2) + "\n");
 
 mkdirSync(output, { recursive: true });
-let linkedOutput = false;
 if (existsSync(bundled)) {
 	if (lstatSync(bundled).isSymbolicLink()) {
-		if (realpathSync(bundled) !== realpathSync(output)) {
-			unlinkSync(bundled);
-			symlinkSync(output, bundled, process.platform === "win32" ? "junction" : "dir");
-		}
-		linkedOutput = true;
+		unlinkSync(bundled);
 	} else if (JSON.parse(readFileSync(join(bundled, "package.json"), "utf8")).name !== STATUS_PACKAGE) {
 		throw new Error("状态依赖目录已有其他包，拒绝覆盖");
 	}
 }
-// 同时生成可重建的 file: 依赖与 npm pack 实际收集的 bundled 依赖目录。
-for (const directory of linkedOutput ? [output] : [output, bundled]) {
+// 独立文件让 npm pack 避免生成部分 pnpm 安装器会解为空文件的 tar 硬链接。
+for (const directory of [output, bundled]) {
 	for (const [name, content] of artifacts) {
 		const path = join(directory, name);
 		mkdirSync(dirname(path), { recursive: true });

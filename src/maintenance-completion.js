@@ -9,16 +9,16 @@ export function installMaintenanceCompletion(agentCtx, agent, parameters, before
 	const commit = value => { captured = { ...value, receiptFrom: agent.session.seq }; };
 	agentCtx.tools.register(defineTool({
 		name: MAINTENANCE_COMPLETE,
-		description: "提交本次维护的结构化结果并正常结束本轮。所有条目核对与待办保存完成后调用一次。",
+		description: "结束本次维护。写入已由程序保存记账，只需提交总结；可补充保留、待证据或剩余条目。校验失败时本轮继续，可根据错误修正后重交。",
 		parameters,
-		output: { schema: { type: "object", properties: { recorded: { type: "boolean", required: true } }, additionalProperties: false }, render: () => [{ type: "text", text: "本次维护结果已提交。" }] },
+		output: { schema: { type: "object", properties: { recorded: { type: "boolean", required: true } }, additionalProperties: true }, render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }] },
 		async execute(args, exec) {
 			const violations = validateJsonSchemaValue(schema, args);
 			if (violations.length) throw new ToolArgsError(violations);
-			await beforeComplete(args, exec);
-			staged.set(exec, { value: args, rootCallId: exec.rootCallId });
+			const value = await beforeComplete(args, exec);
+			staged.set(exec, { value, rootCallId: exec.rootCallId });
 			exec.concludeTurn();
-			return { recorded: true };
+			return { recorded: true, ...value };
 		},
 	}));
 	agentCtx.tools.guard(() => captured || pending || staged.size ? "本次维护结果正在提交或已经完成" : undefined);

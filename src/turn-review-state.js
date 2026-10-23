@@ -70,27 +70,40 @@ export function prepareTurnReview(root, { parentSession, namespace, activity, en
 		}
 		if (state.claim && now - state.claim.at > (timeoutSeconds + 60) * 1000) state.claim = null;
 		const waiting = { claim: null, hasNewEvidence };
-		if (!enabled || state.claim || !hasNewEvidence || state.pending.length < minEvidence) return waiting;
-		if (unique(state.pending.map(item => item.turnSeq)).length < 3) return waiting;
+		if (!enabled || state.claim || !hasNewEvidence || !state.pending.length) return waiting;
+		if (!state.resume && (state.pending.length < minEvidence || unique(state.pending.map(item => item.turnSeq)).length < 3)) return waiting;
 		const id = randomUUID();
 		state.claim = { id, at: now, fingerprints: state.pending.map(item => item.fingerprint) };
 		const memories = new Map(state.pending.flatMap(item => item.memories).map(entry => [JSON.stringify(entry), entry]));
 		const tasks = new Map(state.pending.flatMap(item => item.tasks || []).map(task => [task.seq, task]));
-		return { hasNewEvidence, claim: { id, activity: { turn: activity.turn, endSeq: activity.endSeq, memories: [...memories.values()].slice(-16),
+		return { hasNewEvidence, claim: { id, activity: { claimId: id, turn: activity.turn, endSeq: activity.endSeq, memories: [...memories.values()].slice(-16),
 			tasks: [...tasks.values()],
 			evidence: state.pending.map(item => ({ tool: item.tool, ...item.sources.at(-1) })),
 		} } };
 	});
 }
 
-export function finishTurnReview(root, { parentSession, namespace, claimId, completed }) {
+export function acknowledgeTurnReview(root, { parentSession, namespace, claimId, sources }) {
+	if (!claimId || !sources.length) return;
+	const seqs = new Set(sources.filter(source => source.sourceSession === parentSession).map(source => source.seq));
+	update(root, parentSession, namespace, state => {
+		if (state.claim?.id !== claimId) return;
+		const processed = new Set(state.pending.filter(item => state.claim.fingerprints.includes(item.fingerprint) && item.sources.some(source => seqs.has(source.seq))).map(item => item.fingerprint));
+		state.seen = unique([...state.seen, ...processed]).slice(-SEEN_LIMIT);
+		state.pending = state.pending.filter(item => !processed.has(item.fingerprint));
+		state.claim.fingerprints = state.claim.fingerprints.filter(value => !processed.has(value));
+	});
+}
+
+export function finishTurnReview(root, { parentSession, namespace, claimId, completed, attempted = false, remaining = [] }) {
 	update(root, parentSession, namespace, state => {
 		if (state.claim?.id !== claimId) return;
 		if (completed) {
 			const processed = state.claim.fingerprints;
 			state.seen = unique([...state.seen, ...processed]).slice(-SEEN_LIMIT);
 			state.pending = state.pending.filter(item => !processed.includes(item.fingerprint));
-		}
+			state.resume = false;
+		} else if (attempted) state.resume = state.pending.length > 0 || remaining.length > 0;
 		state.claim = null;
 	});
 }

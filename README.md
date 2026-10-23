@@ -84,6 +84,11 @@ The bundle includes an independent Memory status component that can be toggled o
     autoPending: false
     turnReviewEnabled: true
     turnReviewMinEvidence: 6
+    turnReviewReasoningEffort: ''
+    maintenanceMaxTokens: 16384
+    maintenanceMaxCalls: 64
+    maintenanceMaxWrites: 6
+    maintenanceTimeoutSeconds: 300
     maintenanceCooldownMinutes: 30
     reflectionMode: notify
 ```
@@ -92,7 +97,11 @@ Automatic namespaces use persistent workspace identity or canonical root paths. 
 
 The `default` namespace is global. Project indexes and default searches include it. Character budgets cover index entries and manual rules together, while full files stay available through the tools. Host variables carry memory text as data, so literal `{{template brackets}}` survive.
 
-End-of-turn review is enabled by default. It accumulates deduplicated evidence from at least three user turns and uses a fixed review session once the evidence threshold and cooldown are met. Each parent conversation has at most two maintenance sessions: review uses its current parent model, while batch maintenance requires an explicit `maintenanceLlmProvider` and `maintenanceModel`. Sessions are created on demand and resumed by the same ID, receiving bounded evidence packets and exact source reads; their history can be compacted in place. Optional batch maintenance runs under `reflectionMode: auto` and resumes saved checkpoints. Tool, write, time and output limits reset for each run. Both paths share one namespace cooldown through `maintenanceCooldownMinutes`, and maintenance writes do not count as new user work. Requires DSH 0.2.1-rc.2 or a newer compatible version. See the [maintenance guide](docs/automatic-maintenance.zh.md).
+End-of-turn review is enabled by default. Its first run needs deduplicated evidence from at least three user turns, the evidence threshold and the cooldown. Each parent conversation has at most two maintenance sessions: review follows the current parent model, while batch maintenance uses an explicit `maintenanceLlmProvider` and `maintenanceModel`. Set `turnReviewReasoningEffort` to choose a separate review effort; leave it empty to inherit the parent's. Optional batch maintenance runs under `reflectionMode: auto`. Both paths share one namespace cooldown through `maintenanceCooldownMinutes`, and maintenance writes do not count as new user work.
+
+Successful writes are recorded immediately. Completion validates the entries before ending the worker; a rejected submission returns the affected entry and a correction the worker can make in the same run. Checkpoints and completion remain available after the work-call budget is spent. A timeout or cancellation ends the run while keeping its saved progress. When new evidence arrives and the cooldown passes, an unfinished review can resume without rebuilding the initial evidence threshold. The fixed session receives the previous result, remaining work and saved entries whose versions are still current.
+
+The defaults allow 64 work calls, 6 writes and 300 seconds per run, with up to 16384 output tokens per model response. An explicit value in an existing profile overrides these defaults after an upgrade. Reads of the same revision accumulate across pages; edits check the target entry's revision, so changes to unrelated entries do not cancel the run. Requires DSH 0.2.1-rc.2 or a newer compatible version. See the [maintenance guide](docs/automatic-maintenance.zh.md).
 
 ## Understand the implementation
 

@@ -62,6 +62,6 @@ export function createTurnReviewer(ctx, cfg, io) {
 		if (!claim) return { activity, result: null };
 		let result;
 		try { result = await io.review(agent, claim.activity); return { activity, result }; }
-		finally { finishTurnReview(root, { parentSession, namespace, claimId: claim.id, completed: ["reviewed", "unchanged", "waiting_evidence"].includes(result?.status) }); }
+		finally { finishTurnReview(root, { parentSession, namespace, claimId: claim.id, completed: ["reviewed", "unchanged", "waiting_evidence"].includes(result?.status), attempted: Boolean(result?.run?.dispatchedAt), remaining: result?.run?.remaining }); }
 	};
 }

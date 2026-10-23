@@ -189,9 +189,9 @@ export async function createMaintenanceEvidence(ctx, job) {
 		let selected;
 		if (args.evidence_call_ids?.length) {
 			selected = await byCallIds(args.evidence_call_ids, job.controller.signal);
-			if (explicit && (args.sourceSession !== selected[0].sourceSession || JSON.stringify(unique(args.sourceSeqs || []).sort()) !== JSON.stringify(selected.map(ref => ref.seq).sort()))) throw new Error("显式来源与evidence_call_ids不一致");
+			if (explicit && (args.sourceSession !== selected[0].sourceSession || JSON.stringify(unique(args.sourceSeqs || []).sort()) !== JSON.stringify(selected.map(ref => ref.seq).sort()))) throw new Error(`MEMORY_SOURCE_MISMATCH: evidence_call_ids对应 ${JSON.stringify(selected.map(({ sourceSession, seq }) => ({ sourceSession, seq })))}。请只保留 evidence_call_ids，或使用这些 sourceSession/sourceSeqs，不要混填两套不一致的引用。`);
 		} else {
-			if (!args.sourceSession || !args.sourceSeqs?.length) throw new Error("维护写入需要本次分配的sourceSession/sourceSeqs或evidence_call_ids");
+			if (!args.sourceSession || !args.sourceSeqs?.length) throw new Error("MEMORY_SOURCE_REQUIRED: 新事实写入请从本次证据包选用 evidence_call_ids，或成对提供 sourceSession/sourceSeqs。仅整理已有正文时省略 evidence 与来源参数即可保留原来源。");
 			selected = unique(args.sourceSeqs).map(seq => {
 				const ref = refs.get(keyOf(args.sourceSession, seq));
 				if (!ref) throw new Error("来源事件不属于本次维护");

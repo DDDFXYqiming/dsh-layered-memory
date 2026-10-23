@@ -8,7 +8,7 @@ export async function readActivation(sessionQuery, sessionId) {
 		function accept(name, args) {
 			if (name !== "memory_activate" && name !== "skill") return;
 			if (typeof args === "string") args = JSON.parse(args);
-			if (name === "memory_activate") activation = { mode: args.mode || "common", access: args.access };
+			if (name === "memory_activate") activation = { mode: args.mode || "common" };
 			if (name === "skill" && args.name === "memory") activation ||= { mode: "common" };
 		}
 		for (const event of observation.events) {

@@ -5,11 +5,11 @@ export const SKILL_DESCRIPTION = "跨会话记忆：按项目与全局检索已�
 export const SKILL_WHEN_TO_USE = "任务涉及既有环境、历史经验或已验证的新知识；需要检索、纠正、迁移或整理长期记忆。";
 export const SKILL_CONTENT = `${L0_TEMPLATE}
 
-## 激活
+## 工具
 
-加载本技能后提供常用工具；尚未出现时调用 memory_activate({mode:"common"})。
+基础检索、读写工具随会话提供；memory_activate({mode:"common"}) 补充状态与冲突登记。
 历史、归档、候选、迁移和维护按需调用 memory_activate({mode:"manage"})。
-只读工作使用 access:"read"；子代理默认只读。工具调用成功后以返回的 entry 为准。
+读写权限由用户配置 memoryAccess/subagentMemoryAccess 决定，子代理默认只读。工具调用后复用返回的 entry。
 
 ## 常用操作
 
@@ -38,5 +38,5 @@ export const SKILL_CONTENT = `${L0_TEMPLATE}
 
 ## 维护
 
-相关用户任务完成后，固定核对会话根据成功证据及精确来源核对记忆，结果交回插件并保存在维护记录中。notify模式将待办保存在可查询状态中；auto模式使用固定整理会话按保存进度分批处理索引压力及明确冲突，每次受调用、写入和时间预算限制。相似度候选需阅读原文确认，归档前指出替代条目。只读到尾页不算读完全文；修改前读取同一revision完整内容。没有待办时结束，不为达到条目数目标而合并。
+主模型在任务中照常查阅和更新笔记。任务结束后，固定核对会话依据本轮证据照看相关笔记的遗漏、矛盾和重复，零变更是正常结果。notify模式将待办保存在可查询状态中；auto模式用固定整理会话分批处理存量待办。修改前完整读取同一revision，归档前确认替代条目，结果与来源交回插件保存。
 `;

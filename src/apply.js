@@ -50,6 +50,7 @@ export const Config = Schema.object({
 });
 
 const READ_TOOLS = new Set(["memory_read", "memory_list", "memory_search", "memory_stats", "memory_pending", "memory_expand", "memory_history"]);
+const CORE_TOOLS = new Set(["memory_read", "memory_list", "memory_search", "memory_write", "memory_update"]);
 const COMMON_TOOLS = new Set(["memory_read", "memory_list", "memory_search", "memory_stats", "memory_write", "memory_update", "memory_review"]);
 const skillGesture = message => message?.source?.kind === "user" && message.content.some(block => block.type === "text" && /(^|\s)\/memory(?=\s|$)/.test(block.text));
 
@@ -112,7 +113,7 @@ function apply(ctx, config = {}) {
 	}).map(def => READ_TOOLS.has(def.name) ? def : {
 		...def,
 		execute(args, exec) {
-			if (allowedAccess(exec.agent) !== "write" || states.get(exec.agent)?.access === "read") throw new Error(`${def.name}: this agent has read-only memory access`);
+			if (allowedAccess(exec.agent) !== "write") throw new Error(`${def.name}: this agent has read-only memory access`);
 			return def.execute(args, exec);
 		},
 	});
@@ -122,24 +123,20 @@ function apply(ctx, config = {}) {
 		for (const dispose of [...state.disposers.values()].reverse()) dispose();
 		states.delete(agent);
 	}
-	function activate(agent, mode = "common", access = states.get(agent)?.access || allowedAccess(agent)) {
+	function activate(agent, mode = "common") {
 		if (maintenance?.owns(agent)) throw new Error("maintenance workers receive memory tools from their active job");
-		if (access === "write" && allowedAccess(agent) !== "write") throw new Error("memory_activate: this agent has read-only memory access");
+		const access = allowedAccess(agent);
 		let state = states.get(agent);
-		if (!state) { state = { disposers: new Map(), access }; states.set(agent, state); }
-		// An explicit read activation also removes previously granted mutation tools.
-		if (access === "read") {
-			for (const [name, dispose] of state.disposers) if (!READ_TOOLS.has(name)) { dispose(); state.disposers.delete(name); }
-		}
-		state.access = access;
-		const selected = allTools.filter(def => (mode === "manage" || COMMON_TOOLS.has(def.name)) && (access === "write" || READ_TOOLS.has(def.name)));
+		if (!state) { state = { disposers: new Map() }; states.set(agent, state); }
+		const selected = allTools.filter(def => cfg.progressive && !CORE_TOOLS.has(def.name) && (mode === "manage" || COMMON_TOOLS.has(def.name)) && (access === "write" || READ_TOOLS.has(def.name)));
 		const already = selected.every(def => state.disposers.has(def.name));
 		for (const def of selected) if (!state.disposers.has(def.name)) state.disposers.set(def.name, agent.ctx.tools.register(def));
-		return { activated: true, already, tools: [...state.disposers.keys()], access, mode };
+		const tools = allTools.filter(def => (!cfg.progressive || CORE_TOOLS.has(def.name) || state.disposers.has(def.name)) && (access === "write" || READ_TOOLS.has(def.name))).map(def => def.name);
+		return { activated: true, already, tools, access, mode };
 	}
 	const reviewTurn = createTurnReviewer(ctx, cfg, {
 		scope: scopeFor,
-		canWrite: agent => allowedAccess(agent) === "write" && states.get(agent)?.access !== "read" && !maintenance.owns(agent),
+		canWrite: agent => allowedAccess(agent) === "write" && !maintenance.owns(agent),
 		review: (agent, activity) => maintenance.request(resolveRoot(agent.session.header.cwd), resolveNamespace(cfg, undefined, agent.session.header.cwd), agent, {
 			purpose: "turn_review", trigger: { kind: "automatic", turn: activity.turn, endSeq: activity.endSeq }, activity,
 		}),
@@ -147,7 +144,7 @@ function apply(ctx, config = {}) {
 	disposers.push(wireEvents(ctx, cfg, {
 		resolveRoot, reviewTurn,
 		onActivity: record => activity.publish(record),
-		canWrite: agent => allowedAccess(agent) === "write" && states.get(agent)?.access !== "read",
+		canWrite: agent => allowedAccess(agent) === "write",
 		onMaintenanceRunner(runner) { maintenance = runner; ctx.provide("layeredMemoryWorkers", runner.workers); },
 		maintenanceTools(namespace) {
 			return buildTools(ctx, { ...cfg, defaultNamespace: namespace, autoNamespace: false }, {
@@ -166,7 +163,7 @@ function apply(ctx, config = {}) {
 			restored.add(agent);
 			const prior = await readActivation(query, agent.session.id);
 			if (prior && !states.has(agent) && !maintenance.owns(agent)) {
-				activate(agent, prior.mode, allowedAccess(agent) === "read" ? "read" : prior.access || "write");
+				activate(agent, prior.mode);
 				return systemPrompt.assemble(context);
 			}
 		}
@@ -183,17 +180,17 @@ function apply(ctx, config = {}) {
 	disposers.push(ctx.on("agent/disposed", ({ agent }) => detach(agent)));
 	ctx.tools.register(defineTool({
 		name: "memory_activate",
-		description: "激活当前会话的记忆工具。common 为查阅和写入，manage 增加候选、归档、历史、溯源、迁移与维护工具。access=read 仅查阅；子代理默认只读。",
-		parameters: { mode: { type: "string", enum: ["common", "manage"] }, access: { type: "string", enum: ["read", "write"] } },
+		description: "基础记忆查阅和写入工具已可直接使用。common 补充统计与复核工具；manage 增加候选、归档、历史、溯源、迁移与维护工具。读写权限由用户配置决定。",
+		parameters: { mode: { type: "string", enum: ["common", "manage"] } },
 		output: { schema: { type: "object", additionalProperties: true, properties: { activated: { type: "boolean", required: true }, already: { type: "boolean", required: true }, tools: { type: "array", items: { type: "string" }, required: true } } }, render: (_args, value) => [{ type: "text", text: `${value.access}/${value.mode}: ${value.tools.join(", ")}` }] },
 		execute: async (args, exec) => {
 			if (!exec.agent) throw new Error("memory_activate requires an agent session");
 			await prepareWorkspace(exec.agent);
-			return activate(exec.agent, args.mode || "common", args.access || states.get(exec.agent)?.access || allowedAccess(exec.agent));
+			return activate(exec.agent, args.mode || "common");
 		},
 		presentCall: () => ({ card: "generic", title: "激活记忆工具", kind: "execute" }),
 	}));
-	if (!cfg.progressive) for (const def of allTools) ctx.tools.register(def);
+	for (const def of allTools) if (!cfg.progressive || CORE_TOOLS.has(def.name)) ctx.tools.register(def);
 	console.info(`[dsh-layered-memory] v${version} loaded=${runtimeInfo.loadedAt} source=${runtimeInfo.source} memoryDir=${cfg.memoryDir} mode=${cfg.reflectionMode} autoPending=${cfg.autoPending} access=${cfg.memoryAccess}/${cfg.subagentMemoryAccess}`);
 	ctx.effect(() => () => {
 		for (const agent of states.keys()) detach(agent);

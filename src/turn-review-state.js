@@ -81,7 +81,7 @@ export function prepareTurnReview(root, { parentSession, namespace, activity, en
 		}
 		const waiting = { claim: null, hasNewEvidence };
 		if (!enabled || state.claim || !hasNewEvidence || !state.pending.length) return waiting;
-		if (!state.resume && (state.pending.length < minEvidence || unique(state.pending.map(item => item.turnSeq)).length < 3)) return waiting;
+		if (!state.resume && state.pending.length < minEvidence) return waiting;
 		const id = randomUUID();
 		state.claim = { id, at: now, pid: process.pid, host: hostname(), fingerprints: state.pending.map(item => item.fingerprint) };
 		const memories = new Map(state.pending.flatMap(item => item.memories).map(entry => [JSON.stringify(entry), entry]));

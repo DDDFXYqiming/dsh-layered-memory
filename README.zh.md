@@ -33,7 +33,7 @@ dsh plugin --profile web add   github:DDDFXYqiming/dsh-layered-memory   "github:
 
 ## 使用
 
-加载 `memory` skill，或者调用 `memory_activate({mode:"common"})` 打开工具。管理操作用 `mode:"manage"`。只读会话可以传 `access:"read"`，子 agent 默认就是只读。
+基础工具 `memory_search/list/read/write/update` 随会话提供。加载 `memory` skill 或调用 `memory_activate({mode:"common"})` 补充状态与冲突登记工具，管理操作用 `mode:"manage"`。读写权限由用户配置 `memoryAccess` 和 `subagentMemoryAccess` 决定，子 agent 默认只读；`memory_activate` 不改变权限。
 
 条目用 search、list 或 create 返回的 `entry` 对象定位，不要拿标题重新拼一个身份出来。
 
@@ -48,6 +48,7 @@ memory_write({
 // 后续调用复用返回的 entry。
 memory_read({entry, full: true})
 memory_update({entry, content: "修正后的事实", evidence: "新的验证过程"})
+memory_activate({mode: "manage"})
 memory_history({entry})
 memory_rollback({entry, snapshot_id: "填一个返回的快照 id"})
 ```
@@ -97,7 +98,7 @@ memory_rollback({entry, snapshot_id: "填一个返回的快照 id"})
 
 `default` 是全局空间，项目索引和默认搜索都把它算进来。字符预算同时管索引条目和手写规则，完整文件仍然可以通过工具读到。宿主用变量传递记忆文本，内容按数据处理，`{{模板括号}}` 会原样保留。
 
-任务收尾核对默认开启，首次派发需要至少三个用户回合的去重新证据，达到数量门槛并满足冷却间隔。每个父对话最多两个维护会话：核对沿用当前父模型，存量整理通过 `maintenanceLlmProvider` 与 `maintenanceModel` 明确配置模型。`turnReviewReasoningEffort` 可单独指定核对思考档，留空则沿用父会话。存量自动维护由 `reflectionMode: auto` 启用。两条路径通过 `maintenanceCooldownMinutes` 共用空间级冷却，维护自己的写入不算新用户工作。
+主模型在任务中照常查阅和更新笔记，后台照看本轮相关笔记的遗漏、矛盾和重复，零变更是正常结果。任务收尾核对默认开启，积累 6 条去重后未处理的成功证据作为一个批次；单个正常完成的用户回合也可满足，当前回合仍须有新证据。每个父对话最多两个固定维护会话：核对沿用当前父模型，存量整理通过 `maintenanceLlmProvider` 与 `maintenanceModel` 明确配置模型。`turnReviewReasoningEffort` 可单独指定核对思考档，留空则沿用父会话。存量自动维护由 `reflectionMode: auto` 启用。两条路径通过 `maintenanceCooldownMinutes` 共用默认 30 分钟的空间级冷却，维护自己的写入不算新用户工作。
 
 成功写入立即记账保存。完成工具先校验条目，再结束维护代理；提交有误时返回具体条目和修正方式，代理可在本轮继续处理。工作调用额度用完后仍可保存检查点和提交完成结果。超时或取消会结束本轮并保留已保存进度；有新证据且冷却到期后，未完成核对可以继续，无需重新凑满首次派发门槛。固定会话会收到前次结果、剩余工作及版本仍有效的已保存条目。
 
@@ -144,7 +145,7 @@ L1 索引在磁盘上保存完整的活跃目录。组装上下文时，项目�
 - **折叠会藏起细节**，项目索引或全局索引超出字符预算时，条目被折叠、描述被截短。完整正文还能通过 `memory_read` 拿到，但只看索引的 agent 看到的东西比文件里少。
 - **维护要花模型调用**，内部收尾核对与 `reflectionMode: auto` 都会启动子代理并消耗模型调用。`autoPending: true` 将失败后恢复的调用序列记入候选区。预算按单次维护运行计算，不按整个会话累计。
 - **命名空间靠路径识别**，自动命名空间来自工作区身份或者规范化根路径。项目挪到别的路径就会变成另一个空间，除非显式迁移。
-- **工具按会话生效**，加载 `memory` 技能、调用 `memory_activate` 或进入维护子会话时挂载相应工具。目录索引随上下文提供，正文通过工具读取。
+- **工具按会话生效**，基础记忆工具随会话提供，补充工具通过 `memory` 技能或 `memory_activate` 按需挂载。历史激活只恢复工具模式，读写权限仍来自用户配置。目录索引随上下文提供，正文通过工具读取。
 - **索引超预算会被改写**，超出上限时引擎重写索引文件并标记 `over_limit`，条目列表可能被重新编排。写入方看到的条目数量不能当成文件里真实条目的数量。
 
 ### 开发者备注

@@ -1,7 +1,7 @@
 export const AUTO_BEGIN = "<!-- AUTO-BEGIN -->";
 export const AUTO_END = "<!-- AUTO-END -->";
 
-export const WRITE_POLICY = "仅在获得已验证、未来可复用的新信息或已有记忆确需纠正时写入；先检索已有条目，已有条目用 memory_update，只有新信息才用 memory_write。";
+export const WRITE_POLICY = "把记忆当作留给后续任务的工作笔记：需要时查阅，发现旧结论过时就修正，有值得接续的新信息再补充。已有条目用 memory_update，新的条目用 memory_write；完成任务不要求新增记忆。";
 export const LEGACY_WRITE_POLICY = "任务完成且【行动验证成功】时主动 memory_write 沉淀（无需等用户提醒；无验证信息则不写）";
 
 export const L0_TEMPLATE = `# 记忆管理
@@ -22,7 +22,7 @@ export const L0_TEMPLATE = `# 记忆管理
 export const INDEX_TEMPLATE = `# Memory Index
 环境事实在 facts.md，任务经验在 sops/；正文按需读取。
 ${WRITE_POLICY}
-记忆工具尚未激活时调用 memory_activate；管理操作选择 mode:manage。
+基础记忆读写工具可直接使用；管理操作调用 memory_activate({mode:"manage"})。
 ${AUTO_BEGIN}
 [L2] （暂无事实）
 [L3] （暂无经验）

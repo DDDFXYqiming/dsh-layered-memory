@@ -348,11 +348,11 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 			}
 			const handoff = JSON.stringify(previous);
 			const text = turnReview ? [
-				"你负责独立核对已完成用户任务的记忆。以本次证据包为准，仅核对已验证事实及相关记忆。",
+				"你是主会话的记忆协作者，照看本次工作涉及的笔记，让后续任务能够接续。结合原用户任务和实际结果，检查已有笔记是否遗漏、过时或相互矛盾；有需要再补充，笔记已够用就结束。",
 				`本次 runId=${id}，空间 ${namespace}；工作调用 ${cfg.maintenanceMaxCalls} 次、写入 ${cfg.maintenanceMaxWrites} 次、总时限 ${cfg.maintenanceTimeoutSeconds} 秒。检查点和完成工具不占工作调用额度。每次工具回执附有剩余预算和已保存进度。`,
 				`续跑交接：${handoff}`,
 				"本次只优先处理少量最相关条目；无需反复检索相同线索。已保存的内容自动记账，接近预算时及时结束，不必为了重报结果重新读写。",
-				"已有条目先完整读取当前版本，再决定是否更新；仅当本轮真实证据推翻旧事实时纠正原条目。已有内容和来源正确时保留，新知识先检索再判断可复用性。",
+				"先查阅相关笔记再决定是否修改，包括主会话刚保存的内容。已有条目先完整读取当前版本；能修正原条目就直接修正，避免为同一件事反复新建记录。",
 				"遵守原用户任务的读写约束；核对本轮相关内容即可。没有新信息时直接结构化完成，entries为空。缺少证据时保留原文，明确冲突可用memory_review登记。",
 				`事实来源属于父会话 ${parent.session.id}。写入新证据使用该 sourceSession 和下面验证事件的 sourceSeqs；也可使用所列 evidence_call_ids，插件会绑定回父会话。`,
 				`本次证据包：${JSON.stringify(job.evidence.packet)}`,

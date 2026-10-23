@@ -33,7 +33,7 @@ Desktop runs the same install through its bundled `dsh` command with the `deskto
 
 ## Use
 
-Load the `memory` skill, or call `memory_activate({mode:"common"})` to enable the tools. Management operations use `mode:"manage"`. A read-only session can pass `access:"read"`, and child agents default to read-only access.
+The basic `memory_search/list/read/write/update` tools are available in each session. Load the `memory` skill or call `memory_activate({mode:"common"})` to add status and conflict tools; management operations use `mode:"manage"`. User configuration controls access through `memoryAccess` and `subagentMemoryAccess`, with child agents read-only by default. `memory_activate` does not change permissions.
 
 Entries are addressed by the `entry` object returned from search, list or create. Reuse that object instead of rebuilding it from a title.
 
@@ -48,6 +48,7 @@ memory_write({
 // Reuse the returned entry for later calls.
 memory_read({entry, full: true})
 memory_update({entry, content: "A revised finding", evidence: "New verification"})
+memory_activate({mode: "manage"})
 memory_history({entry})
 memory_rollback({entry, snapshot_id: "Choose a returned snapshot id"})
 ```
@@ -97,7 +98,7 @@ Automatic namespaces use persistent workspace identity or canonical root paths. 
 
 The `default` namespace is global. Project indexes and default searches include it. Character budgets cover index entries and manual rules together, while full files stay available through the tools. Host variables carry memory text as data, so literal `{{template brackets}}` survive.
 
-End-of-turn review is enabled by default. Its first run needs deduplicated evidence from at least three user turns, the evidence threshold and the cooldown. Each parent conversation has at most two maintenance sessions: review follows the current parent model, while batch maintenance uses an explicit `maintenanceLlmProvider` and `maintenanceModel`. Set `turnReviewReasoningEffort` to choose a separate review effort; leave it empty to inherit the parent's. Optional batch maintenance runs under `reflectionMode: auto`. Both paths share one namespace cooldown through `maintenanceCooldownMinutes`, and maintenance writes do not count as new user work.
+The main agent reads and updates notes during its task. Background review checks relevant notes for omissions, contradictions and duplication; zero changes are a normal outcome. End-of-turn review is enabled by default and batches six deduplicated, unprocessed pieces of successful evidence. One normally completed user turn can supply the batch, and the current turn must add new evidence. Each parent conversation has at most two fixed maintenance sessions: review follows the current parent model, while batch maintenance uses an explicit `maintenanceLlmProvider` and `maintenanceModel`. Set `turnReviewReasoningEffort` to choose a separate review effort; leave it empty to inherit the parent's. Optional batch maintenance runs under `reflectionMode: auto`. Both paths share the default 30-minute namespace cooldown through `maintenanceCooldownMinutes`, and maintenance writes do not count as new user work.
 
 Successful writes are recorded immediately. Completion validates the entries before ending the worker; a rejected submission returns the affected entry and a correction the worker can make in the same run. Checkpoints and completion remain available after the work-call budget is spent. A timeout or cancellation ends the run while keeping its saved progress. When new evidence arrives and the cooldown passes, an unfinished review can resume without rebuilding the initial evidence threshold. The fixed session receives the previous result, remaining work and saved entries whose versions are still current.
 
@@ -144,7 +145,7 @@ The indexes sit in a stable prefix, so an unchanged snapshot reuses the provider
 - **Index folding hides detail**, when the project or global index exceeds its character budget, entries are folded and descriptions are trimmed. The full body stays available through `memory_read`, but an agent that reads only the index sees less than the file contains.
 - **Maintenance spends model calls**, internal end-of-turn reviews and `reflectionMode: auto` runs invoke subagents that consume tokens. `autoPending: true` records retry candidates on disk for later review. Budget limits apply per maintenance run rather than per session.
 - **Namespace identity is path based**, automatic namespaces derive from workspace identity or canonical root path. Moving a project to another path creates a different namespace until it is migrated explicitly.
-- **Tool access is per session**, loading the memory skill, calling `memory_activate` or entering a maintenance session mounts the corresponding tools. The directory index is provided in context, while entry bodies are read through tools.
+- **Tool access is per session**, basic memory tools are available in each session and the memory skill or `memory_activate` adds optional tools. Historical activation restores the tool mode only; permissions remain user-configured. The directory index is provided in context, while entry bodies are read through tools.
 - **Index rewrites on budget overflow**, when an index exceeds its limit, the engine rewrites the index file and marks `over_limit`, which can reorder listed entries. Callers should read entry counts from storage metadata rather than from the folded prompt view.
 
 ### Dev Note

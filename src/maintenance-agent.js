@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync, readdirSync, openSync, writeFileSync, closeSync, unlinkSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { hostname } from "node:os";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { rewriteFile, hashText, pendingNames } from "./store.js";
 import { reviewWork, checkpointReview, claimReviewWork } from "./review.js";
@@ -12,6 +11,7 @@ import { createMaintenanceEvidence } from "./maintenance-evidence.js";
 import { MAINTENANCE_COMPLETE } from "./maintenance-completion.js";
 import { createMaintenanceProgress, entryKey as refKey } from "./maintenance-progress.js";
 import { acknowledgeTurnReview } from "./turn-review-state.js";
+import { acquireProcessLock } from "./process-lock.js";
 
 export const MAINTENANCE_HISTORY_FILE = "maintenance-runs.json";
 export const computeReviewRevision = computeContentRevision;
@@ -26,17 +26,7 @@ const RESULT_PARAMETERS = {
 };
 
 function acquireLock(root, id) {
-	const path = join(root, ".maintenance-agent.lock");
-	let fd;
-	try { fd = openSync(path, "wx"); }
-	catch (error) { if (error.code === "EEXIST") return null; throw error; }
-	try { writeFileSync(fd, JSON.stringify({ id, pid: process.pid, host: hostname(), startedAt: new Date().toISOString() })); }
-	finally { closeSync(fd); }
-	return () => {
-		const current = JSON.parse(readFileSync(path, "utf8"));
-		if (current.id !== id) throw new Error("maintenance lock ownership changed");
-		unlinkSync(path);
-	};
+	return acquireProcessLock(join(root, ".maintenance-agent.lock"), { id });
 }
 function readRuns(root) {
 	try { return JSON.parse(readFileSync(join(root, MAINTENANCE_HISTORY_FILE), "utf8")).runs; }
@@ -305,6 +295,13 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 		}
 		try {
 			const runs = readRuns(root);
+			for (const interrupted of runs.filter(item => !item.finishedAt && ["running", "scanning"].includes(item.status))) {
+				Object.assign(interrupted, { status: "deferred", phase: null, finishedAt: record.startedAt,
+					summary: "宿主中断了上次维护，已保存的进度和剩余工作已保留。" });
+				saveRun(root, interrupted);
+				await workers.record(interrupted);
+				io.onActivity(interrupted);
+			}
 			const dispatchedAt = item => item.dispatchedAt || (item.provider !== "plugin-worker" && item.session ? item.startedAt : null);
 			if (runs.some(item => item.parentSession === parent.session.id && dispatchedAt(item) &&
 				(trigger.kind === "automatic" ? item.endSeq === trigger.endSeq : item.callId === trigger.callId))) return { status: "skipped" };

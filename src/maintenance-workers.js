@@ -115,13 +115,6 @@ export function createMaintenanceWorkers(ctx, cfg, io) {
 				: await ctx.agents.create({ sessionId: slot.id, parentAgent: spec.parent, meta: childSessionMeta(spec.parent, depth, false), agentOptions: route, setup, signal });
 			signal.throwIfAborted();
 			const agent = handle.agent;
-			if (stored) {
-				phase("compacting");
-				const compaction = ctx.agentPresets.serviceFor(agent, "compaction");
-				if (!compaction) throw new Error("worker Agent preset does not provide compaction");
-				await compaction.compactIfNeeded(agent, "pressure", signal);
-			}
-			signal.throwIfAborted();
 			startedAt = agent.session.seq;
 			phase("running");
 			agent.followup(createUserMessage({ content: [{ type: "text", text: spec.prompt }], source: { kind: "dsh-layered-memory", form: "notice", summary: spec.purpose === "turn_review" ? "核对本轮记忆" : "整理已有记忆", runId: spec.id } }));

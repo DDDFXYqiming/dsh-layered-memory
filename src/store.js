@@ -1,9 +1,10 @@
 // 文件存储与条目身份。正文变更由命名空间锁串行化，索引是可重建的派生数据。
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, linkSync, cpSync, realpathSync } from "node:fs";
-import { homedir, hostname } from "node:os";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, cpSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, basename, dirname, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { atomicWriteFileSync, stageWrite, commitStaged } from "./atomic-write.js";
+import { acquireProcessLock } from "./process-lock.js";
 import { FACTS_TEMPLATE, INDEX_TEMPLATE, L0_TEMPLATE } from "./templates.js";
 
 export const META_FILE = "memory-meta.json";
@@ -20,7 +21,6 @@ export const HEAT_HALF_LIFE_DAYS = 14;
 export const NAMESPACE_CACHE_TTL_MS_DEFAULT = 60_000;
 const WRITE_LOCK_FILE = ".write.lock";
 const heldWriteLocks = new Set();
-const SLEEP_BUF = new Int32Array(new SharedArrayBuffer(4));
 
 export function defaultMemDir() { return join(homedir(), ".dsh", "memory"); }
 export function hashText(text) { return createHash("sha512").update(String(text ?? "")).digest("hex").slice(0, 32); }
@@ -70,43 +70,19 @@ export function ensureNamespaceLayout(root, identity) {
   });
 }
 
-/** 锁内容先完整写入独立文件，再以 hard link 原子占位，消除空锁窗口。 */
 export function withNsWriteLock(root, fn, { waitBudgetMs = 3000 } = {}) {
   mkdirSync(root, { recursive: true });
   const canonical = canonicalWorkspacePath(root);
   if (heldWriteLocks.has(canonical)) return fn();
   const lockPath = join(canonical, WRITE_LOCK_FILE);
-  const id = randomUUID();
-  const candidate = join(canonical, `.write-owner-${id}`);
-  writeFileSync(candidate, JSON.stringify({ id, pid: process.pid, host: hostname() }), { flag: "wx" });
-  const deadline = Date.now() + waitBudgetMs;
+  const release = acquireProcessLock(lockPath, { waitBudgetMs });
+  if (!release) throw new Error(`Namespace lock wait exceeded ${waitBudgetMs}ms: ${lockPath}`);
+  heldWriteLocks.add(canonical);
   try {
-    for (;;) {
-      try { linkSync(candidate, lockPath); break; }
-      catch (error) {
-        if (error.code !== "EEXIST") throw error;
-        const owner = readJson(lockPath, null);
-        if (owner?.host === hostname() && Number.isSafeInteger(owner.pid) && owner.pid > 0) {
-          try { process.kill(owner.pid, 0); }
-          catch (e) {
-            if (e.code === "ESRCH") throw new Error(`Namespace lock belongs to an exited process; recover the lock explicitly before writing: ${lockPath}`);
-            if (e.code !== "EPERM") throw e;
-          }
-        }
-        if (Date.now() >= deadline) throw new Error(`Namespace lock wait exceeded ${waitBudgetMs}ms: ${lockPath}`);
-        Atomics.wait(SLEEP_BUF, 0, 0, 10);
-      }
-    }
-    heldWriteLocks.add(canonical);
-    try {
-      const result = fn();
-      if (result && typeof result.then === "function") throw new Error("Namespace transaction callback must be synchronous");
-      return result;
-    } finally {
-      heldWriteLocks.delete(canonical);
-      if (readJson(lockPath, null)?.id === id) rmSync(lockPath);
-    }
-  } finally { rmSync(candidate, { force: true }); }
+    const result = fn();
+    if (result && typeof result.then === "function") throw new Error("Namespace transaction callback must be synchronous");
+    return result;
+  } finally { heldWriteLocks.delete(canonical); release(); }
 }
 export function withNsWriteLocks(roots, fn) {
   for (const root of roots) mkdirSync(root, { recursive: true });
@@ -485,9 +461,9 @@ export function migrateNamespace(memDir, fromNamespace, toNamespace, { workspace
   mkdirSync(target, { recursive: true });
   return withNsWriteLocks([source, target], () => {
     const dataDirs = new Set(["sops", PENDING_DIR, ARCHIVE_DIR, HISTORY_DIR]);
-    const contents = readdirSync(target, { withFileTypes: true }).filter(name => name.name !== WRITE_LOCK_FILE && !name.name.startsWith(".write-owner-") && (to !== "default" || !name.isDirectory() || dataDirs.has(name.name)));
+    const contents = readdirSync(target, { withFileTypes: true }).filter(name => name.name !== WRITE_LOCK_FILE && !name.name.startsWith(".write-owner-") && !name.name.startsWith(".write.lock.owner-") && (to !== "default" || !name.isDirectory() || dataDirs.has(name.name)));
     if (contents.length) throw new Error("Destination namespace must be empty: " + target);
-    const names = readdirSync(source, { withFileTypes: true }).filter(name => ![WRITE_LOCK_FILE, ".maintenance-agent.lock"].includes(name.name) && !name.name.startsWith(".write-owner-") && (!name.isDirectory() || from !== "default" || dataDirs.has(name.name)));
+    const names = readdirSync(source, { withFileTypes: true }).filter(name => ![WRITE_LOCK_FILE, ".maintenance-agent.lock"].includes(name.name) && !name.name.startsWith(".write-owner-") && !name.name.startsWith(".write.lock.owner-") && !name.name.startsWith(".maintenance-agent.lock.owner-") && (!name.isDirectory() || from !== "default" || dataDirs.has(name.name)));
     for (const name of names) cpSync(join(source, name.name), join(target, name.name), { recursive: name.isDirectory(), errorOnExist: true, force: false });
     const identity = { namespace: to, ...(workspace ? { workspace: canonicalWorkspacePath(workspace) } : {}), migratedFrom: from, migratedAt: new Date().toISOString(), sourcePreserved: true };
     atomicWriteFileSync(join(target, ".namespace.json"), JSON.stringify(identity, null, 2));

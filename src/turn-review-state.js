@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { rewriteFile } from "./store.js";
+import { isProcessOwnerDead, readProcessLockOwner } from "./process-lock.js";
 
 const STATE_FILE = "turn-review-state.json";
 const WINDOW = 32;
@@ -42,6 +44,11 @@ function update(root, parentSession, namespace, change) {
 	return result;
 }
 
+function claimOwnerGone(root, claim, now, timeoutSeconds) {
+	const owner = claim.pid === undefined ? readProcessLockOwner(join(root, ".maintenance-agent.lock")) : claim;
+	return owner ? isProcessOwnerDead(owner) : now - claim.at > (timeoutSeconds + 60) * 1000;
+}
+
 export function prepareTurnReview(root, { parentSession, namespace, activity, enabled, minEvidence, timeoutSeconds }) {
 	return update(root, parentSession, namespace, state => {
 		const now = Date.now();
@@ -68,12 +75,15 @@ export function prepareTurnReview(root, { parentSession, namespace, activity, en
 			state.pending = pendingWindow(state.pending.filter(item => !captured(item)));
 			hasNewEvidence = state.pending.some(item => admitted.has(item.fingerprint));
 		}
-		if (state.claim && now - state.claim.at > (timeoutSeconds + 60) * 1000) state.claim = null;
+		if (state.claim && claimOwnerGone(root, state.claim, now, timeoutSeconds)) {
+			state.claim = null;
+			state.resume = true;
+		}
 		const waiting = { claim: null, hasNewEvidence };
 		if (!enabled || state.claim || !hasNewEvidence || !state.pending.length) return waiting;
 		if (!state.resume && (state.pending.length < minEvidence || unique(state.pending.map(item => item.turnSeq)).length < 3)) return waiting;
 		const id = randomUUID();
-		state.claim = { id, at: now, fingerprints: state.pending.map(item => item.fingerprint) };
+		state.claim = { id, at: now, pid: process.pid, host: hostname(), fingerprints: state.pending.map(item => item.fingerprint) };
 		const memories = new Map(state.pending.flatMap(item => item.memories).map(entry => [JSON.stringify(entry), entry]));
 		const tasks = new Map(state.pending.flatMap(item => item.tasks || []).map(task => [task.seq, task]));
 		return { hasNewEvidence, claim: { id, activity: { claimId: id, turn: activity.turn, endSeq: activity.endSeq, memories: [...memories.values()].slice(-16),

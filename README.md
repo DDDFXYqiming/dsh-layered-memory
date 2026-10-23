@@ -67,7 +67,7 @@ memory_rollback({entry, snapshot_id: "Choose a returned snapshot id"})
 
 Search covers active entries in the current and global spaces. Pass `include_archived:true` to reach archived content, then read the returned entry. A read reports its line range, total lines, revision, completeness and the next line offset. Global rules and complete indexes remain readable through the `rules`, `index` and `policy` entry kinds.
 
-The bundle includes an independent Memory status component that can be toggled on the plugins page. A compact line below the Web composer shows current maintenance activity, changed entry counts or incomplete-run reasons. Clicking opens the plugin's detail panel with run records, read-only worker history and a stop control for active maintenance.
+The bundle includes an independent Memory status component that can be toggled on the plugins page. A compact line below the Web composer shows current maintenance activity, changed entry counts or incomplete-run reasons. Sessions without maintenance records show a clickable “Memory ready” entry. The detail panel provides run records, read-only worker history and a stop control for active maintenance.
 
 ## Configuration
 

@@ -11,7 +11,7 @@ export function createStatusClient(require, styles) {
 	const dictionaries = {
 		zh: {
 			reviewing: "正在核对记忆", organizing: "正在整理记忆", changed: "记忆已整理 {count} 条",
-			settled: "记忆核对完成", awaitingEvidence: "记忆等待补充证据",
+			settled: "记忆核对完成", awaitingEvidence: "记忆等待补充证据", idle: "记忆待命", initializing: "记忆状态加载中",
 			stoppedReview: "记忆核对已停止", stoppedBatch: "记忆整理已停止",
 			failed: "上次记忆核对未完成", partial: "记忆已整理 {count} 条 · 上次核对未完成", details: "查看记忆活动",
 			unavailable: "记忆状态暂不可用", concurrent: "还有 {count} 项记忆任务运行中",
@@ -25,7 +25,7 @@ export function createStatusClient(require, styles) {
 		},
 		en: {
 			reviewing: "Reviewing memory", organizing: "Organizing memory", changed: "Organized {count} memory entries",
-			settled: "Memory review complete", awaitingEvidence: "Memory awaiting evidence",
+			settled: "Memory review complete", awaitingEvidence: "Memory awaiting evidence", idle: "Memory ready", initializing: "Loading memory status",
 			stoppedReview: "Memory review stopped", stoppedBatch: "Memory organization stopped",
 			failed: "Last memory review incomplete", partial: "Organized {count} entries · last review incomplete", details: "View memory activity",
 			unavailable: "Memory status unavailable", concurrent: "{count} more memory tasks running",
@@ -172,9 +172,29 @@ export function createStatusClient(require, styles) {
 						h("div", { ref: historyEnd }))));
 	}
 	function MemoryStatus({ activityStore, controls, t }) {
+		const buttonRef = React.useRef(null);
 		const panelRef = React.useRef(null);
 		const panelId = React.useId();
 		const [open, setOpen] = React.useState(false);
+		React.useLayoutEffect(() => {
+			if (!open) return;
+			const button = buttonRef.current;
+			const panel = panelRef.current;
+			const place = () => {
+				const anchor = button.getBoundingClientRect();
+				const width = panel.getBoundingClientRect().width;
+				panel.style.left = Math.max(12, Math.min(anchor.left + (anchor.width - width) / 2, document.documentElement.clientWidth - width - 12)) + "px";
+				panel.style.bottom = window.innerHeight - anchor.top + 8 + "px";
+				panel.style.maxHeight = Math.min(560, anchor.top - 20) + "px";
+			};
+			place();
+			const observer = new ResizeObserver(place);
+			observer.observe(button);
+			observer.observe(panel);
+			window.addEventListener("resize", place);
+			window.addEventListener("scroll", place, true);
+			return () => { observer.disconnect(); window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true); };
+		}, [open]);
 		React.useEffect(() => {
 			const panel = panelRef.current;
 			const toggle = event => setOpen(event.newState === "open");
@@ -189,24 +209,23 @@ export function createStatusClient(require, styles) {
 		const waiting = latestFinished?.status === "waiting_evidence" ? latestFinished : null;
 		const stopped = latestFinished?.status === "stopped" ? latestFinished : null;
 		const item = running || failure || waiting || stopped || snapshot?.latestChanged || snapshot?.records[0];
-		const visible = value.error || Boolean(item);
 		const isFailure = value.error || (!running && Boolean(failure));
-		let label = "";
+		let label = t(snapshot ? "idle" : "initializing");
 		if (value.error) label = t("unavailable");
 		else if (running) label = t(running.purpose === "turn_review" ? "reviewing" : "organizing");
 		else if (failure) label = failure.changedEntries ? t("partial", { count: failure.changedEntries }) : t("failed");
 		else if (waiting) label = t("awaitingEvidence");
 		else if (stopped) label = t(stopped.purpose === "turn_review" ? "stoppedReview" : "stoppedBatch");
 		else if (item) label = item.changedEntries ? t("changed", { count: item.changedEntries }) : t("settled");
-		const clickable = !value.error && Boolean(item);
+		const clickable = !value.error && snapshot !== null;
 		const title = [label, !running && (failure?.summary || waiting?.summary || stopped?.summary), !running && (waiting || stopped)?.changedEntries ? t("changedCount", { count: (waiting || stopped).changedEntries }) : "", clickable ? t("details") : "", running && snapshot.running.length > 1 ? t("concurrent", { count: snapshot.running.length - 1 }) : ""].filter(Boolean).join(" · ");
 		return h(React.Fragment, null,
 			h("style", null, styles),
-			h("span", { className: "lm-status-seat", "data-memory-status": value.error ? "unavailable" : running ? "running" : failure ? "failed" : waiting ? "waiting" : stopped ? "stopped" : item ? item.changedEntries ? "changed" : "reviewed" : "idle" },
+			h("span", { className: "lm-status-seat", "data-memory-status": value.error ? "unavailable" : running ? "running" : failure ? "failed" : waiting ? "waiting" : stopped ? "stopped" : item ? item.changedEntries ? "changed" : "reviewed" : snapshot ? "idle" : "loading" },
 				h(clickable ? "button" : "span", {
-					className: "lm-status-line" + (running && !value.error ? " is-running" : "") + (isFailure ? " is-failed" : "") + (!visible ? " is-empty" : ""),
-					...(clickable ? { type: "button", onClick: () => panelRef.current.togglePopover(), "aria-haspopup": "dialog", "aria-expanded": open, "aria-controls": panelId } : {}),
-					title, "aria-label": title || undefined, "aria-hidden": !visible || undefined,
+					className: "lm-status-line" + (running && !value.error ? " is-running" : "") + (isFailure ? " is-failed" : ""),
+					...(clickable ? { ref: buttonRef, type: "button", onClick: () => panelRef.current.togglePopover(), "aria-haspopup": "dialog", "aria-expanded": open, "aria-controls": panelId } : {}),
+					title, "aria-label": title,
 				}, h(Brain), h("span", { className: "lm-status-text", role: "status", "aria-live": "polite" }, label),
 					isFailure ? h("span", { className: "lm-status-failure", "aria-hidden": true }, "!") : clickable ? h("span", { className: "lm-status-details", "aria-hidden": true }, "⌃") : null)),
 			h(ActivityPanel, { open, snapshot, controls, panelRef, panelId, t }));

@@ -100,7 +100,9 @@ export function syncReview(root, { overLimit, entries = readEntries(root), origi
 	return update(root, state => {
 		refresh(state, entries);
 		state.overLimit = overLimit;
-		if (overLimit && (!state.pressure || state.pressure.status === "complete" && Object.keys(state.ordinaryChanges).length >= REVIEW_CHANGE_THRESHOLD)) {
+		const progressed = state.pressure?.items?.some(item => item.status === "changed") === true;
+		// 收敛判据：上一轮索引压力作业只要真的改动过条目（items 中 status 为 “changed”），就说明仍有压缩空间，直接续派下一轮；整轮都没改动才回落到日常变更门槛，避免空转烧 token
+		if (overLimit && (!state.pressure || state.pressure.status === "complete" && (progressed || Object.keys(state.ordinaryChanges).length >= REVIEW_CHANGE_THRESHOLD))) {
 			if (state.pressure) state.completedPressure.push(state.pressure);
 			state.pressure = { id: randomUUID(), kind: "index_pressure", status: "pending", createdAt: now(), items: null, reviewed: [], ...(origin?.memoryChanges.length ? { ownerSession: origin.parentSession, trigger: origin.trigger } : {}) };
 		}

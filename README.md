@@ -111,7 +111,7 @@ The defaults allow 64 work calls, 6 writes and 300 seconds per run, with up to 1
 
 Facts are addressed by their second-level heading inside `facts.md`. Procedures are addressed by path inside `sops/`. A display title and an entry key are separate values, so the same title can exist as a fact and as a procedure, in one space or in two.
 
-The L1 index holds the full active directory on disk. Context assembly gives the project index and the global index separate character budgets. When a budget is exceeded, entries are folded with their descriptions trimmed, and each folded entry keeps a readable path back to the full body.
+The L1 index holds the full active directory on disk. Context assembly gives the project index and the global index separate character budgets, and each budget is allocated by what each layer actually needs rather than a fixed ratio: rules come first, and the entry layer keeps at least a quarter. When the entry layer cannot fit, the newest entries are kept, older ones are omitted, and the layer opens with how many entries were omitted and how to list the full index through `memory_list`; the end of the whole view also states the omission and the entry point to the full index. A newly written memory always appears in the injected view.
 
 The host exposes memory text through a `systemPrompt.variable`. The prompt references that fixed variable instead of re-parsing content as a template. The host compares content snapshots and appends only when the snapshot changed. L0 and runtime skills share one core rule template.
 
@@ -134,7 +134,7 @@ The model receives a project index and a global index inside the system prompt, 
 
 #### Token effect
 
-Fixed per session for the indexes, bounded by `l1MaxChars` for the project index and `globalL1MaxChars` for the global one. Reads add tokens on demand and return line ranges, so a large entry can be consumed in pieces. `progressive: true` keeps index lines short and defers detail to reads.
+Fixed per session for the indexes, bounded by `l1MaxChars` for the project index and `globalL1MaxChars` for the global one. Over budget it keeps the newest entries, omits older ones, and states the omission explicitly in the view instead of dropping entries silently. Reads add tokens on demand and return line ranges, so a large entry can be consumed in pieces. `progressive: true` keeps index lines short and defers detail to reads.
 
 #### KV cache effect
 

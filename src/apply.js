@@ -40,6 +40,9 @@ export const Config = Schema.object({
 	reflectSopsThreshold: Schema.natural().default(40),
 	l1MaxChars: Schema.number().min(1024).default(L1_MAX_CHARS_DEFAULT),
 	globalL1MaxChars: Schema.natural().min(512).default(2048),
+	// 索引整理的目标水位线比例：目标字符 = l1MaxChars × 本值，默认 0.9。
+	// 预算是硬上限、不靠抬高它回避整理；水位线给新记忆留出继续写入的空间。
+	indexTargetRatio: Schema.number().min(0.5).max(1).default(0.9),
 	reflectCooldownTurns: Schema.natural().default(10),
 	nearDupeThreshold: Schema.number().min(0).max(1).default(NEAR_DUPE_THRESHOLD),
 	mergeCandidateThreshold: Schema.number().min(0).max(1).default(MERGE_CANDIDATE_THRESHOLD),
@@ -62,7 +65,7 @@ function apply(ctx, config = {}) {
 	cfg.runtimeInfo = runtimeInfo;
 	if (Boolean(cfg.maintenanceLlmProvider) !== Boolean(cfg.maintenanceModel)) throw new Error("maintenanceLlmProvider and maintenanceModel must be set together");
 	cfg.heat = { halfLifeDays: cfg.heatHalfLifeDays, recencyWindowMs: cfg.recencyWindowDays * 86400000 };
-	cfg.maintainOpts = { nearDupeThreshold: cfg.nearDupeThreshold, mergeCandidateThreshold: cfg.mergeCandidateThreshold, minTokensForFuzzy: cfg.minTokensForFuzzy, heat: cfg.heat, coldReviewDays: cfg.coldReviewDays };
+	cfg.maintainOpts = { nearDupeThreshold: cfg.nearDupeThreshold, mergeCandidateThreshold: cfg.mergeCandidateThreshold, minTokensForFuzzy: cfg.minTokensForFuzzy, heat: cfg.heat, coldReviewDays: cfg.coldReviewDays, indexTargetRatio: cfg.indexTargetRatio };
 	const workspaceRoots = new Map();
 	cfg.workspaceRootFor = cwd => workspaceRoots.get(cwd) || cwd;
 	const activity = createActivitySource(ctx, cfg);

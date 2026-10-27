@@ -78,7 +78,11 @@ export function runMaintain(root, maxChars = L1_MAX_CHARS_DEFAULT, opts = {}) {
 			const stats = computeNamespaceStats(root, entries);
 			const cold = findColdEntries(root, { ...opts, days: opts.coldReviewDays ?? COLD_REVIEW_DAYS, entries });
 			const counts = { pending: pendingNames(root).length, conflicts: dedupe.conflicts.length, exact_duplicates: dedupe.exactDuplicates.length, near_duplicates: dedupe.nearDuplicates.length, merge_candidates: mergeCandidates.length };
-			const review = syncReview(root, { overLimit: index.over_limit, entries, origin: opts.origin });
+			// 整理目标不是「不超上限」而是「压到水位线以下」：水位线 = l1MaxChars × indexTargetRatio。
+			// 只判 over_limit 会让索引长期贴着上限，新记忆写一条就再次超限。
+			const targetChars = Math.max(0, Math.floor(maxChars * (opts.indexTargetRatio ?? 0.9)));
+			const aboveTarget = index.index_chars > targetChars;
+			const review = syncReview(root, { overLimit: index.over_limit, aboveTarget, targetChars, indexChars: index.index_chars, entries, origin: opts.origin });
 			const previous = readReflectionState(root);
 			const reviewed = previous.scanVersion === 2 && previous.reviewedRevision === computeContentRevision(root);
 			const reasons = reviewed ? [] : Object.keys(counts).filter(key => counts[key] > 0);

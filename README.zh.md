@@ -80,6 +80,7 @@ memory_rollback({entry, snapshot_id: "填一个返回的快照 id"})
     progressive: true
     l1MaxChars: 12288
     globalL1MaxChars: 2048
+    indexTargetRatio: 0.9
     memoryAccess: write
     subagentMemoryAccess: read
     autoPending: false
@@ -98,7 +99,7 @@ memory_rollback({entry, snapshot_id: "填一个返回的快照 id"})
 
 `default` 是全局空间，项目索引和默认搜索都把它算进来。字符预算同时管索引条目和手写规则，完整文件仍然可以通过工具读到。宿主用变量传递记忆文本，内容按数据处理，`{{模板括号}}` 会原样保留。
 
-主模型在任务中照常查阅和更新笔记，后台照看本轮相关笔记的遗漏、矛盾和重复，零变更是正常结果。任务收尾核对默认开启，积累 6 条去重后未处理的成功证据作为一个批次；单个正常完成的用户回合也可满足，当前回合仍须有新证据。每个父对话最多两个固定维护会话：核对沿用当前父模型，存量整理默认也沿用当前对话模型；需要钉到指定模型时，再用 `maintenanceLlmProvider` 与 `maintenanceModel` 成对指定。`turnReviewReasoningEffort` 可单独指定核对思考档，留空则沿用父会话。存量自动维护由 `reflectionMode: auto` 启用。两条路径通过 `maintenanceCooldownMinutes` 共用默认 30 分钟的空间级冷却，维护自己的写入不算新用户工作。
+主模型在任务中照常查阅和更新笔记，后台照看本轮相关笔记的遗漏、矛盾和重复，零变更是正常结果。任务收尾核对默认开启，积累 6 条去重后未处理的成功证据作为一个批次；单个正常完成的用户回合也可满足，当前回合仍须有新证据。每个父对话最多两个固定维护会话：核对沿用当前父模型，存量整理默认也沿用当前对话模型；需要钉到指定模型时，再用 `maintenanceLlmProvider` 与 `maintenanceModel` 成对指定。`turnReviewReasoningEffort` 可单独指定核对思考档，留空则沿用父会话。存量自动维护由 `reflectionMode: auto` 启用。两条路径通过 `maintenanceCooldownMinutes` 共用默认 30 分钟的空间级冷却，维护自己的写入不算新用户工作。索引压力作业以水位线为目标：目标字符 = `l1MaxChars` × `indexTargetRatio`（默认 0.9），候选数按缺口放大，未达标且有改动就连续续派，直到压回水位线或整轮零改动；优先合并同主题条目，归档失效条目为次要手段，调高 `l1MaxChars` 不是回避整理的办法。
 
 成功写入立即记账保存。完成工具先校验条目，再结束维护代理；提交有误时返回具体条目和修正方式，代理可在本轮继续处理。工作调用额度用完后仍可保存检查点和提交完成结果。超时或取消会结束本轮并保留已保存进度；有新证据且冷却到期后，未完成核对可以继续，无需重新凑满首次派发门槛。固定会话会收到前次结果、剩余工作及版本仍有效的已保存条目。
 

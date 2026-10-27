@@ -1,7 +1,7 @@
 export function createStatusClient(require, styles) {
 	const React = require("react");
 	const { createPortal } = require("react-dom");
-	const { Button, SegmentedControl, IconCloseOutlineRegular, IconWarningOutlineRegular, useAnchoredPosition, useDismissOnOutsidePointer } = require("@deepseek-ai/dsh-client-ui-primitives");
+	const { Button, SegmentedControl, IconWarningOutlineRegular, useAnchoredPosition, useDismissOnOutsidePointer } = require("@deepseek-ai/dsh-client-ui-primitives");
 	const { RemoteSnapshotStream, RemoteStreamCarrierError } = require("@deepseek-ai/dsh-api-gateway/client");
 	const h = React.createElement;
 	async function resultValue(request) {
@@ -17,7 +17,7 @@ export function createStatusClient(require, styles) {
 			stoppedReview: "记忆核对已停止", stoppedBatch: "记忆整理已停止",
 			failed: "上次记忆核对未完成", partial: "记忆已整理 {count} 条 · 上次核对未完成", details: "查看记忆活动",
 			unavailable: "记忆状态暂不可用", concurrent: "还有 {count} 项记忆任务运行中",
-			activity: "记忆活动", close: "关闭", runs: "运行记录", current: "当前任务", reviewWorker: "核对会话", batchWorker: "整理会话",
+			activity: "记忆活动", runs: "运行记录", current: "当前任务", reviewWorker: "核对会话", batchWorker: "整理会话",
 			review: "本轮核对", batch: "批量整理", legacy: "旧记录", empty: "还没有维护记录", historyEmpty: "暂无可显示的记录",
 			loading: "正在读取…", refresh: "更新", older: "更早记录", stopping: "停止中…", stop: "停止", notStarted: "尚未开始",
 			changedCount: "变更 {count} 条", retainedCount: "保留 {count} 条", waitingCount: "待证据 {count} 条", remainingCount: "未完成 {count} 条",
@@ -31,7 +31,7 @@ export function createStatusClient(require, styles) {
 			stoppedReview: "Memory review stopped", stoppedBatch: "Memory organization stopped",
 			failed: "Last memory review incomplete", partial: "Organized {count} entries · last review incomplete", details: "View memory activity",
 			unavailable: "Memory status unavailable", concurrent: "{count} more memory tasks running",
-			activity: "Memory activity", close: "Close", runs: "Runs", current: "Current task", reviewWorker: "Review session", batchWorker: "Organization session",
+			activity: "Memory activity", runs: "Runs", current: "Current task", reviewWorker: "Review session", batchWorker: "Organization session",
 			review: "Turn review", batch: "Memory organization", legacy: "Legacy", empty: "No maintenance runs yet", historyEmpty: "No records to display",
 			loading: "Loading…", refresh: "Refresh", older: "Earlier records", stopping: "Stopping…", stop: "Stop", notStarted: "Not started",
 			changedCount: "{count} changed", retainedCount: "{count} retained", waitingCount: "{count} awaiting evidence", remainingCount: "{count} remaining",
@@ -93,7 +93,7 @@ export function createStatusClient(require, styles) {
 			run.waitingEntries ? h("span", null, t("waitingCount", { count: run.waitingEntries })) : null,
 			run.remainingEntries ? h("span", null, t("remainingCount", { count: run.remainingEntries })) : null);
 	}
-	function ActivityPanel({ open, snapshot, controls, panelRef, panelId, position, onClose, t }) {
+	function ActivityPanel({ open, snapshot, controls, panelRef, panelId, position, t }) {
 		const [workers, setWorkers] = React.useState([]);
 		const [workersError, setWorkersError] = React.useState(null);
 		const [refresh, setRefresh] = React.useState(0);
@@ -153,8 +153,7 @@ export function createStatusClient(require, styles) {
 		const tabsId = panelId + "-views";
 		return h("div", { ref: panelRef, id: panelId, role: "dialog", "aria-label": t("activity"), className: "lm-activity-panel", "data-memory-details": true, style: position || { visibility: "hidden", left: 0, top: 0 } },
 			h("header", { className: "lm-activity-heading" },
-				h("span", { className: "lm-activity-title" }, h(Brain), t("activity")),
-				h(Button, { variant: "ghost", size: "sm", className: "lm-close", onClick: onClose, "aria-label": t("close") }, h(IconCloseOutlineRegular, { size: 14 }))),
+				h("span", { className: "lm-activity-title" }, h(Brain), t("activity"))),
 			h("div", { className: "lm-activity-rule", "aria-hidden": true }),
 			h(SegmentedControl, {
 				id: tabsId, value: view, label: t("activity"), className: "lm-activity-tabs",
@@ -224,7 +223,7 @@ export function createStatusClient(require, styles) {
 					title, "aria-label": title,
 				}, h(Brain), h("span", { className: "lm-status-text", role: "status", "aria-live": "polite" }, label),
 					isFailure ? h(IconWarningOutlineRegular, { className: "lm-status-failure", size: 14 }) : null)),
-			open && createPortal(h(ActivityPanel, { open, snapshot, controls, panelRef, panelId, position, onClose: () => setOpen(false), t }), document.body));
+			open && createPortal(h(ActivityPanel, { open, snapshot, controls, panelRef, panelId, position, t }), document.body));
 	}
 	return {
 		inject: ["remote"],

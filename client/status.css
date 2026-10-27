@@ -92,7 +92,6 @@ button.lm-status-line:focus-visible,
 	font-weight: 500;
 }
 .lm-activity-title { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-.lm-activity-panel .lm-close { width: 20px; height: 20px; min-height: 0; padding: 0; border-radius: var(--dsw-radius-sm); }
 .lm-activity-rule { flex: none; margin-bottom: 10px; border-top: .5px solid var(--dsw-alias-border-l2); }
 .lm-activity-tabs { flex: none; align-self: stretch; margin-bottom: 12px; }
 .lm-activity-body { display: flex; flex-direction: column; min-height: 0; }

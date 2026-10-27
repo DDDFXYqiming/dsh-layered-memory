@@ -324,8 +324,8 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 				return { status: "cooldown" };
 			}
 			const agentOptions = { maxTokens: cfg.maintenanceMaxTokens };
-			if (!turnReview && (!cfg.maintenanceLlmProvider || !cfg.maintenanceModel)) throw new Error("请先配置存量整理的 maintenanceLlmProvider 和 maintenanceModel（例如已配置的 DeepSeek Flash 路由）");
-			if (!turnReview && cfg.maintenanceModel) Object.assign(agentOptions, { provider: cfg.maintenanceLlmProvider, model: cfg.maintenanceModel });
+			// 两项都显式配置才覆盖路由；未配置时不写 provider/model，由 maintenance-workers.js 的 resolveChildAgentOptions 继承父会话当前模型。
+			if (!turnReview && cfg.maintenanceLlmProvider && cfg.maintenanceModel) Object.assign(agentOptions, { provider: cfg.maintenanceLlmProvider, model: cfg.maintenanceModel });
 			const reasoning = turnReview ? cfg.turnReviewReasoningEffort : cfg.maintenanceReasoningEffort;
 			if (reasoning) agentOptions.reasoningEffort = reasoning;
 			record.requestedModel = agentOptions;

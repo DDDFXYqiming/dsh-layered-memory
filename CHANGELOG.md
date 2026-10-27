@@ -2,6 +2,12 @@
 
 All notable changes to `@dsh-external/dsh-layered-memory` are documented here.
 
+## [0.10.0-preview.16] - 2026-10-27
+
+- 存量整理默认跟随当前对话正在使用的模型，与收尾核对一致，不再要求预先配置模型路由。
+- `maintenanceLlmProvider` 与 `maintenanceModel` 降为可选覆盖项：两项都填写才覆盖路由，只填一项在加载时报错，都不填则沿用父会话当前模型。
+- 修复存量整理在未配置模型时整轮中止、连带导致状态面板“整理会话”页签不可用的连锁问题。
+
 ## [0.10.0-preview.15] - 2026-10-24
 
 - 基础记忆查询、读取、创建和更新工具直接可用；`memory_activate` 只补充工具集合，移除模型自设的持久访问模式，读写权限统一由用户配置决定。

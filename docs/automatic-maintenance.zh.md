@@ -12,7 +12,7 @@
 
 实际写入由程序记账并立即保存，维护代理通常只需调用 `memory_maintenance_complete({summary})` 结案，不必重报 `changed` 或完整待办清单。所有业务校验在结束代理之前执行；错误包含具体条目及修正动作，代理可补读或改正后重新提交。程序根据真实写入规范化条目状态，已有写入不会因模型填成 `retained` 丢失；上轮的 `changed` 若本轮仅完整读取，则按保留记录。插件等待成功工具回执、正常回合结束及会话持久化后记录完成状态；PTC 内部调用还需等待外层调用成功。结果保存到 `maintenance-runs.json`，主会话保留用户任务的回答。无变化记录为 `unchanged`。纯闲聊、插件发起的轮次和仅调用记忆工具不会增加业务证据。
 
-执行记录按父会话与完成事件去重，同一用户回合最多派发一次自动维护。事实来源指向父会话的验证事件，核对者身份单独记录。收尾核对沿用维护调用、写入、输出和超时预算，使用父会话的模型路由；`turnReviewReasoningEffort` 非空时单独指定核对思考档，否则沿用父会话。每次实际核对会消耗模型调用，`turnReviewEnabled: false` 可关闭。
+执行记录按父会话与完成事件去重，同一用户回合最多派发一次自动维护。事实来源指向父会话的验证事件，核对者身份单独记录。收尾核对沿用维护调用、写入、输出和超时预算，使用父会话的模型路由；`turnReviewReasoningEffort` 非空时单独指定核对思考档，否则沿用父会话。存量整理默认同样沿用父会话当前的模型。每次实际核对会消耗模型调用，`turnReviewEnabled: false` 可关闭。
 
 收尾核对与批整理统一读取当前空间 `maintenance-runs.json` 中最近一次真实派发时间，默认间隔至少 30 分钟。冷却期间继续积累证据，插件重装和会话切换沿用同一份台账。冷却到期本身不会唤醒任务，仍需后续有效回合结束。
 
@@ -25,8 +25,9 @@
     turnReviewMinEvidence: 6
     reflectionEnabled: true
     reflectionMode: auto
-    maintenanceLlmProvider: opencode-go
-    maintenanceModel: deepseek-v4.1-flash
+    # 可选覆盖项：两项都不填即跟随当前对话模型，需要钉到指定模型时再成对填写
+    # maintenanceLlmProvider: opencode-go
+    # maintenanceModel: deepseek-v4.1-flash
     maintenanceReasoningEffort: ''
     turnReviewReasoningEffort: ''
     maintenanceMaxTokens: 16384
@@ -36,7 +37,7 @@
     maintenanceTimeoutSeconds: 300
 ```
 
-存量整理的 LLM 提供方与模型必须成对设置为已配置且可用的路由；上面以 OpenCode Go 的 DeepSeek V4.1 Flash 为例。核对每次显式读取父会话当前的模型配置。旧 `maintenanceProvider` 配置移除，执行统一使用公开 Agent 接口。
+存量整理的 LLM 提供方与模型是可选覆盖项：两项都填写才会覆盖路由；只填一项会在加载时报错；都不填则沿用父会话当前模型。上面注释里的 OpenCode Go 的 DeepSeek V4.1 Flash 是一个覆盖示例。核对每次显式读取父会话当前的模型配置。旧 `maintenanceProvider` 配置移除，执行统一使用公开 Agent 接口。
 
 `maintenanceMaxTokens` 是每次模型响应的输出上限，一轮维护可以包含多次响应。`maintenanceMaxCalls` 统计工作工具调用，检查点和完成工具另行计数；`maintenanceMaxWrites` 统计实际产生变化的写入操作，状态栏则按发生变化的条目去重。`maintenanceTimeoutSeconds` 是整轮时限，到期会结束本轮并保留已保存的进度。
 

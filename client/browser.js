@@ -1,7 +1,7 @@
 export function createMemoryBrowserClient(require, styles) {
 	const React = require("react");
 	const {
-		Button, Input, Menu, MenuItemButton,
+		Button, Input, Menu, MenuItemButton, Switch,
 		IconPlusOutlineRegular, IconSearchOutlineRegular, IconCloseOutlineRegular,
 		IconChevronDownOutlineRegular, IconCheckOutlineRegular,
 	} = require("@deepseek-ai/dsh-client-ui-primitives");
@@ -13,7 +13,7 @@ export function createMemoryBrowserClient(require, styles) {
 			all: "全部", showArchived: "显示已归档", entries: "记忆条目", loading: "正在读取…", empty: "没有匹配的记忆条目", emptyDetail: "从左侧选择一条记忆",
 			archived: "已归档", content: "内容", evidence: "证据", save: "保存", saving: "保存中…", archive: "归档", restore: "恢复",
 			history: "历史快照", noHistory: "暂无历史快照", rollback: "回滚到此版本", rollbackConfirm: "确认回滚", cancel: "取消",
-			rollbackWarning: "回滚会覆盖当前内容，是否继续？", saved: "已保存", archivedDone: "归档状态已更新", rolledBack: "已回滚到所选快照",
+			rollbackWarning: "回滚会覆盖当前内容，是否继续？", requiredFields: "命名空间、标题、内容、证据都必须填写", loadTimeout: "记忆数据加载超时", saved: "已保存", archivedDone: "归档状态已更新", rolledBack: "已回滚到所选快照",
 			reload: "重新加载", conflict: "条目已被其他会话修改，请重新加载后再保存。", createTitle: "新建记忆条目", topic: "标题",
 			topicPlaceholder: "输入条目标题", contentPlaceholder: "输入记忆正文", evidencePlaceholder: "输入本次写入的证据", create: "创建", creating: "创建中…",
 			created: "条目已创建", close: "关闭", createdAt: "创建时间", updatedAt: "更新时间", characters: "{count} 字符",
@@ -24,7 +24,7 @@ export function createMemoryBrowserClient(require, styles) {
 			all: "All", showArchived: "Show archived", entries: "Memory entries", loading: "Loading…", empty: "No matching memory entries", emptyDetail: "Select a memory entry on the left",
 			archived: "Archived", content: "Content", evidence: "Evidence", save: "Save", saving: "Saving…", archive: "Archive", restore: "Restore",
 			history: "History", noHistory: "No history snapshots", rollback: "Roll back to this version", rollbackConfirm: "Confirm rollback", cancel: "Cancel",
-			rollbackWarning: "Rolling back replaces the current content. Continue?", saved: "Saved", archivedDone: "Archive state updated", rolledBack: "Rolled back to the selected snapshot",
+			rollbackWarning: "Rolling back replaces the current content. Continue?", requiredFields: "Namespace, title, content, and evidence are required", loadTimeout: "Timed out loading memory data", saved: "Saved", archivedDone: "Archive state updated", rolledBack: "Rolled back to the selected snapshot",
 			reload: "Reload", conflict: "This entry changed elsewhere. Reload it before saving again.", createTitle: "New memory entry", topic: "Title",
 			topicPlaceholder: "Enter an entry title", contentPlaceholder: "Enter memory content", evidencePlaceholder: "Enter evidence for this write", create: "Create", creating: "Creating…",
 			created: "Entry created", close: "Close", createdAt: "Created", updatedAt: "Updated", characters: "{count} characters",
@@ -37,7 +37,12 @@ export function createMemoryBrowserClient(require, styles) {
 		return result.value;
 	}
 	const identity = entry => JSON.stringify([entry.namespace, entry.kind, entry.key]);
-	const time = value => value ? new Date(value).toLocaleString() : "—";
+	// 与界面语言一致的时间格式，避免中文界面出现美式日期
+	const time = value => {
+		if (!value) return "—";
+		const lang = (typeof document !== "undefined" && document.documentElement.lang) || "zh-CN";
+		return new Date(value).toLocaleString(lang, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+	};
 	function MemoryBrowserIcon({ size = 20 }) {
 		return h("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
 			h("path", { d: "M5 4.5A2.5 2.5 0 0 1 7.5 2H20v17H7.5A2.5 2.5 0 0 0 5 21.5z" }),
@@ -93,18 +98,20 @@ export function createMemoryBrowserClient(require, styles) {
 			h("section", { className: "lm-browser-modal", role: "dialog", "aria-modal": true, "aria-labelledby": "lm-browser-create-title" },
 				h("div", { className: "lm-browser-modal-heading" }, h("h2", { id: "lm-browser-create-title" }, t("createTitle")), h(Button, { variant: "ghost", size: "sm", "aria-label": t("close"), disabled: busy, onClick: onClose }, h(IconCloseOutlineRegular, { size: 16 }))),
 				h("form", { onSubmit: event => { event.preventDefault(); onSubmit(); } },
+					error ? h("p", { className: "lm-browser-error", role: "alert" }, error) : null,
 					h(Field, { label: t("namespace") }, h(SelectMenu, { value: form.namespace, options: namespaces.map(row => ({ value: row.namespace, label: row.namespace })), disabled: busy, onChange: value => update("namespace", value), ariaLabel: t("namespace"), triggerClassName: "lm-browser-input" })),
 					h(Field, { label: "kind" }, h(SelectMenu, { value: form.kind, options: [{ value: "fact", label: "fact" }, { value: "sop", label: "sop" }], disabled: busy, onChange: value => update("kind", value), ariaLabel: "kind", triggerClassName: "lm-browser-input" })),
-					h(Field, { label: t("topic") }, h("input", { className: "lm-browser-input", value: form.topic, required: true, placeholder: t("topicPlaceholder"), disabled: busy, onChange: event => update("topic", event.target.value) })),
-					h(Field, { label: t("content") }, h("textarea", { className: "lm-browser-textarea lm-browser-create-content", value: form.content, required: true, placeholder: t("contentPlaceholder"), disabled: busy, onChange: event => update("content", event.target.value) })),
-					h(Field, { label: t("evidence") }, h("input", { className: "lm-browser-input", value: form.evidence, required: true, placeholder: t("evidencePlaceholder"), disabled: busy, onChange: event => update("evidence", event.target.value) })),
-					error ? h("p", { className: "lm-browser-error", role: "alert" }, error) : null,
+					h(Field, { label: t("topic") }, h(Input, { value: form.topic, placeholder: t("topicPlaceholder"), disabled: busy, onChange: event => update("topic", event.target.value) })),
+					h(Field, { label: t("content") }, h("textarea", { className: "lm-browser-textarea lm-browser-create-content", value: form.content, placeholder: t("contentPlaceholder"), disabled: busy, onChange: event => update("content", event.target.value) })),
+					h(Field, { label: t("evidence") }, h(Input, { value: form.evidence, placeholder: t("evidencePlaceholder"), disabled: busy, onChange: event => update("evidence", event.target.value) })),
 					h("div", { className: "lm-browser-modal-actions" }, h(Button, { variant: "outline", type: "button", disabled: busy, onClick: onClose }, t("cancel")), h(Button, { variant: "primary", type: "submit", disabled: busy || !form.namespace }, busy ? t("creating") : t("create"))))));
 	}
 	function MemoryBrowserPage({ controls, t }) {
 		const [namespaces, setNamespaces] = React.useState([]);
 		const [namespace, setNamespace] = React.useState(null);
 		const [namespaceError, setNamespaceError] = React.useState(null);
+		const [namespaceBusy, setNamespaceBusy] = React.useState(true);
+		const [namespaceVersion, setNamespaceVersion] = React.useState(0);
 		const [query, setQuery] = React.useState("");
 		const [kind, setKind] = React.useState("");
 		const [includeArchived, setIncludeArchived] = React.useState(false);
@@ -135,15 +142,34 @@ export function createMemoryBrowserClient(require, styles) {
 		const historyRequest = React.useRef(0);
 		React.useEffect(() => {
 			let active = true;
-			controls.listNamespaces().then(rows => {
-				if (!active) return;
-				setNamespaces(rows);
-				setNamespaceError(null);
-				setNamespace(current => current && rows.some(row => row.namespace === current) ? current : rows[0]?.namespace || null);
-			}).catch(error => { if (active) setNamespaceError(error.message); });
+			setNamespaceBusy(true);
+			// 首屏时远程命名空间可能尚未就绪，调用会一直悬挂；带超时重试，避免页面空着
+			const attempt = async () => {
+				for (let index = 0; index < 3; index += 1) {
+					if (!active) return;
+					try {
+						const rows = await Promise.race([
+							controls.listNamespaces(),
+							new Promise((_, reject) => setTimeout(() => reject(new Error(t("loadTimeout"))), 2500)),
+						]);
+						if (!active) return;
+						setNamespaces(rows);
+						setNamespaceError(null);
+						setNamespaceBusy(false);
+						setNamespace(current => current && rows.some(row => row.namespace === current) ? current : rows[0]?.namespace || null);
+						return;
+					} catch (error) {
+						if (!active) return;
+						if (index === 2) { setNamespaceBusy(false); setNamespaceError(error.message); return; }
+						await new Promise(resolve => setTimeout(resolve, 400));
+					}
+				}
+			};
+			attempt();
 			return () => { active = false; };
-		}, [controls]);
+		}, [controls, namespaceVersion]);
 		React.useEffect(() => {
+			setNotice(null); setActionError(null); setConflict(false);
 			if (!namespace) { setEntries([]); setSelectedId(null); setListBusy(false); return; }
 			let active = true;
 			setListBusy(true);
@@ -165,9 +191,6 @@ export function createMemoryBrowserClient(require, styles) {
 			const request = ++detailRequest.current;
 			const selected = entries.find(row => identity(row.entry) === selectedId);
 			setRollbackId(null);
-			setActionError(null);
-			setNotice(null);
-			setConflict(false);
 			if (!selected) { setDetail(null); setDetailBusy(false); setDetailError(null); return; }
 			setDetail(null);
 			setDetailBusy(true);
@@ -209,6 +232,10 @@ export function createMemoryBrowserClient(require, styles) {
 			setCreateOpen(true);
 		}
 		async function createEntry() {
+			if (!createForm.namespace || !createForm.topic.trim() || !createForm.content.trim() || !createForm.evidence.trim()) {
+				setCreateError(t("requiredFields"));
+				return;
+			}
 			setBusy("create");
 			setCreateError(null);
 			try {
@@ -283,17 +310,17 @@ export function createMemoryBrowserClient(require, styles) {
 			h("style", null, styles),
 			h("header", { className: "lm-browser-heading" }, h("h1", null, t("title")), h(Button, { variant: "primary", size: "sm", className: "lm-browser-new", icon: h(IconPlusOutlineRegular, { size: 13 }), disabled: !namespaces.length, onClick: openCreate }, t("newEntry"))),
 			h("div", { className: "lm-browser-toolbar" },
-				h("div", { className: "lm-browser-namespace" }, h(SelectMenu, { value: namespace || "", options: namespaces.length ? namespaces.map(row => ({ value: row.namespace, label: row.namespace })) : [{ value: "", label: t("noNamespace") }], disabled: !namespaces.length || Boolean(busy), onChange: setNamespace, ariaLabel: t("namespace") })),
+				h("div", { className: "lm-browser-namespace" }, h(SelectMenu, { value: namespace || "", options: namespaces.length ? namespaces.map(row => ({ value: row.namespace, label: row.namespace })) : [{ value: "", label: namespaceBusy ? t("loading") : t("noNamespace") }], disabled: namespaceBusy || !namespaces.length || Boolean(busy), onChange: setNamespace, ariaLabel: t("namespace") })),
 				h("div", { className: "lm-browser-search" }, h(Input, { type: "search", icon: h(IconSearchOutlineRegular, { size: 14 }), "aria-label": t("search"), placeholder: t("searchPlaceholder"), value: query, onChange: event => setQuery(event.target.value) }), query ? h(Button, { variant: "ghost", size: "sm", className: "lm-browser-search-clear", "aria-label": t("clearSearch"), onClick: () => setQuery("") }, h(IconCloseOutlineRegular, { size: 14 })) : null),
 				h("div", { className: "lm-browser-filter-tabs", role: "group", "aria-label": "kind" }, [["", t("all")], ["fact", "fact"], ["sop", "sop"]].map(([value, label]) => h("button", { key: value || "all", type: "button", className: "lm-browser-filter-tab" + (kind === value ? " is-active" : ""), "aria-pressed": kind === value, onClick: () => setKind(value) }, label))),
-				h("label", { className: "lm-browser-archived-toggle" }, h("input", { type: "checkbox", role: "switch", checked: includeArchived, onChange: event => setIncludeArchived(event.target.checked) }), h("span", null, t("showArchived")))),
-			namespaceError ? h("p", { className: "lm-browser-error lm-browser-banner", role: "alert" }, namespaceError) : null,
+				h("label", { className: "lm-browser-archived-toggle" }, h(Switch, { checked: includeArchived, label: t("showArchived"), onChange: next => setIncludeArchived(next) }), h("span", { "aria-hidden": "true" }, t("showArchived")))),
+			namespaceError ? h("div", { className: "lm-browser-error lm-browser-banner", role: "alert" }, h("span", null, namespaceError), h(Button, { variant: "outline", size: "sm", onClick: () => setNamespaceVersion(value => value + 1) }, t("reload"))) : null,
 			h("div", { className: "lm-browser-body" },
 				h("section", { className: "lm-browser-list-pane", "aria-label": t("entries") },
 					listBusy ? h("p", { className: "lm-browser-empty", role: "status" }, t("loading")) : null,
 					listError ? h("p", { className: "lm-browser-error", role: "alert" }, listError) : null,
-					!listBusy && !listError && !entries.length ? h("p", { className: "lm-browser-empty" }, t("empty")) : null,
-					h("ul", { className: "lm-browser-list" }, entries.map(row => h("li", { key: identity(row.entry) }, h("button", { type: "button", className: "lm-browser-row" + (selectedId === identity(row.entry) ? " is-selected" : "") + (row.archived ? " is-archived" : ""), onClick: () => setSelectedId(identity(row.entry)) },
+					namespaceBusy ? h("p", { className: "lm-browser-empty", role: "status" }, t("loading")) : (!listBusy && !listError && !entries.length ? h("p", { className: "lm-browser-empty" }, t("empty")) : null),
+					h("ul", { className: "lm-browser-list" }, entries.map(row => h("li", { key: identity(row.entry) }, h("button", { type: "button", className: "lm-browser-row" + (selectedId === identity(row.entry) ? " is-selected" : "") + (row.archived ? " is-archived" : ""), onClick: () => { setSelectedId(identity(row.entry)); setNotice(null); setActionError(null); setConflict(false); } },
 						h("span", { className: "lm-browser-row-title" }, row.title),
 						h("span", { className: "lm-browser-row-meta" }, h("span", { className: "lm-browser-kind" }, row.entry.kind), row.archived ? h("span", null, t("archived")) : null, row.updatedAt ? h("time", { dateTime: row.updatedAt }, time(row.updatedAt)) : null)))))),
 				h("article", { className: "lm-browser-detail" },
@@ -301,14 +328,17 @@ export function createMemoryBrowserClient(require, styles) {
 					detailError ? h("div", { className: "lm-browser-detail-message" }, h("p", { className: "lm-browser-error", role: "alert" }, detailError), h(Button, { variant: "outline", size: "sm", onClick: reloadDetail }, t("reload"))) : null,
 					!detailBusy && !detailError && !detail ? h("p", { className: "lm-browser-empty" }, t("emptyDetail")) : null,
 					detail ? h("div", { className: "lm-browser-detail-scroll" },
-						h("div", { className: "lm-browser-detail-heading" }, h("h2", null, detail.title), detail.archived ? h("span", { className: "lm-browser-archived-badge" }, t("archived")) : null),
+						h("div", { className: "lm-browser-detail-heading" },
+							h("div", { className: "lm-browser-detail-title" }, h("h2", null, detail.title), detail.archived ? h("span", { className: "lm-browser-archived-badge" }, t("archived")) : null),
+							h("div", { className: "lm-browser-detail-actions" },
+								notice ? h("span", { className: "lm-browser-inline-notice", role: "status" }, notice) : null,
+								h(Button, { variant: "outline", size: "sm", disabled: Boolean(busy), onClick: toggleArchived }, detail.archived ? t("restore") : t("archive")),
+								h(Button, { variant: "primary", size: "sm", disabled: Boolean(busy) || !dirty, onClick: saveEntry }, busy === "save" ? t("saving") : t("save")))),
+						conflict ? h("div", { className: "lm-browser-conflict", role: "alert" }, h("span", null, t("conflict")), h(Button, { variant: "outline", size: "sm", onClick: reloadDetail }, t("reload"))) : null,
+						actionError && !conflict ? h("p", { className: "lm-browser-error", role: "alert" }, actionError) : null,
 						h("dl", { className: "lm-browser-readonly" }, [["namespace", detail.entry.namespace], ["kind", detail.entry.kind], ["key", detail.entry.key]].map(([label, value]) => h("div", { key: label }, h("dt", null, label), h("dd", null, value)))),
 						h(Field, { label: t("content") }, h("textarea", { className: "lm-browser-textarea lm-browser-content", value: content, disabled: Boolean(busy), onChange: event => setContent(event.target.value) })),
 						h(Field, { label: t("evidence") }, h(Input, { value: evidence, disabled: Boolean(busy), placeholder: t("evidencePlaceholder"), onChange: event => setEvidence(event.target.value) })),
-						conflict ? h("div", { className: "lm-browser-conflict", role: "alert" }, h("span", null, t("conflict")), h(Button, { variant: "outline", size: "sm", onClick: reloadDetail }, t("reload"))) : null,
-						actionError && !conflict ? h("p", { className: "lm-browser-error", role: "alert" }, actionError) : null,
-						notice ? h("p", { className: "lm-browser-notice", role: "status" }, notice) : null,
-						h("div", { className: "lm-browser-actions" }, h(Button, { variant: "outline", size: "sm", disabled: Boolean(busy), onClick: toggleArchived }, detail.archived ? t("restore") : t("archive")), h(Button, { variant: "primary", size: "sm", disabled: Boolean(busy) || !dirty, onClick: saveEntry }, busy === "save" ? t("saving") : t("save"))),
 						h("section", { className: "lm-browser-history" },
 							h("h3", null, t("history")),
 							historyBusy ? h("p", { className: "lm-browser-empty", role: "status" }, t("loading")) : null,

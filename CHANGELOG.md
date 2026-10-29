@@ -4,6 +4,15 @@ All notable changes to `@dsh-external/dsh-layered-memory` are documented here.
 
 ## 2026-10-29
 
+## 2026-10-29 UI 巡检修复
+
+- 命名空间与 kind 下拉改用官方 `Menu` + `MenuItemButton`；归档开关改用官方 `Switch`；新建弹层文本字段改用官方 `Input`，去掉原生 select/checkbox 控件样式。
+- 时间显示按界面语言本地化（中文界面不再出现美式日期）；保存/归档/回滚反馈移到标题行旁，切换条目时才清除。
+- 详情操作按钮（归档/保存）移到标题行右侧，长内容无需滚到底部才能保存；新建弹层改为固定底栏 + 内容区滚动。
+- 首次打开页面时远程命名空间可能尚未就绪：加载增加超时重试与加载态，失败显示可重试的错误提示。
+- 修正列表选中态、空态居中、滚动条宽度与官方页面一致；手机/平板字号规则清理失效选择器。
+
+
 - 新增“记忆”管理页：左侧边栏入口 + 独立页面，支持命名空间切换、标题/正文搜索、kind 过滤、归档查看；条目详情编辑保存（ifRevision 防冲突）、新建、归档/恢复、历史快照查看与二次确认回滚。
 - 主包新增 layeredMemoryStore 服务（8 个方法），status 子包经 typert 暴露 STORE_REMOTE 描述符；client 侧与 STATUS_REMOTE 合并单次 $mount（同 package 两次 $mount 会卡死 activate）。
 - build.mjs：bundled 副本目录只读（root 所有）时跳过并告警，lib/status 产物不受影响。

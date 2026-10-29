@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import Schema from "@deepseek-ai/schemastery";
-import { ensureNamespaceLayout, nsRoot, resolveNamespace, defaultMemDir, backfillMeta, HEAT_HALF_LIFE_DAYS, RECENCY_WINDOW_MS } from "./store.js";
+import { ensureNamespaceLayout, nsRoot, resolveNamespace, defaultMemDir, backfillMeta, HEAT_HALF_LIFE_DAYS, RECENCY_WINDOW_MS, readEntries, readMeta, loadAccess, hashText } from "./store.js";
+import { NEW_ENTRY_DAYS_DEFAULT, NEW_ENTRY_BONUS_DEFAULT, RELATED_BONUS_DEFAULT, RELATED_BONUS_CAP_DEFAULT, COLD_EXPLORE_RATIO_DEFAULT, RECALL_LIMIT_DEFAULT, entryId, scoreEntries, rankEntries, pickColdSet, recallEntries, recallLine } from "./heat.js";
 import { NEAR_DUPE_THRESHOLD, MERGE_CANDIDATE_THRESHOLD, MIN_TOKENS_FOR_FUZZY, COLD_REVIEW_DAYS } from "./maintain.js";
 import { L1_MAX_CHARS_DEFAULT, buildCombinedPromptIndex } from "./l1index.js";
 import { buildTools } from "./tools.js";
@@ -49,6 +50,12 @@ export const Config = Schema.object({
 	mergeCandidateThreshold: Schema.number().min(0).max(1).default(MERGE_CANDIDATE_THRESHOLD),
 	minTokensForFuzzy: Schema.number().min(1).default(MIN_TOKENS_FOR_FUZZY),
 	heatHalfLifeDays: Schema.number().min(1).default(HEAT_HALF_LIFE_DAYS),
+	heatNewEntryDays: Schema.number().min(0).default(NEW_ENTRY_DAYS_DEFAULT),
+	heatNewEntryBonus: Schema.number().min(0).default(NEW_ENTRY_BONUS_DEFAULT),
+	heatRelatedBonus: Schema.number().min(0).default(RELATED_BONUS_DEFAULT),
+	heatRelatedCap: Schema.number().min(0).default(RELATED_BONUS_CAP_DEFAULT),
+	l1ColdExploreRatio: Schema.number().min(0).max(1).default(COLD_EXPLORE_RATIO_DEFAULT),
+	recallLimit: Schema.natural().min(1).default(RECALL_LIMIT_DEFAULT),
 	recencyWindowDays: Schema.number().min(1).default(RECENCY_WINDOW_MS / 86400000),
 	coldReviewDays: Schema.number().min(1).default(COLD_REVIEW_DAYS),
 });
@@ -57,6 +64,16 @@ const READ_TOOLS = new Set(["memory_read", "memory_list", "memory_search", "memo
 const CORE_TOOLS = new Set(["memory_read", "memory_list", "memory_search", "memory_write", "memory_update"]);
 const COMMON_TOOLS = new Set(["memory_read", "memory_list", "memory_search", "memory_stats", "memory_write", "memory_update", "memory_review"]);
 const skillGesture = message => message?.source?.kind === "user" && message.content.some(block => block.type === "text" && /(^|\s)\/memory(?=\s|$)/.test(block.text));
+// pre-step 的 messages 是本步将要发给模型的整批消息；取最后一条真正的用户输入作为召回 query。
+function latestUserText(messages) {
+	let latest;
+	for (const message of messages || []) {
+		if (message?.source?.kind !== "user") continue;
+		const text = (message.content || []).filter(block => block?.type === "text").map(block => block.text).join("\n");
+		if (text) latest = text;
+	}
+	return latest;
+}
 
 function apply(ctx, config = {}) {
 	const cfg = Config(Object.fromEntries(Object.entries(config).filter(([, value]) => value !== "")));
@@ -98,11 +115,65 @@ function apply(ctx, config = {}) {
 		const cwd = agent?.session.header.cwd;
 		return { root: resolveRoot(cwd), namespace: resolveNamespace(cfg, undefined, cwd) };
 	}
+	// 会话热度快照：同一会话沿用首次装配时的排序，一次 memory_read 不会改写当前提示词顺序。
+	const SESSION_RANK_LIMIT = 200;
+	const sessionRanks = new Map(); // sessionId -> Map<namespace, Map<id, rank>>
+	const latestRequest = new Map(); // agent -> 最新 user 文本，作为召回 query
+	// 召回缓存：同会话同空间同 query 且条目内容未变时直接复用 BM25 结果。
+	const RECALL_CACHE_LIMIT = 50;
+	const recallCache = new Map(); // "sessionId|namespace|query" -> { signature, rows }
+	function heatScores(root, entries) {
+		return scoreEntries(entries, {
+			access: loadAccess(root), meta: readMeta(root), heat: cfg.heat,
+			relatedBonus: cfg.heatRelatedBonus, relatedCap: cfg.heatRelatedCap,
+			newEntryDays: cfg.heatNewEntryDays, newEntryBonus: cfg.heatNewEntryBonus,
+		});
+	}
+	function rankFor(namespace, sessionId) {
+		const root = nsRoot(cfg.memoryDir, namespace);
+		const entries = readEntries(root);
+		if (!sessionId) return { entries, rank: rankEntries(entries, heatScores(root, entries)) };
+		let buckets = sessionRanks.get(sessionId);
+		if (!buckets) {
+			// 会话上限：Map 按插入顺序淘汰最早的那个会话。
+			if (sessionRanks.size >= SESSION_RANK_LIMIT) sessionRanks.delete(sessionRanks.keys().next().value);
+			buckets = new Map();
+			sessionRanks.set(sessionId, buckets);
+		}
+		let rank = buckets.get(namespace);
+		if (!rank) { rank = rankEntries(entries, heatScores(root, entries)); buckets.set(namespace, rank); }
+		return { entries, rank };
+	}
+	function recallCached(namespace, sessionId, query, entries) {
+		const key = `${sessionId ?? ""}|${namespace}|${query}`;
+		// 条目 revision 变（新增/更新/归档）即视为内容版本变化，下一轮重新建 BM25 索引。
+		const signature = hashText(entries.map(entry => entry.kind + ":" + entry.key + ":" + entry.revision).join("|"));
+		const cached = recallCache.get(key);
+		if (cached && cached.signature === signature) return cached.rows;
+		const rows = recallEntries(entries, query, { limit: cfg.recallLimit });
+		if (recallCache.size >= RECALL_CACHE_LIMIT) recallCache.delete(recallCache.keys().next().value);
+		recallCache.set(key, { signature, rows });
+		return rows;
+	}
+	function heatViewFor(agent) {
+		const sessionId = agent?.session?.id;
+		const query = agent ? latestRequest.get(agent) : "";
+		return namespace => {
+			const { entries, rank } = rankFor(namespace, sessionId);
+			// rank 里没有的新条目按 -Infinity 置顶；冷探索位只在当前快照顺序的最冷端轮转。
+			const orderedIds = entries.filter(entry => !entry.meta?.archived).map(entry => entryId(entry.kind, entry.key))
+				.sort((a, b) => (rank.get(a) ?? -Infinity) - (rank.get(b) ?? -Infinity));
+			const cold = pickColdSet(orderedIds, { sessionSeed: `${sessionId ?? ""}|${namespace}`, ratio: cfg.l1ColdExploreRatio });
+			const rows = query ? recallCached(namespace, sessionId, query, entries) : [];
+			const line = recallLine(rows);
+			return { rank, cold, coldRatio: cfg.l1ColdExploreRatio, ...(line ? { recall: { lines: [line], ids: rows.map(row => entryId(row.entry.kind, row.entry.key)) } } : {}) };
+		};
+	}
 	resolveRoot();
 	const systemPrompt = ctx.get("systemPrompt");
 	disposers.push(systemPrompt.variable("layered_memory_index", context => {
 		const { namespace } = scopeFor(context.agent);
-		const { text } = buildCombinedPromptIndex(cfg.memoryDir, namespace, { projectMaxChars: cfg.l1MaxChars, globalMaxChars: cfg.globalL1MaxChars });
+		const { text } = buildCombinedPromptIndex(cfg.memoryDir, namespace, { projectMaxChars: cfg.l1MaxChars, globalMaxChars: cfg.globalL1MaxChars, forNamespace: heatViewFor(context.agent) });
 		return text ? `<memory_index source="user-writable">\n${text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")}\n</memory_index>` : "";
 	}));
 	disposers.push(systemPrompt.context({ name: "memory:index", order: 10, text: "{{layered_memory_index}}" }));
@@ -115,6 +186,7 @@ function apply(ctx, config = {}) {
 		requestMaintenance: (namespace, exec, report) => maintenance.request(nsRoot(cfg.memoryDir, namespace), namespace, exec.agent, {
 			purpose: "batch", trigger: { kind: "manual", callId: exec.callId }, report,
 		}),
+		isMaintenance: agent => Boolean(maintenance?.owns(agent)),
 	}).map(def => READ_TOOLS.has(def.name) ? def : {
 		...def,
 		execute(args, exec) {
@@ -123,6 +195,7 @@ function apply(ctx, config = {}) {
 		},
 	});
 	function detach(agent) {
+		latestRequest.delete(agent);
 		const state = states.get(agent);
 		if (!state) return;
 		for (const dispose of [...state.disposers.values()].reverse()) dispose();
@@ -154,6 +227,7 @@ function apply(ctx, config = {}) {
 		maintenanceTools(namespace) {
 			return buildTools(ctx, { ...cfg, defaultNamespace: namespace, autoNamespace: false }, {
 				resolveReviewEvidence: (args, exec) => maintenance.scopeFor(exec.agent).evidence.resolveReview(args.evidence_call_ids, exec.signal),
+				isMaintenance: () => true,
 			});
 		},
 		onSkillResult(exec, result) {
@@ -175,14 +249,22 @@ function apply(ctx, config = {}) {
 		return next();
 	}));
 	disposers.push(ctx.on("agent/created", async ({ agent }) => { await prepareWorkspace(agent); }));
-	disposers.push(ctx.on("agent/inbox/inserted", ({ agent, message }) => { if (skillGesture(message) && !maintenance.owns(agent)) activate(agent); }));
+	disposers.push(ctx.on("agent/inbox/inserted", ({ agent, message }) => {
+		// 系统提示在 pre-step 之前组装，入箱时就记下 user 文本，首步召回才不会晚一轮。
+		const request = latestUserText([message]);
+		if (request !== undefined) latestRequest.set(agent, request);
+		if (skillGesture(message) && !maintenance.owns(agent)) activate(agent);
+	}));
 	disposers.push(ctx.on("agent/pre-step", async ({ agent, messages }, next) => {
 		await prepareWorkspace(agent);
+		const request = latestUserText(messages);
+		if (request !== undefined) latestRequest.set(agent, request);
 		const decision = await next();
 		if (decision.kind !== "reject" && messages.some(skillGesture) && !maintenance.owns(agent)) activate(agent);
 		return decision;
 	}));
 	disposers.push(ctx.on("agent/disposed", ({ agent }) => detach(agent)));
+	disposers.push(ctx.on("session/disposed", session => { if (session?.id) sessionRanks.delete(session.id); }));
 	ctx.tools.register(defineTool({
 		name: "memory_activate",
 		description: "基础记忆查阅和写入工具已可直接使用。common 补充统计与复核工具；manage 增加候选、归档、历史、溯源、迁移与维护工具。读写权限由用户配置决定。",
@@ -199,6 +281,9 @@ function apply(ctx, config = {}) {
 	console.info(`[dsh-layered-memory] v${version} loaded=${runtimeInfo.loadedAt} source=${runtimeInfo.source} memoryDir=${cfg.memoryDir} mode=${cfg.reflectionMode} autoPending=${cfg.autoPending} access=${cfg.memoryAccess}/${cfg.subagentMemoryAccess}`);
 	ctx.effect(() => () => {
 		for (const agent of states.keys()) detach(agent);
+		sessionRanks.clear();
+		latestRequest.clear();
+		recallCache.clear();
 		for (const dispose of disposers.reverse()) dispose();
 	}, "layered-memory: teardown");
 }

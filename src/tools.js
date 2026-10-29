@@ -98,7 +98,7 @@ export function buildTools(ctx, cfg, io = {}) {
 	}, {
 		entry: req(readableRef), title: req(str), content: req(str), meta: req(record), revision: req(str),
 		complete: req(bool), not_found: req(bool), from_line: req(num), to_line: req(num), total_lines: req(num), next_line: req(nullable(num)), oversized_line: req(bool),
-	}, async args => {
+	}, async (args, exec) => {
 		const entry = ref(args.entry), root = rootOf(entry);
 		let value;
 		if (entry.kind === "fact" || entry.kind === "sop") value = readEntry(root, entry.kind, entry.key);
@@ -112,7 +112,8 @@ export function buildTools(ctx, cfg, io = {}) {
 		}
 		if (!value) return { entry, title: entry.key, content: "", meta: {}, revision: "", complete: false, not_found: true, from_line: 0, to_line: 0, total_lines: 0, next_line: null, oversized_line: false };
 		if (args.if_revision && args.if_revision !== value.revision) throw new Error("条目已变化，请从第1行重新读取");
-		if (entry.kind === "fact" || entry.kind === "sop") bumpAccess(root, `${entry.kind}:${entry.key}`, { halfLifeDays: cfg.heatHalfLifeDays });
+		// 维护工作进程的读取是后台整理，不参与热度计分；同会话重复读取由 store 侧按 lastSession 去重。
+		if ((entry.kind === "fact" || entry.kind === "sop") && !io.isMaintenance?.(exec.agent)) bumpAccess(root, `${entry.kind}:${entry.key}`, { halfLifeDays: cfg.heatHalfLifeDays, sessionId: exec.agent?.session.id });
 		return { entry, title: value.title, meta: value.meta, revision: value.revision, not_found: false, ...pageContent(value.content, args) };
 	}, true));
 

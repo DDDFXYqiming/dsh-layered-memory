@@ -80,7 +80,7 @@
 .lm-browser-history-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .lm-browser-history-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; padding: 9px 10px; border-radius: 10px; background: var(--dsw-alias-bg-layer-1); }
 .lm-browser-history-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; flex: 1 1 100%; }
-.lm-browser-history-tools { display: flex; flex: none; align-items: center; gap: 4px; }
+.lm-browser-history-tools { display: flex; flex: none; align-items: center; gap: 8px; }
 .lm-browser-history-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
 .lm-browser-history-meta code { color: var(--dsw-alias-label-secondary); }
 .lm-browser-history-summary { display: flex; flex: 1 1 100%; align-items: baseline; gap: 10px; min-width: 0; max-width: 100%; overflow: hidden; padding-left: 1px; color: var(--dsw-alias-label-caption); font-size: 12px; line-height: 18px; }

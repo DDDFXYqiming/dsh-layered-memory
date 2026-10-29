@@ -17,9 +17,16 @@
 .lm-browser-heading h1 { min-width: 0; margin: 0; font-size: 20px; font-weight: 500; line-height: 28px; }
 .lm-browser-new { flex: none; height: 32px; padding: 0 12px; border-radius: 16px; }
 .lm-browser-toolbar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 0 clamp(24px, 4vw, 48px) 16px; }
-.lm-browser-namespace { flex: 0 1 190px; min-width: 130px; }
-.lm-browser-namespace select, .lm-browser-input { width: 100%; height: 36px; border: .5px solid var(--dsw-alias-border-l3); border-radius: 12px; outline: none; padding: 0 10px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); font: inherit; }
-.lm-browser-namespace select:focus, .lm-browser-input:focus { border-color: var(--dsw-alias-state-business-primary); }
+.lm-browser-namespace { flex: 0 1 220px; min-width: 150px; }
+.lm-browser-input { width: 100%; height: 36px; border: .5px solid var(--dsw-alias-border-l3); border-radius: 12px; outline: none; padding: 0 10px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); font: inherit; }
+.lm-browser-input:focus { border-color: var(--dsw-alias-state-business-primary); }
+/* 官方 Menu 下拉触发器：与工具栏其它控件同高同圆角，按钮内容左值右箭头 */
+.lm-browser-select-trigger.lm-browser-select-trigger { width: 100%; height: 36px; justify-content: space-between; gap: 8px; padding: 0 10px; border-radius: 12px; border: .5px solid var(--dsw-alias-border-l3); color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); font: inherit; font-weight: 400; }
+.lm-browser-select-trigger.lm-browser-select-trigger:hover { border-color: var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-base); }
+.lm-browser-select-trigger.lm-browser-select-trigger[aria-expanded="true"] { border-color: var(--dsw-alias-state-business-primary); }
+.lm-browser-select-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.lm-browser-select-trigger svg { flex: none; color: var(--dsw-alias-label-tertiary); }
+.lm-browser-select-menu { max-height: 320px; overflow: auto; min-width: 220px; }
 .lm-browser-search { display: flex; align-items: center; flex: 1 1 240px; min-width: 180px; height: 36px; margin: 0; padding: 0 10px; border: .5px solid var(--dsw-alias-border-l3); border-radius: 12px; color: var(--dsw-alias-label-tertiary); transition: border-color .15s; }
 .lm-browser-search:hover { border-color: var(--dsw-alias-border-l2); }
 .lm-browser-search:focus-within { border-color: var(--dsw-alias-state-business-primary); }

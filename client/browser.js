@@ -1,6 +1,10 @@
 export function createMemoryBrowserClient(require, styles) {
 	const React = require("react");
-	const { Button, Input, IconPlusOutlineRegular, IconSearchOutlineRegular, IconCloseOutlineRegular } = require("@deepseek-ai/dsh-client-ui-primitives");
+	const {
+		Button, Input, Menu, MenuItemButton,
+		IconPlusOutlineRegular, IconSearchOutlineRegular, IconCloseOutlineRegular,
+		IconChevronDownOutlineRegular, IconCheckOutlineRegular,
+	} = require("@deepseek-ai/dsh-client-ui-primitives");
 	const h = React.createElement;
 	const locale = "layered-memory";
 	const dictionaries = {
@@ -42,6 +46,40 @@ export function createMemoryBrowserClient(require, styles) {
 	function Field({ label, children, className = "" }) {
 		return h("label", { className: "lm-browser-field " + className }, h("span", { className: "lm-browser-field-label" }, label), children);
 	}
+	// 官方 Menu + MenuItemButton 风格的选中下拉，替代原生 select 控件
+	function SelectMenu({ value, options, disabled, onChange, ariaLabel, triggerClassName }) {
+		const [open, setOpen] = React.useState(false);
+		const current = options.find(option => option.value === value);
+		return h(Menu, {
+			open,
+			onClose: () => setOpen(false),
+			align: "start",
+			portal: true,
+			autoFocus: true,
+			listClassName: "lm-browser-select-menu",
+			anchor: h(Button, {
+				variant: "outline",
+				size: "sm",
+				type: "button",
+				className: "lm-browser-select-trigger" + (triggerClassName ? " " + triggerClassName : ""),
+				disabled,
+				"aria-label": ariaLabel,
+				"aria-haspopup": "menu",
+				"aria-expanded": open,
+				onClick: () => setOpen(value => !value),
+				onKeyDown: event => {
+					if (!open && event.key === "ArrowDown") { event.preventDefault(); setOpen(true); }
+				},
+			},
+				h("span", { className: "lm-browser-select-value" }, current ? current.label : (options[0]?.label ?? "")),
+				h(IconChevronDownOutlineRegular, { size: 12, "aria-hidden": "true" })),
+		}, options.map(option => h(MenuItemButton, {
+			key: option.value,
+			icon: option.value === value ? h(IconCheckOutlineRegular, { size: 14 }) : undefined,
+			onSelect: () => { setOpen(false); onChange(option.value); },
+		}, option.label)));
+	}
+
 	function CreateDialog({ open, form, setForm, namespaces, busy, error, onClose, onSubmit, t }) {
 		React.useEffect(() => {
 			if (!open) return;
@@ -55,8 +93,8 @@ export function createMemoryBrowserClient(require, styles) {
 			h("section", { className: "lm-browser-modal", role: "dialog", "aria-modal": true, "aria-labelledby": "lm-browser-create-title" },
 				h("div", { className: "lm-browser-modal-heading" }, h("h2", { id: "lm-browser-create-title" }, t("createTitle")), h(Button, { variant: "ghost", size: "sm", "aria-label": t("close"), disabled: busy, onClick: onClose }, h(IconCloseOutlineRegular, { size: 16 }))),
 				h("form", { onSubmit: event => { event.preventDefault(); onSubmit(); } },
-					h(Field, { label: t("namespace") }, h("select", { className: "lm-browser-input", value: form.namespace, required: true, disabled: busy, onChange: event => update("namespace", event.target.value) }, namespaces.map(row => h("option", { key: row.namespace, value: row.namespace }, row.namespace)))),
-					h(Field, { label: "kind" }, h("select", { className: "lm-browser-input", value: form.kind, disabled: busy, onChange: event => update("kind", event.target.value) }, h("option", { value: "fact" }, "fact"), h("option", { value: "sop" }, "sop"))),
+					h(Field, { label: t("namespace") }, h(SelectMenu, { value: form.namespace, options: namespaces.map(row => ({ value: row.namespace, label: row.namespace })), disabled: busy, onChange: value => update("namespace", value), ariaLabel: t("namespace"), triggerClassName: "lm-browser-input" })),
+					h(Field, { label: "kind" }, h(SelectMenu, { value: form.kind, options: [{ value: "fact", label: "fact" }, { value: "sop", label: "sop" }], disabled: busy, onChange: value => update("kind", value), ariaLabel: "kind", triggerClassName: "lm-browser-input" })),
 					h(Field, { label: t("topic") }, h("input", { className: "lm-browser-input", value: form.topic, required: true, placeholder: t("topicPlaceholder"), disabled: busy, onChange: event => update("topic", event.target.value) })),
 					h(Field, { label: t("content") }, h("textarea", { className: "lm-browser-textarea lm-browser-create-content", value: form.content, required: true, placeholder: t("contentPlaceholder"), disabled: busy, onChange: event => update("content", event.target.value) })),
 					h(Field, { label: t("evidence") }, h("input", { className: "lm-browser-input", value: form.evidence, required: true, placeholder: t("evidencePlaceholder"), disabled: busy, onChange: event => update("evidence", event.target.value) })),
@@ -245,7 +283,7 @@ export function createMemoryBrowserClient(require, styles) {
 			h("style", null, styles),
 			h("header", { className: "lm-browser-heading" }, h("h1", null, t("title")), h(Button, { variant: "primary", size: "sm", className: "lm-browser-new", icon: h(IconPlusOutlineRegular, { size: 13 }), disabled: !namespaces.length, onClick: openCreate }, t("newEntry"))),
 			h("div", { className: "lm-browser-toolbar" },
-				h("label", { className: "lm-browser-namespace" }, h("span", { className: "lm-browser-sr-only" }, t("namespace")), h("select", { "aria-label": t("namespace"), value: namespace || "", disabled: !namespaces.length || Boolean(busy), onChange: event => setNamespace(event.target.value) }, !namespaces.length ? h("option", { value: "" }, t("noNamespace")) : namespaces.map(row => h("option", { key: row.namespace, value: row.namespace }, row.namespace)))),
+				h("div", { className: "lm-browser-namespace" }, h(SelectMenu, { value: namespace || "", options: namespaces.length ? namespaces.map(row => ({ value: row.namespace, label: row.namespace })) : [{ value: "", label: t("noNamespace") }], disabled: !namespaces.length || Boolean(busy), onChange: setNamespace, ariaLabel: t("namespace") })),
 				h("div", { className: "lm-browser-search" }, h(Input, { type: "search", icon: h(IconSearchOutlineRegular, { size: 14 }), "aria-label": t("search"), placeholder: t("searchPlaceholder"), value: query, onChange: event => setQuery(event.target.value) }), query ? h(Button, { variant: "ghost", size: "sm", className: "lm-browser-search-clear", "aria-label": t("clearSearch"), onClick: () => setQuery("") }, h(IconCloseOutlineRegular, { size: 14 })) : null),
 				h("div", { className: "lm-browser-filter-tabs", role: "group", "aria-label": "kind" }, [["", t("all")], ["fact", "fact"], ["sop", "sop"]].map(([value, label]) => h("button", { key: value || "all", type: "button", className: "lm-browser-filter-tab" + (kind === value ? " is-active" : ""), "aria-pressed": kind === value, onClick: () => setKind(value) }, label))),
 				h("label", { className: "lm-browser-archived-toggle" }, h("input", { type: "checkbox", role: "switch", checked: includeArchived, onChange: event => setIncludeArchived(event.target.checked) }), h("span", null, t("showArchived")))),

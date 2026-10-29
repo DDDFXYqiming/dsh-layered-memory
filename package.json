@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-layered-memory",
-  "version": "0.10.0-preview.18",
+  "version": "0.10.0-preview.19",
   "description": "DSH 跨会话记忆：项目与全局视图、结构化条目标识、证据溯源、可恢复历史及按需维护。",
   "type": "module",
   "main": "lib/index.js",
@@ -24,6 +24,7 @@
     "docs",
     "templates",
     "scripts/e2e-log-report.mjs",
+    "scripts/e2e-heat.mjs",
     "client",
     "scripts/build.mjs"
   ],
@@ -32,6 +33,7 @@
     "check:lib": "node --check lib/index.js",
     "check": "npm run build",
     "e2e:report": "node scripts/e2e-log-report.mjs",
+    "e2e:heat": "node scripts/e2e-heat.mjs",
     "prepack": "node scripts/build.mjs"
   },
   "dsh": {

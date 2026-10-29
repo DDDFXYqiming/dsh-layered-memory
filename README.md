@@ -112,7 +112,7 @@ The defaults allow 64 work calls, 6 writes and 300 seconds per run, with up to 1
 
 Facts are addressed by their second-level heading inside `facts.md`. Procedures are addressed by path inside `sops/`. A display title and an entry key are separate values, so the same title can exist as a fact and as a procedure, in one space or in two.
 
-The L1 index holds the full active directory on disk. Context assembly gives the project index and the global index separate character budgets, and each budget is allocated by what each layer actually needs rather than a fixed ratio: rules come first, and the entry layer keeps at least a quarter. When the entry layer cannot fit, the newest entries are kept, older ones are omitted, and the layer opens with how many entries were omitted and how to list the full index through `memory_list`; the end of the whole view also states the omission and the entry point to the full index. A newly written memory always appears in the injected view.
+The L1 index holds the full active directory on disk in write order; heat never rewrites it. Context assembly gives the project index and the global index separate character budgets: rules come first, and the entry layer keeps at least a quarter. Entries are injected in usage-heat order (real `memory_read` calls score; the same entry scores once per session; maintenance reads and search hits do not score; `related` adds a small capped bonus; new entries get short-lived protection). When the budget fits, every entry appears in heat order; when it does not, hot entries are kept and low-heat entries get session-rotated exploration slots, with the omission count stated in the view. The order is snapshotted per session and only a new session picks up newer heat. A recall section built from the current user request (plain BM25) surfaces low-heat but relevant memories without relying on luck. Heat only affects recommendation order: it never changes whether an entry exists and never triggers automatic archiving.
 
 The host exposes memory text through a `systemPrompt.variable`. The prompt references that fixed variable instead of re-parsing content as a template. The host compares content snapshots and appends only when the snapshot changed. L0 and runtime skills share one core rule template.
 
@@ -135,7 +135,7 @@ The model receives a project index and a global index inside the system prompt, 
 
 #### Token effect
 
-Fixed per session for the indexes, bounded by `l1MaxChars` for the project index and `globalL1MaxChars` for the global one. Over budget it keeps the newest entries, omits older ones, and states the omission explicitly in the view instead of dropping entries silently. Reads add tokens on demand and return line ranges, so a large entry can be consumed in pieces. `progressive: true` keeps index lines short and defers detail to reads.
+Fixed per session for the indexes, bounded by `l1MaxChars` for the project index and `globalL1MaxChars` for the global one. Over budget it keeps the hottest entries first, gives low-heat entries session-rotated exploration slots, and states the omission count explicitly in the view instead of dropping entries silently; nothing is deleted or archived because of heat. Reads add tokens on demand and return line ranges, so a large entry can be consumed in pieces. `progressive: true` keeps index lines short and defers detail to reads.
 
 #### KV cache effect
 
@@ -147,7 +147,7 @@ The indexes sit in a stable prefix, so an unchanged snapshot reuses the provider
 - **Maintenance spends model calls**, internal end-of-turn reviews and `reflectionMode: auto` runs invoke subagents that consume tokens. `autoPending: true` records retry candidates on disk for later review. Budget limits apply per maintenance run rather than per session.
 - **Namespace identity is path based**, automatic namespaces derive from workspace identity or canonical root path. Moving a project to another path creates a different namespace until it is migrated explicitly.
 - **Tool access is per session**, basic memory tools are available in each session and the memory skill or `memory_activate` adds optional tools. Historical activation restores the tool mode only; permissions remain user-configured. The directory index is provided in context, while entry bodies are read through tools.
-- **Index rewrites on budget overflow**, when an index exceeds its limit, the engine rewrites the index file and marks `over_limit`, which can reorder listed entries. Callers should read entry counts from storage metadata rather than from the folded prompt view.
+- **Budget overflow only affects the prompt view**, the on-disk `index.txt` remains the full active directory and heat never reorders it; an `over_limit` flag means the injection budget is short, not that entries were deleted or archived.
 
 ### Dev Note
 

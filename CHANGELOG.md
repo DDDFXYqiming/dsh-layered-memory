@@ -11,6 +11,7 @@ All notable changes to `@dsh-external/dsh-layered-memory` are documented here.
 - 历史快照列表新增正文首行摘要与变化标签（内容 +N 字符 / 证据更新 / 初始版本 / 无正文变化）。
 - 每条快照新增「预览」按钮，就地展开只读正文（限高滚动），同一时间只展开一条。
 - `entryHistory` 服务端返回 summary、preview、change，契约同步校验。
+- 回滚确认改为历史行下方的整行横幅（左提示、右取消/确认），不再挤压摘要与按钮布局；摘要单行省略。
 
 
 - 命名空间与 kind 下拉改用官方 `Menu` + `MenuItemButton`；归档开关改用官方 `Switch`；新建弹层文本字段改用官方 `Input`，去掉原生 select/checkbox 控件样式。

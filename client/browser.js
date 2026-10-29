@@ -302,13 +302,7 @@ export function createMemoryBrowserClient(require, styles) {
 		}
 		function renderSnapshot(snapshot) {
 			const expanded = previewId === snapshot.snapshotId;
-			const action = rollbackId === snapshot.snapshotId
-				? h("div", { className: "lm-browser-rollback-confirm" },
-					h("p", null, t("rollbackWarning")),
-					h("div", null,
-						h(Button, { variant: "ghost", size: "sm", disabled: Boolean(busy), onClick: () => setRollbackId(null) }, t("cancel")),
-						h(Button, { variant: "primary", size: "sm", disabled: Boolean(busy), onClick: () => rollback(snapshot.snapshotId) }, t("rollbackConfirm"))))
-				: h(Button, { variant: "ghost", size: "sm", disabled: Boolean(busy), onClick: () => setRollbackId(snapshot.snapshotId) }, t("rollback"));
+			const confirming = rollbackId === snapshot.snapshotId;
 			return h("li", { key: snapshot.snapshotId, className: "lm-browser-history-row" },
 				h("div", { className: "lm-browser-history-head" },
 					h("div", { className: "lm-browser-history-meta" },
@@ -317,10 +311,15 @@ export function createMemoryBrowserClient(require, styles) {
 						h("span", null, t("characters", { count: snapshot.chars }))),
 					h("div", { className: "lm-browser-history-tools" },
 						h(Button, { variant: "ghost", size: "sm", onClick: () => setPreviewId(expanded ? null : snapshot.snapshotId) }, expanded ? t("collapse") : t("preview")),
-						action)),
+						h(Button, { variant: "ghost", size: "sm", disabled: Boolean(busy), onClick: () => setRollbackId(confirming ? null : snapshot.snapshotId) }, t("rollback")))),
 				h("div", { className: "lm-browser-history-summary" },
 					h("span", { className: "lm-browser-history-summary-text" }, snapshot.summary || t("noSummary")),
 					h("span", { className: "lm-browser-history-change" }, changeText(snapshot.change))),
+				confirming ? h("div", { className: "lm-browser-rollback-confirm" },
+					h("p", null, t("rollbackWarning")),
+					h("div", null,
+						h(Button, { variant: "ghost", size: "sm", disabled: Boolean(busy), onClick: () => setRollbackId(null) }, t("cancel")),
+						h(Button, { variant: "primary", size: "sm", disabled: Boolean(busy), onClick: () => rollback(snapshot.snapshotId) }, t("rollbackConfirm")))) : null,
 				expanded ? h("pre", { className: "lm-browser-history-preview" }, snapshot.preview || t("noPreview")) : null);
 		}
 		const dirty = detail && (content !== detail.content || evidence !== detail.evidence);

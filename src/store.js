@@ -362,14 +362,22 @@ export function entryHeat(access, meta, kind, key, heat = {}) {
   const age = created ? Date.now() - Date.parse(created) : Infinity;
   return age >= 0 && age <= (heat.recencyWindowMs ?? RECENCY_WINDOW_MS) ? RECENCY_BONUS : 0;
 }
-export function bumpAccess(root, key, { halfLifeDays = HEAT_HALF_LIFE_DAYS } = {}) {
+// 真实读取才计分；同一会话同一条目只计一次，避免反复读同一条把热度刷爆。
+export function bumpAccess(root, key, { halfLifeDays = HEAT_HALF_LIFE_DAYS, sessionId = null } = {}) {
   return withNsWriteLock(root, () => {
     const access = loadAccess(root), previous = access[key];
+    if (sessionId && previous && typeof previous === "object" && previous.lastSession === sessionId) return previous;
     const age = previous?.lastAt ? Math.max(0, Date.now() - Date.parse(previous.lastAt)) : 0;
     const oldScore = typeof previous === "number" ? previous : Number(previous?.score ?? previous?.count ?? 0);
     const count = (typeof previous === "number" ? previous : previous?.count || 0) + 1;
-    access[key] = { count, score: oldScore * Math.pow(0.5, age / (halfLifeDays * 86400000)) + 1, lastAt: new Date().toISOString() };
+    access[key] = {
+      count,
+      score: oldScore * Math.pow(0.5, age / (halfLifeDays * 86400000)) + 1,
+      lastAt: new Date().toISOString(),
+      ...(sessionId ? { lastSession: sessionId } : {}),
+    };
     atomicWriteFileSync(join(root, ACCESS_FILE), JSON.stringify(access, null, 2));
+    return access[key];
   });
 }
 export function bumpTurnCounter(root) {

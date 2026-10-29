@@ -418,10 +418,18 @@ export function backfillMeta(root, { namespace = "default", now = new Date() } =
     for (const [kind, names] of [["fact", factSections(root)], ["sop", sopNames(root)]]) {
       const bucket = meta[kind === "fact" ? "facts" : "sops"];
       for (const key of names) {
-        if (bucket[key]) continue;
         const file = join(root, kind === "fact" ? "facts.md" : "sops/" + key + ".md");
-        const iso = new Date(Math.min(statSync(file).mtimeMs, now.getTime())).toISOString();
-        bucket[key] = { sourceSession: null, sourceSeqs: [], evidence: "", namespace, archived: false, createdAt: iso, updatedAt: iso, backfilled: true, backfilledAt: now.toISOString() };
+        const mtimeIso = new Date(Math.min(statSync(file).mtimeMs, now.getTime())).toISOString();
+        if (bucket[key]) {
+          // 老条目已有 meta 但缺 createdAt：热度排序要用创建时间做新手保护与同分排序，
+          // 缺了这些条目永远拿不到新手保护。文件 mtime 是可得的最佳近似。
+          if (!bucket[key].createdAt) {
+            bucket[key] = { ...bucket[key], createdAt: mtimeIso };
+            added.push(kind + ":" + key);
+          }
+          continue;
+        }
+        bucket[key] = { sourceSession: null, sourceSeqs: [], evidence: "", namespace, archived: false, createdAt: mtimeIso, updatedAt: mtimeIso, backfilled: true, backfilledAt: now.toISOString() };
         added.push(kind + ":" + key);
       }
     }

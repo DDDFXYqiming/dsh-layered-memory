@@ -2,6 +2,10 @@
 
 All notable changes to `@dsh-external/dsh-layered-memory` are documented here.
 
+## [0.10.0-preview.21] - 2026-10-29
+
+- 旧条目补齐 createdAt：早于该字段的存量条目在加载时按文件 mtime 回填，使它们也能参与新手保护与同分排序，不再恒排在最后。
+
 ## [0.10.0-preview.20] - 2026-10-29
 
 - 热度排序快照改为按用户回合刷新：同一回合内顺序稳定，下一条用户消息即采用最新热度并轮换冷探索位，避免长会话停在首次装配时的旧顺序。

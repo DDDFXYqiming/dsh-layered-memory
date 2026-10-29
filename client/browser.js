@@ -13,7 +13,7 @@ export function createMemoryBrowserClient(require, styles) {
 			all: "全部", showArchived: "显示已归档", entries: "记忆条目", loading: "正在读取…", empty: "没有匹配的记忆条目", emptyDetail: "从左侧选择一条记忆",
 			archived: "已归档", content: "内容", evidence: "证据", save: "保存", saving: "保存中…", archive: "归档", restore: "恢复",
 			history: "历史快照", noHistory: "暂无历史快照", rollback: "回滚到此版本", rollbackConfirm: "确认回滚", cancel: "取消",
-			rollbackWarning: "回滚会覆盖当前内容，是否继续？", requiredFields: "命名空间、标题、内容、证据都必须填写", loadTimeout: "记忆数据加载超时", saved: "已保存", archivedDone: "归档状态已更新", rolledBack: "已回滚到所选快照", preview: "预览", collapse: "收起", initialVersion: "初始版本", evidenceUpdated: "证据更新", contentDelta: "内容 {delta} 字符", noContentChange: "无正文变化", noSummary: "（空内容）", noPreview: "该快照没有可预览的正文",
+			rollbackWarning: "回滚会覆盖当前内容，是否继续？", requiredFields: "命名空间、标题、内容、证据都必须填写", loadTimeout: "记忆数据加载超时", saved: "已保存", archivedDone: "归档状态已更新", rolledBack: "已回滚到所选快照", preview: "预览", collapse: "收起", initialVersion: "初始版本", evidenceUpdated: "证据更新", contentDelta: "内容 {delta} 字符", noContentChange: "无正文变化", noSummary: "（空内容）", noPreview: "该快照没有可预览的正文", editMode: "编辑", previewMode: "预览",
 			reload: "重新加载", conflict: "条目已被其他会话修改，请重新加载后再保存。", createTitle: "新建记忆条目", topic: "标题",
 			topicPlaceholder: "输入条目标题", contentPlaceholder: "输入记忆正文", evidencePlaceholder: "输入本次写入的证据", create: "创建", creating: "创建中…",
 			created: "条目已创建", close: "关闭", createdAt: "创建时间", updatedAt: "更新时间", characters: "{count} 字符",
@@ -24,7 +24,7 @@ export function createMemoryBrowserClient(require, styles) {
 			all: "All", showArchived: "Show archived", entries: "Memory entries", loading: "Loading…", empty: "No matching memory entries", emptyDetail: "Select a memory entry on the left",
 			archived: "Archived", content: "Content", evidence: "Evidence", save: "Save", saving: "Saving…", archive: "Archive", restore: "Restore",
 			history: "History", noHistory: "No history snapshots", rollback: "Roll back to this version", rollbackConfirm: "Confirm rollback", cancel: "Cancel",
-			rollbackWarning: "Rolling back replaces the current content. Continue?", requiredFields: "Namespace, title, content, and evidence are required", loadTimeout: "Timed out loading memory data", saved: "Saved", archivedDone: "Archive state updated", rolledBack: "Rolled back to the selected snapshot", preview: "Preview", collapse: "Collapse", initialVersion: "Initial version", evidenceUpdated: "Evidence updated", contentDelta: "Content {delta} chars", noContentChange: "No content change", noSummary: "(empty)", noPreview: "This snapshot has no preview",
+			rollbackWarning: "Rolling back replaces the current content. Continue?", requiredFields: "Namespace, title, content, and evidence are required", loadTimeout: "Timed out loading memory data", saved: "Saved", archivedDone: "Archive state updated", rolledBack: "Rolled back to the selected snapshot", preview: "Preview", collapse: "Collapse", initialVersion: "Initial version", evidenceUpdated: "Evidence updated", contentDelta: "Content {delta} chars", noContentChange: "No content change", noSummary: "(empty)", noPreview: "This snapshot has no preview", editMode: "Edit", previewMode: "Preview",
 			reload: "Reload", conflict: "This entry changed elsewhere. Reload it before saving again.", createTitle: "New memory entry", topic: "Title",
 			topicPlaceholder: "Enter an entry title", contentPlaceholder: "Enter memory content", evidencePlaceholder: "Enter evidence for this write", create: "Create", creating: "Creating…",
 			created: "Entry created", close: "Close", createdAt: "Created", updatedAt: "Updated", characters: "{count} characters",
@@ -43,6 +43,81 @@ export function createMemoryBrowserClient(require, styles) {
 		const lang = (typeof document !== "undefined" && document.documentElement.lang) || "zh-CN";
 		return new Date(value).toLocaleString(lang, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 	};
+	// 极简 Markdown → React 元素，零依赖，覆盖标题/粗斜体/行内代码/列表/链接/引用/分隔线
+	function renderInline(text, keyPrefix) {
+		const parts = [];
+		let rest = text;
+		let idx = 0;
+		const patterns = [
+			[/\*\*([^*]+)\*\*/, (m, t) => h("strong", { key: keyPrefix + idx++ }, t)],
+			[/\*([^*]+)\*/, (m, t) => h("em", { key: keyPrefix + idx++ }, t)],
+			[/`([^`]+)`/, (m, t) => h("code", { key: keyPrefix + idx++ }, t)],
+			[/\[([^\]]+)\]\(([^)]+)\)/, (m, t, u) => h("a", { key: keyPrefix + idx++, href: u, target: "_blank", rel: "noopener" }, t)],
+		];
+		while (rest.length > 0) {
+			let earliest = null, earliestRe = null, earliestFn = null;
+			for (const [re, fn] of patterns) {
+				const m = rest.match(re);
+				if (m && (earliest === null || m.index < earliest)) {
+					earliest = m.index; earliestRe = m; earliestFn = fn;
+				}
+			}
+			if (earliest === null) { parts.push(rest); break; }
+			if (earliest > 0) parts.push(rest.slice(0, earliest));
+			parts.push(earliestFn(...earliestRe));
+			rest = rest.slice(earliest + earliestRe[0].length);
+		}
+		return parts;
+	}
+	function renderMarkdown(text) {
+		const lines = String(text || "").split(/\r?\n/);
+		const blocks = [];
+		let listItems = null, listOrdered = false;
+		let paraLines = [];
+		const flushPara = () => {
+			if (paraLines.length) {
+				blocks.push(h("p", { key: "p" + blocks.length }, renderInline(paraLines.join("\n"), "pi")));
+				paraLines = [];
+			}
+		};
+		const flushList = () => {
+			if (listItems && listItems.length) {
+				const tag = listOrdered ? "ol" : "ul";
+				blocks.push(h(tag, { key: "l" + blocks.length }, listItems.map((item, i) => h("li", { key: "li" + i }, renderInline(item, "li" + i)))));
+			}
+			listItems = null;
+		};
+		for (const line of lines) {
+			const hMatch = line.match(/^(#{1,6})\s+(.*)/);
+			const ulMatch = line.match(/^[-*+]\s+(.*)/);
+			const olMatch = line.match(/^\d+[.)]\s+(.*)/);
+			const quoteMatch = line.match(/^>\s?(.*)/);
+			if (hMatch) {
+				flushPara(); flushList();
+				const level = hMatch[1].length;
+				blocks.push(h("h" + Math.min(level + 1, 6), { key: "h" + blocks.length }, renderInline(hMatch[2], "hi")));
+			} else if (ulMatch || olMatch) {
+				flushPara();
+				const isOl = !!olMatch;
+				if (listItems && listOrdered !== isOl) flushList();
+				if (!listItems) { listItems = []; listOrdered = isOl; }
+				listItems.push((ulMatch || olMatch)[1]);
+			} else if (quoteMatch) {
+				flushPara(); flushList();
+				blocks.push(h("blockquote", { key: "q" + blocks.length }, renderInline(quoteMatch[1], "qi")));
+			} else if (/^---+$/.test(line.trim())) {
+				flushPara(); flushList();
+				blocks.push(h("hr", { key: "hr" + blocks.length }));
+			} else if (line.trim() === "") {
+				flushPara(); flushList();
+			} else {
+				flushList();
+				paraLines.push(line);
+			}
+		}
+		flushPara(); flushList();
+		return blocks;
+	}
 	function MemoryBrowserIcon({ size = 20 }) {
 		return h("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
 			h("path", { d: "M5 4.5A2.5 2.5 0 0 1 7.5 2H20v17H7.5A2.5 2.5 0 0 0 5 21.5z" }),
@@ -135,6 +210,7 @@ export function createMemoryBrowserClient(require, styles) {
 		const [notice, setNotice] = React.useState(null);
 		const [conflict, setConflict] = React.useState(false);
 		const [rollbackId, setRollbackId] = React.useState(null);
+		const [contentPreview, setContentPreview] = React.useState(true);
 		const [previewId, setPreviewId] = React.useState(null);
 		const [createOpen, setCreateOpen] = React.useState(false);
 		const [createForm, setCreateForm] = React.useState({ namespace: "", kind: "fact", topic: "", content: "", evidence: "" });
@@ -192,6 +268,7 @@ export function createMemoryBrowserClient(require, styles) {
 			const selected = entries.find(row => identity(row.entry) === selectedId);
 			setRollbackId(null);
 			setPreviewId(null);
+			setContentPreview(true);
 			if (!selected) { setDetail(null); setDetailBusy(false); setDetailError(null); return; }
 			setDetail(null);
 			setDetailBusy(true);
@@ -353,7 +430,12 @@ export function createMemoryBrowserClient(require, styles) {
 						conflict ? h("div", { className: "lm-browser-conflict", role: "alert" }, h("span", null, t("conflict")), h(Button, { variant: "outline", size: "sm", onClick: reloadDetail }, t("reload"))) : null,
 						actionError && !conflict ? h("p", { className: "lm-browser-error", role: "alert" }, actionError) : null,
 						h("dl", { className: "lm-browser-readonly" }, [["namespace", detail.entry.namespace], ["kind", detail.entry.kind], ["key", detail.entry.key]].map(([label, value]) => h("div", { key: label }, h("dt", null, label), h("dd", null, value)))),
-						h(Field, { label: t("content") }, h("textarea", { className: "lm-browser-textarea lm-browser-content", value: content, disabled: Boolean(busy), onChange: event => setContent(event.target.value) })),
+						h(Field, { label: h("span", { style: { display: "inline-flex", alignItems: "center", gap: 8 } }, t("content"), h("span", { className: "lm-browser-seg-toggle" },
+													h("button", { type: "button", className: "lm-browser-seg-btn" + (contentPreview ? " is-active" : ""), onClick: () => setContentPreview(true) }, t("previewMode")),
+													h("button", { type: "button", className: "lm-browser-seg-btn" + (!contentPreview ? " is-active" : ""), onClick: () => setContentPreview(false) }, t("editMode")))) },
+									contentPreview
+										? h("div", { className: "lm-browser-md-preview", onClick: () => setContentPreview(false) }, renderMarkdown(content))
+										: h("textarea", { className: "lm-browser-textarea lm-browser-content", value: content, disabled: Boolean(busy), onChange: event => setContent(event.target.value), onBlur: () => setContentPreview(true) })),
 						h(Field, { label: t("evidence") }, h(Input, { value: evidence, disabled: Boolean(busy), placeholder: t("evidencePlaceholder"), onChange: event => setEvidence(event.target.value) })),
 						h("section", { className: "lm-browser-history" },
 							h("h3", null, t("history")),

@@ -6,6 +6,13 @@ All notable changes to `@dsh-external/dsh-layered-memory` are documented here.
 
 ## 2026-10-29 UI 巡检修复
 
+## 2026-10-29 历史快照预览
+
+- 历史快照列表新增正文首行摘要与变化标签（内容 +N 字符 / 证据更新 / 初始版本 / 无正文变化）。
+- 每条快照新增「预览」按钮，就地展开只读正文（限高滚动），同一时间只展开一条。
+- `entryHistory` 服务端返回 summary、preview、change，契约同步校验。
+
+
 - 命名空间与 kind 下拉改用官方 `Menu` + `MenuItemButton`；归档开关改用官方 `Switch`；新建弹层文本字段改用官方 `Input`，去掉原生 select/checkbox 控件样式。
 - 时间显示按界面语言本地化（中文界面不再出现美式日期）；保存/归档/回滚反馈移到标题行旁，切换条目时才清除。
 - 详情操作按钮（归档/保存）移到标题行右侧，长内容无需滚到底部才能保存；新建弹层改为固定底栏 + 内容区滚动。

@@ -33,9 +33,12 @@ function snapshotDetails(root, record) {
 	const path = join(root, record.path);
 	if (!record.legacy) {
 		const snapshot = JSON.parse(readFileSync(path, "utf8"));
+		const parsed = parseEntryBody(record.kind, record.key, snapshot.raw);
 		return {
 			revision: snapshotRevision(record.kind, record.key, snapshot.raw, snapshot.meta),
-			chars: parseEntryBody(record.kind, record.key, snapshot.raw).content.length,
+			chars: parsed.content.length,
+			content: parsed.content,
+			evidence: snapshot.meta?.evidence || "",
 		};
 	}
 	const file = readFileSync(path, "utf8");
@@ -49,9 +52,12 @@ function snapshotDetails(root, record) {
 	} catch (error) {
 		if (error.code !== "ENOENT") throw error;
 	}
+	const parsed = parseEntryBody(record.kind, record.key, raw);
 	return {
 		revision: snapshotRevision(record.kind, record.key, raw, meta),
-		chars: parseEntryBody(record.kind, record.key, raw).content.length,
+		chars: parsed.content.length,
+		content: parsed.content,
+		evidence: meta.evidence || "",
 	};
 }
 
@@ -174,11 +180,26 @@ export function createLayeredMemoryStore(cfg) {
 		async entryHistory({ entry: input }) {
 			return run("读取历史快照", async () => {
 				const entry = entryIdentity(input.namespace, input.kind, input.key), root = rootOf(entry);
-				return listEntryHistory(root, entry.kind, entry.key).reverse().slice(0, 50).map(record => ({
+				const rows = listEntryHistory(root, entry.kind, entry.key).reverse().slice(0, 50).map(record => ({
 					snapshotId: record.id,
 					createdAt: record.createdAt,
 					...snapshotDetails(root, record),
 				}));
+				return rows.map((row, index) => {
+					const older = rows[index + 1];
+					const firstLine = String(row.content || "").split(/\r?\n/).map(line => line.trim()).find(line => line !== "") || "";
+					return {
+						snapshotId: row.snapshotId,
+						createdAt: row.createdAt,
+						revision: row.revision,
+						chars: row.chars,
+						summary: firstLine.slice(0, 60),
+						preview: String(row.content || "").slice(0, 2000),
+						change: older === undefined
+							? { contentDelta: null, evidenceChanged: false, initial: true }
+							: { contentDelta: row.chars - older.chars, evidenceChanged: (row.evidence || "") !== (older.evidence || ""), initial: false },
+					};
+				});
 			});
 		},
 		async rollbackEntry({ entry: input, snapshotId }) {

@@ -78,9 +78,15 @@
 .lm-browser-history { padding-top: 20px; border-top: .5px solid var(--dsw-alias-border-l3); }
 .lm-browser-history h3 { margin: 0 0 10px; font-size: 14px; font-weight: 500; line-height: 22px; }
 .lm-browser-history-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.lm-browser-history-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 10px; border-radius: 10px; background: var(--dsw-alias-bg-layer-1); }
+.lm-browser-history-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; padding: 9px 10px; border-radius: 10px; background: var(--dsw-alias-bg-layer-1); }
+.lm-browser-history-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; flex: 1 1 100%; }
+.lm-browser-history-tools { display: flex; flex: none; align-items: center; gap: 4px; }
 .lm-browser-history-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
 .lm-browser-history-meta code { color: var(--dsw-alias-label-secondary); }
+.lm-browser-history-summary { display: flex; flex: 1 1 100%; align-items: baseline; gap: 10px; min-width: 0; padding-left: 1px; color: var(--dsw-alias-label-caption); font-size: 12px; line-height: 18px; }
+.lm-browser-history-summary-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lm-browser-history-change { flex: none; color: var(--dsw-alias-label-tertiary); }
+.lm-browser-history-preview { flex: 1 1 100%; max-height: 240px; margin: 4px 0 2px; padding: 10px 12px; overflow: auto; border-radius: 8px; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-secondary); font-family: var(--dsh-font-family-mono, ui-monospace, SFMono-Regular, Consolas, monospace); font-size: 12px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .lm-browser-rollback-confirm { flex: 1 1 100%; padding-top: 6px; border-top: .5px solid var(--dsw-alias-border-l3); }
 .lm-browser-rollback-confirm p { margin: 0 0 8px; color: var(--dsw-alias-label-secondary); font-size: 13px; }
 .lm-browser-rollback-confirm > div { display: flex; justify-content: flex-end; gap: 8px; }

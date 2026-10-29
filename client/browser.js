@@ -13,7 +13,7 @@ export function createMemoryBrowserClient(require, styles) {
 			all: "全部", showArchived: "显示已归档", entries: "记忆条目", loading: "正在读取…", empty: "没有匹配的记忆条目", emptyDetail: "从左侧选择一条记忆",
 			archived: "已归档", content: "内容", evidence: "证据", save: "保存", saving: "保存中…", archive: "归档", restore: "恢复",
 			history: "历史快照", noHistory: "暂无历史快照", rollback: "回滚到此版本", rollbackConfirm: "确认回滚", cancel: "取消",
-			rollbackWarning: "回滚会覆盖当前内容，是否继续？", requiredFields: "命名空间、标题、内容、证据都必须填写", loadTimeout: "记忆数据加载超时", saved: "已保存", archivedDone: "归档状态已更新", rolledBack: "已回滚到所选快照",
+			rollbackWarning: "回滚会覆盖当前内容，是否继续？", requiredFields: "命名空间、标题、内容、证据都必须填写", loadTimeout: "记忆数据加载超时", saved: "已保存", archivedDone: "归档状态已更新", rolledBack: "已回滚到所选快照", preview: "预览", collapse: "收起", initialVersion: "初始版本", evidenceUpdated: "证据更新", contentDelta: "内容 {delta} 字符", noContentChange: "无正文变化", noSummary: "（空内容）", noPreview: "该快照没有可预览的正文",
 			reload: "重新加载", conflict: "条目已被其他会话修改，请重新加载后再保存。", createTitle: "新建记忆条目", topic: "标题",
 			topicPlaceholder: "输入条目标题", contentPlaceholder: "输入记忆正文", evidencePlaceholder: "输入本次写入的证据", create: "创建", creating: "创建中…",
 			created: "条目已创建", close: "关闭", createdAt: "创建时间", updatedAt: "更新时间", characters: "{count} 字符",
@@ -24,7 +24,7 @@ export function createMemoryBrowserClient(require, styles) {
 			all: "All", showArchived: "Show archived", entries: "Memory entries", loading: "Loading…", empty: "No matching memory entries", emptyDetail: "Select a memory entry on the left",
 			archived: "Archived", content: "Content", evidence: "Evidence", save: "Save", saving: "Saving…", archive: "Archive", restore: "Restore",
 			history: "History", noHistory: "No history snapshots", rollback: "Roll back to this version", rollbackConfirm: "Confirm rollback", cancel: "Cancel",
-			rollbackWarning: "Rolling back replaces the current content. Continue?", requiredFields: "Namespace, title, content, and evidence are required", loadTimeout: "Timed out loading memory data", saved: "Saved", archivedDone: "Archive state updated", rolledBack: "Rolled back to the selected snapshot",
+			rollbackWarning: "Rolling back replaces the current content. Continue?", requiredFields: "Namespace, title, content, and evidence are required", loadTimeout: "Timed out loading memory data", saved: "Saved", archivedDone: "Archive state updated", rolledBack: "Rolled back to the selected snapshot", preview: "Preview", collapse: "Collapse", initialVersion: "Initial version", evidenceUpdated: "Evidence updated", contentDelta: "Content {delta} chars", noContentChange: "No content change", noSummary: "(empty)", noPreview: "This snapshot has no preview",
 			reload: "Reload", conflict: "This entry changed elsewhere. Reload it before saving again.", createTitle: "New memory entry", topic: "Title",
 			topicPlaceholder: "Enter an entry title", contentPlaceholder: "Enter memory content", evidencePlaceholder: "Enter evidence for this write", create: "Create", creating: "Creating…",
 			created: "Entry created", close: "Close", createdAt: "Created", updatedAt: "Updated", characters: "{count} characters",
@@ -135,6 +135,7 @@ export function createMemoryBrowserClient(require, styles) {
 		const [notice, setNotice] = React.useState(null);
 		const [conflict, setConflict] = React.useState(false);
 		const [rollbackId, setRollbackId] = React.useState(null);
+		const [previewId, setPreviewId] = React.useState(null);
 		const [createOpen, setCreateOpen] = React.useState(false);
 		const [createForm, setCreateForm] = React.useState({ namespace: "", kind: "fact", topic: "", content: "", evidence: "" });
 		const [createError, setCreateError] = React.useState(null);
@@ -191,6 +192,7 @@ export function createMemoryBrowserClient(require, styles) {
 			const request = ++detailRequest.current;
 			const selected = entries.find(row => identity(row.entry) === selectedId);
 			setRollbackId(null);
+			setPreviewId(null);
 			if (!selected) { setDetail(null); setDetailBusy(false); setDetailError(null); return; }
 			setDetail(null);
 			setDetailBusy(true);
@@ -290,7 +292,16 @@ export function createMemoryBrowserClient(require, styles) {
 			} catch (error) { setActionError(error.message); }
 			finally { setBusy(null); }
 		}
+		function changeText(change) {
+			if (!change) return "";
+			if (change.initial) return t("initialVersion");
+			const parts = [];
+			if (change.contentDelta !== null && change.contentDelta !== 0) parts.push(t("contentDelta", { delta: (change.contentDelta > 0 ? "+" : "") + change.contentDelta }));
+			if (change.evidenceChanged) parts.push(t("evidenceUpdated"));
+			return parts.length ? parts.join(" · ") : t("noContentChange");
+		}
 		function renderSnapshot(snapshot) {
+			const expanded = previewId === snapshot.snapshotId;
 			const action = rollbackId === snapshot.snapshotId
 				? h("div", { className: "lm-browser-rollback-confirm" },
 					h("p", null, t("rollbackWarning")),
@@ -299,11 +310,18 @@ export function createMemoryBrowserClient(require, styles) {
 						h(Button, { variant: "primary", size: "sm", disabled: Boolean(busy), onClick: () => rollback(snapshot.snapshotId) }, t("rollbackConfirm"))))
 				: h(Button, { variant: "ghost", size: "sm", disabled: Boolean(busy), onClick: () => setRollbackId(snapshot.snapshotId) }, t("rollback"));
 			return h("li", { key: snapshot.snapshotId, className: "lm-browser-history-row" },
-				h("div", { className: "lm-browser-history-meta" },
-					h("time", { dateTime: snapshot.createdAt }, time(snapshot.createdAt)),
-					h("code", { title: snapshot.revision }, snapshot.revision.slice(0, 12)),
-					h("span", null, t("characters", { count: snapshot.chars }))),
-				action);
+				h("div", { className: "lm-browser-history-head" },
+					h("div", { className: "lm-browser-history-meta" },
+						h("time", { dateTime: snapshot.createdAt }, time(snapshot.createdAt)),
+						h("code", { title: snapshot.revision }, snapshot.revision.slice(0, 12)),
+						h("span", null, t("characters", { count: snapshot.chars }))),
+					h("div", { className: "lm-browser-history-tools" },
+						h(Button, { variant: "ghost", size: "sm", onClick: () => setPreviewId(expanded ? null : snapshot.snapshotId) }, expanded ? t("collapse") : t("preview")),
+						action)),
+				h("div", { className: "lm-browser-history-summary" },
+					h("span", { className: "lm-browser-history-summary-text" }, snapshot.summary || t("noSummary")),
+					h("span", { className: "lm-browser-history-change" }, changeText(snapshot.change))),
+				expanded ? h("pre", { className: "lm-browser-history-preview" }, snapshot.preview || t("noPreview")) : null);
 		}
 		const dirty = detail && (content !== detail.content || evidence !== detail.evidence);
 		return h("section", { className: "lm-browser-page", "aria-label": t("title"), "data-memory-browser": true },

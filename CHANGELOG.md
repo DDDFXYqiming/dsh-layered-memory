@@ -2,6 +2,12 @@
 
 All notable changes to `@dsh-external/dsh-layered-memory` are documented here.
 
+## 2026-10-29
+
+- 新增“记忆”管理页：左侧边栏入口 + 独立页面，支持命名空间切换、标题/正文搜索、kind 过滤、归档查看；条目详情编辑保存（ifRevision 防冲突）、新建、归档/恢复、历史快照查看与二次确认回滚。
+- 主包新增 layeredMemoryStore 服务（8 个方法），status 子包经 typert 暴露 STORE_REMOTE 描述符；client 侧与 STATUS_REMOTE 合并单次 $mount（同 package 两次 $mount 会卡死 activate）。
+- build.mjs：bundled 副本目录只读（root 所有）时跳过并告警，lib/status 产物不受影响。
+
 ## [0.10.0-preview.18] - 2026-10-27
 
 - 索引整理改为以水位线为目标（`indexTargetRatio`，默认 0.9）：候选数按缺口放大，未达标且有改动时连续续派，直到压回水位线。

@@ -228,7 +228,8 @@ export function createStatusClient(require, styles) {
 	return {
 		inject: ["remote"],
 		async apply(ctx) {
-			const unmountRemote = await ctx.remote.$mount(STATUS_REMOTE);
+			// 状态与管理页的描述符合并挂载，避免同 package 两次 $mount
+			const unmountRemote = await ctx.remote.$mount({ package: STATUS_PACKAGE, descriptors: [...STATUS_REMOTE.descriptors, ...STORE_REMOTE.descriptors] });
 			const stores = new Set();
 			const ui = ctx.inject(["remote.layeredMemoryStatus", "slots", "locale"], scope => {
 				scope.effect(() => scope.locale.register(locale, dictionaries), "memory-status: locale");

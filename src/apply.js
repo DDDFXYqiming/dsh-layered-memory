@@ -11,6 +11,7 @@ import { createTurnReviewer } from "./turn-review.js";
 import { createActivitySource } from "./activity.js";
 import { readActivation } from "./activation-history.js";
 import { SKILL_NAME, SKILL_DESCRIPTION, SKILL_WHEN_TO_USE, SKILL_CONTENT } from "./skill-content.js";
+import { createLayeredMemoryStore } from "./store-service.js";
 
 const inject = ["skills", "tools", "agents", "agentPresets", "systemPrompt", "sessionQuery", "sessions", "sessionPersistence", "storage", "storageDomain"];
 const accessSchema = () => Schema.union([Schema.const("read"), Schema.const("write")]);
@@ -70,6 +71,7 @@ function apply(ctx, config = {}) {
 	cfg.workspaceRootFor = cwd => workspaceRoots.get(cwd) || cwd;
 	const activity = createActivitySource(ctx, cfg);
 	ctx.provide("layeredMemoryActivity", activity);
+	ctx.provide("layeredMemoryStore", createLayeredMemoryStore(cfg));
 	async function prepareWorkspace(agent) {
 		const cwd = agent.session.header.cwd;
 		if (!cfg.autoNamespace || cfg.defaultNamespace || !cwd || workspaceRoots.has(cwd)) return;

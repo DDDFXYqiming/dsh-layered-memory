@@ -314,8 +314,8 @@ async function case3(c) {
 			const prompt = await env.prompt(env.agent(sessionId));
 			const order = promptFactOrder(prompt);
 			const shown = new Set(order);
-			// 与 apply 完全一致的会话种子：sessionId|namespace。
-			const expectedCold = [...pickColdSet(orderedIds, { sessionSeed: sessionId + "|default" })];
+			// prompt 未经 inbox，回合序号为 0；与 apply 完全一致的种子：sessionId|epoch|namespace。
+			const expectedCold = [...pickColdSet(orderedIds, { sessionSeed: sessionId + "|0|default" })];
 			const shownCold = expectedCold.filter(id => shown.has(id.slice(id.indexOf(":") + 1)));
 			// 序号 24 以后的最冷条目不可能靠热条目预算进入视图，出现即证明探索位生效。
 			for (const id of shownCold) if (orderedIds.indexOf(id) >= 24) deepShown.add(id.slice(id.indexOf(":") + 1));
@@ -330,6 +330,22 @@ async function case3(c) {
 		const distinct = new Set(signatures).size;
 		c.note("不同会话冷集合", signatures.map(text => brief(text, 90)).join(" ｜ "));
 		c.check("不同 sessionSeed 轮换不同冷条目", distinct >= 2, distinct + " 种", "≥2 种");
+
+		const turnAgent = env.agent("探索长会话");
+		const turnColdSets = [];
+		for (const epoch of [0, 1, 2]) {
+			if (epoch > 0) {
+				await env.emit("agent/inbox/inserted", { agent: turnAgent, message: { source: { kind: "user" }, content: [{ type: "text", text: "第 " + epoch + " 回合" }] } });
+			}
+			const order = promptFactOrder(await env.prompt(turnAgent));
+			const expectedCold = [...pickColdSet(orderedIds, { sessionSeed: "探索长会话|" + epoch + "|default" })];
+			const shownCold = expectedCold.map(id => id.slice(id.indexOf(":") + 1)).filter(key => order.includes(key));
+			turnColdSets.push(shownCold);
+			c.note("长会话 epoch=" + epoch, shownCold.map(key => brief(key, 50)).join(","));
+			c.check("长会话 epoch=" + epoch + " 冷集合来自探索池", shownCold.length > 0 && shownCold.every(key => coldPool.has(key)), shownCold.length + " 条", ">0 且全部来自探索池");
+		}
+		const turnDistinct = new Set(turnColdSets.map(set => [...set].sort().join(","))).size;
+		c.check("同一 sessionId 连续用户回合冷集合轮换", turnDistinct >= 2, turnDistinct + " 种", "≥2 种");
 	} finally {
 		await env.dispose();
 	}
@@ -412,7 +428,7 @@ async function case5(c) {
 }
 
 // ---------------------------------------------------------------------------
-// 用例 6：会话快照，同会话顺序不变、新会话变
+// 用例 6：用户回合快照，同回合顺序不变、下一用户回合刷新
 // ---------------------------------------------------------------------------
 async function case6(c) {
 	const env = createEnv({ defaultNamespace: "", globalL1MaxChars: 4096, heatNewEntryBonus: 0 });
@@ -424,12 +440,18 @@ async function case6(c) {
 		for (let i = 1; i <= 5; i++) await env.call("memory_read", { entry: { namespace: "default", kind: "fact", key: "快照-03" } }, agentA);
 		for (let i = 1; i <= 5; i++) await env.call("memory_read", { entry: { namespace: "default", kind: "fact", key: "快照-03" } }, env.agent("快照加热-" + i));
 		const after = promptFactOrder(await env.prompt(agentA));
-		const fresh = promptFactOrder(await env.prompt(env.agent("快照会话-B")));
+		const messages = [{ source: { kind: "user" }, content: [{ type: "text", text: "当前回合的新查询" }] }];
+		await env.emit("agent/pre-step", { agent: agentA, messages }, async () => ({ kind: "allow" }));
+		const afterPreStep = promptFactOrder(await env.prompt(agentA));
+		await env.emit("agent/inbox/inserted", { agent: agentA, message: { source: { kind: "user" }, content: [{ type: "text", text: "下一回合" }] } });
+		const nextTurn = promptFactOrder(await env.prompt(agentA));
 		c.note("A 首次", before.join(" > "));
-		c.note("A 再次", after.join(" > "));
-		c.note("B 新会话", fresh.slice(0, 2).join(" > "));
-		c.check("同会话再次装配顺序不变", JSON.stringify(after) === JSON.stringify(before), after.join(" > "), before.join(" > "));
-		c.check("新会话采用新热度顺序", fresh[0] === "快照-03" && before[0] !== "快照-03" && JSON.stringify(fresh) !== JSON.stringify(before), "新会话首位=" + fresh[0], "快照-03");
+		c.note("A 同回合", after.join(" > "));
+		c.note("A pre-step", afterPreStep.join(" > "));
+		c.note("A 下一回合", nextTurn.join(" > "));
+		c.check("同一用户回合反复装配顺序不变", JSON.stringify(after) === JSON.stringify(before), after.join(" > "), before.join(" > "));
+		c.check("pre-step 不开启新回合", JSON.stringify(afterPreStep) === JSON.stringify(before), afterPreStep.join(" > "), before.join(" > "));
+		c.check("下一用户回合同会话按新热度刷新", nextTurn[0] === "快照-03" && before[0] !== "快照-03" && JSON.stringify(nextTurn) !== JSON.stringify(before), "下一回合首位=" + nextTurn[0], "快照-03");
 	} finally {
 		await env.dispose();
 	}
@@ -501,7 +523,7 @@ const CASES = [
 	{ id: 3, title: "截断保护：冷条目有探索位，不会永久隐身（不同 sessionSeed 轮换）", ready: true, run: case3 },
 	{ id: 4, title: "计分：同会话重复 read 只 +1；维护读不计；search 不计", ready: true, run: case4 },
 	{ id: 5, title: "related 小额加分且封顶；新条目有新手保护", ready: true, run: case5 },
-	{ id: 6, title: "会话快照：同会话内猛读其它条目后再次装配，顺序不变；新会话变", ready: true, run: case6 },
+	{ id: 6, title: "用户回合快照：同回合反复装配顺序不变；下一用户回合同会话按新热度刷新", ready: true, run: case6 },
 	{ id: 7, title: "召回：低热度但正文匹配当前请求的条目出现在召回段", ready: true, run: case7 },
 	{ id: 8, title: "规则段仍最先且完整（预算内）", ready: true, run: case8 },
 	{ id: 9, title: "无 options 时 buildPromptIndex 输出与旧行为一致", ready: true, run: case9 },

@@ -59,7 +59,7 @@ buildCombinedPromptIndex(memoryDir, namespace, {
 ## apply.js 变更（teammate: wiring）
 
 - 新增 Config：`heatNewEntryDays`(7)、`heatNewEntryBonus`(1.5)、`heatRelatedBonus`(0.25)、`heatRelatedCap`(0.5)、`l1ColdExploreRatio`(0.12)、`recallLimit`(8)。
-- 每会话热度快照：`Map<sessionId, Map<id, rankIndex>>`。首次为该会话装配提示时用当前热度算 rank 并缓存；之后同一会话沿用缓存顺序（新出现条目 rank=-Infinity），会话结束/代理销毁时清理（上限 200 个会话）。**不要**因一次 memory_read 改变当前会话提示顺序。
+- 每回合热度快照：`Map<sessionId, Map<namespace, Map<id, rankIndex>>>`。每个用户回合首次装配时用当前热度算 rank 并缓存；同一回合后续装配沿用缓存顺序（新出现条目 rank=-Infinity），下一条 user 消息清空该会话缓存并递增回合序号。`agent/pre-step` 只更新召回 query，不重复开启回合；会话结束时清理（上限 200 个会话）。**不要**因一次 memory_read 改变当前回合提示顺序。
 - 当前用户请求：在 `agent/pre-step`（调用 next 之前）记录最新 user 文本到 Map<agent, string>；prompt 变量回调读取它作为召回 query。
 - `systemPrompt.variable("layered_memory_index")` 里传入 `forNamespace`：读 entries → scoreEntries → 取/建会话 rank 快照 → pickColdSet → recallEntries(query) → lines。
 - `buildTools` 增加 `isMaintenance` 回调，主调用传 `maintenance?.owns(agent)`；maintenanceTools 传 `() => true`。
@@ -76,7 +76,7 @@ buildCombinedPromptIndex(memoryDir, namespace, {
 3. 截断保护：冷条目有探索位，不会永久隐身（不同 sessionSeed 轮换）。
 4. 计分：同会话重复 read 只 +1；维护读不计；search 不计。
 5. related 小额加分且封顶；新条目有新手保护。
-6. 会话快照：同会话内猛读其它条目后再次装配，顺序不变；新会话变。
+6. 回合快照：同一用户回合内猛读其它条目后再次装配，顺序不变；下一用户回合在同一个长会话里刷新，冷探索种子随回合轮换。
 7. 召回：低热度但正文匹配当前请求的条目出现在“召回”段。
 8. 规则段仍最先且完整（预算内）。
 9. 无 options 时 buildPromptIndex 输出与旧行为一致。

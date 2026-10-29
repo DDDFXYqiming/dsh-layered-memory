@@ -115,9 +115,11 @@ function apply(ctx, config = {}) {
 		const cwd = agent?.session.header.cwd;
 		return { root: resolveRoot(cwd), namespace: resolveNamespace(cfg, undefined, cwd) };
 	}
-	// 会话热度快照：同一会话沿用首次装配时的排序，一次 memory_read 不会改写当前提示词顺序。
+	// 回合热度快照：同一用户回合内反复装配保持顺序；下一条 user 消息开启新回合并刷新。
+	// 长会话因此既能保住单回合内的提示词稳定性，也能持续吸收新的使用热度。
 	const SESSION_RANK_LIMIT = 200;
 	const sessionRanks = new Map(); // sessionId -> Map<namespace, Map<id, rank>>
+	const sessionEpochs = new Map(); // sessionId -> 当前用户回合序号
 	const latestRequest = new Map(); // agent -> 最新 user 文本，作为召回 query
 	// 召回缓存：同会话同空间同 query 且条目内容未变时直接复用 BM25 结果。
 	const RECALL_CACHE_LIMIT = 50;
@@ -157,13 +159,14 @@ function apply(ctx, config = {}) {
 	}
 	function heatViewFor(agent) {
 		const sessionId = agent?.session?.id;
+		const epoch = sessionId ? (sessionEpochs.get(sessionId) ?? 0) : 0;
 		const query = agent ? latestRequest.get(agent) : "";
 		return namespace => {
 			const { entries, rank } = rankFor(namespace, sessionId);
-			// rank 里没有的新条目按 -Infinity 置顶；冷探索位只在当前快照顺序的最冷端轮转。
+			// rank 里没有的新条目按 -Infinity 置顶；冷探索位按当前回合种子在热窗口之外轮转。
 			const orderedIds = entries.filter(entry => !entry.meta?.archived).map(entry => entryId(entry.kind, entry.key))
 				.sort((a, b) => (rank.get(a) ?? -Infinity) - (rank.get(b) ?? -Infinity));
-			const cold = pickColdSet(orderedIds, { sessionSeed: `${sessionId ?? ""}|${namespace}`, ratio: cfg.l1ColdExploreRatio });
+			const cold = pickColdSet(orderedIds, { sessionSeed: `${sessionId ?? ""}|${epoch}|${namespace}`, ratio: cfg.l1ColdExploreRatio });
 			const rows = query ? recallCached(namespace, sessionId, query, entries) : [];
 			const line = recallLine(rows);
 			return { rank, cold, coldRatio: cfg.l1ColdExploreRatio, ...(line ? { recall: { lines: [line], ids: rows.map(row => entryId(row.entry.kind, row.entry.key)) } } : {}) };
@@ -251,6 +254,12 @@ function apply(ctx, config = {}) {
 	disposers.push(ctx.on("agent/created", async ({ agent }) => { await prepareWorkspace(agent); }));
 	disposers.push(ctx.on("agent/inbox/inserted", ({ agent, message }) => {
 		// 系统提示在 pre-step 之前组装，入箱时就记下 user 文本，首步召回才不会晚一轮。
+		// 每条真实 user 消息只在这里开启一次新回合；pre-step 会带历史消息，不能重复递增。
+		if (message?.source?.kind === "user" && agent?.session?.id) {
+			const sessionId = agent.session.id;
+			sessionEpochs.set(sessionId, (sessionEpochs.get(sessionId) ?? 0) + 1);
+			sessionRanks.delete(sessionId);
+		}
 		const request = latestUserText([message]);
 		if (request !== undefined) latestRequest.set(agent, request);
 		if (skillGesture(message) && !maintenance.owns(agent)) activate(agent);
@@ -264,7 +273,11 @@ function apply(ctx, config = {}) {
 		return decision;
 	}));
 	disposers.push(ctx.on("agent/disposed", ({ agent }) => detach(agent)));
-	disposers.push(ctx.on("session/disposed", session => { if (session?.id) sessionRanks.delete(session.id); }));
+	disposers.push(ctx.on("session/disposed", session => {
+		if (!session?.id) return;
+		sessionRanks.delete(session.id);
+		sessionEpochs.delete(session.id);
+	}));
 	ctx.tools.register(defineTool({
 		name: "memory_activate",
 		description: "基础记忆查阅和写入工具已可直接使用。common 补充统计与复核工具；manage 增加候选、归档、历史、溯源、迁移与维护工具。读写权限由用户配置决定。",
@@ -282,6 +295,7 @@ function apply(ctx, config = {}) {
 	ctx.effect(() => () => {
 		for (const agent of states.keys()) detach(agent);
 		sessionRanks.clear();
+		sessionEpochs.clear();
 		latestRequest.clear();
 		recallCache.clear();
 		for (const dispose of disposers.reverse()) dispose();

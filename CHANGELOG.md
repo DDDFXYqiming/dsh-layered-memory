@@ -2,6 +2,10 @@
 
 All notable changes to `@dsh-external/dsh-layered-memory` are documented here.
 
+## [0.10.0-preview.20] - 2026-10-29
+
+- 热度排序快照改为按用户回合刷新：同一回合内顺序稳定，下一条用户消息即采用最新热度并轮换冷探索位，避免长会话停在首次装配时的旧顺序。
+
 ## [0.10.0-preview.19] - 2026-10-29
 
 - L1 注入视图按使用热度排序：真实 `memory_read` 计分，同会话同条目只计一次，维护读与搜索命中不计，`related` 小额封顶加分，新条目有短期新手保护；磁盘目录与 `memory_search` / `memory_list` 始终全量，热度不触发自动归档。

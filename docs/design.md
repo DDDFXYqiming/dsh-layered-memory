@@ -12,6 +12,27 @@ L1 在磁盘上保存全量活跃目录。动态上下文将项目和 global 分
 
 宿主 `systemPrompt.variable` 提供文本，context 只引用固定变量，正文不会被再次当模板解析。宿主比较内容快照，相同内容不重复追加。L0 和 runtime skill 使用同一份核心规则模板。
 
+## 索引占用的来源与口径
+
+服务端从磁盘上的 `index.txt` 统计占用，不另存一份计数。`src/l1index.js` 导出 `sections(text)` 与 `indexStats(root, budgetChars)`。
+
+`sections(text)` 按 `<!-- AUTO-BEGIN -->` 与 `<!-- AUTO-END -->` 标记把索引切成三段：标记之前是头部说明，中间是自动目录段，标记之后是规则段。
+
+`indexStats` 在自动目录段里取以 `[L2]` 开头的一行和以 `[L3]` 开头的一行，连同头部说明和规则段，给出四段字符数。
+
+- `headChars`：头部说明的长度。
+- `rulesChars`：规则段的长度，含 `[RULES]` 标记行。
+- `factsChars`：`[L2]` 事实目录行的整行长度。
+- `sopsChars`：`[L3]` 经验目录行的整行长度。
+
+`indexChars` 是 `index.txt` 全文长度，换行统一为 `\n` 后去掉尾部空白。四段之和与 `indexChars` 有差，差值来自 `AUTO` 标记行与换行。`rulesLines` 是规则段行数，`factCount` 与 `sopCount` 是事实与经验条目数。
+
+预算按命名空间取，与注入预算一致。`src/store-service.js` 的 `namespaceStats({ namespace })` 对 `default` 空间取 `cfg.globalL1MaxChars`，其余命名空间取 `cfg.l1MaxChars`，缺省分别是 2048 与 12288。注入侧 `src/l1index.js` 的 `buildCombinedPromptIndex` 对 `default` 空间用 `globalMaxChars`，对项目空间用 `projectMaxChars`，取值同为这两个配置项。
+
+磁盘上的 `index.txt` 始终是完整的活跃目录，占用视图只统计，不裁剪它。裁剪只发生在注入到提示词的那份视图：超出预算时规则段先取额度，其余额度分给条目，条目按热度排序取用，冷条目另留固定比例的探索额度，仍不足的较早条目被省略，视图尾部写明省略。
+
+远程方法在 `src/status-contract.js` 用 `parseNamespaceStats` 解析，注册为 `storeDescriptor("namespaceStats", parseNamespaceStats, parseNamespaceInput)`；`src/status.js` 代理同名方法。返回字段为 `namespace`、`indexChars`、`budgetChars`、`headChars`、`rulesChars`、`factsChars`、`sopsChars`、`rulesLines`、`factCount`、`sopCount`，缺字段或类型不符按 0 处理。
+
 ## 修改与恢复
 
 同一命名空间的正文、meta、索引和历史修改使用同一个写入口和互斥协议。锁只在文件提交期间持有，不跨模型思考。跨空间操作按稳定顺序获得锁。
@@ -43,3 +64,13 @@ L1 在磁盘上保存全量活跃目录。动态上下文将项目和 global 分
 基础 `memory_search/list/read/write/update` 随会话提供。`common` 补充状态与冲突登记，`manage` 补充历史、归档、候选和迁移。`memory_activate` 和历史激活只选择工具模式，不保存模型自设权限。读写权限仅来自用户配置 `memoryAccess`、`subagentMemoryAccess`，子代理默认 `read`。自动维护使用专用激活入口，沿用配置中的调用、写入和时间预算。
 
 核心插件通过 `layeredMemoryActivity` 服务发布当前运行阶段与维护结果，通过父会话限定的 worker facade 提供固定槽位、分页历史和停止操作。独立的状态子包通过 `typert` 读取这些能力，在 `conversation.composer.dock` 单行展示进度、真实变更数及未完成原因。点击展开插件浮层，主对话位置保持稳定；历史只投影维护回复、工具和实际错误。已有原生 catalog 历史保留，新维护执行不再按次数新增菜单项。
+
+## 界面本地化
+
+客户端文案集中在词典里，注册到宿主的 locale 服务。`client/browser.js` 用 `scope.locale.register("layered-memory", dictionaries)` 注册记忆管理页词典，`client/status.js` 用 `scope.locale.register("layered-memory-status", dictionaries)` 注册状态面板词典。
+
+词典覆盖 zh、en、ja、es、fr、de、ru、pt 八种语言。`client/browser.js` 每种语言 73 个键，`client/status.js` 每种语言 53 个键。
+
+侧栏入口名称按当前语言取。`client/browser.js` 注册 `sidebar.panellist` 槽位时把 `label` 写成 `scope.locale.translate(locale, "title")`。槽位注册带 `locale` 字段，组件内用 `t(key)` 取当前语言的文案。
+
+条目类型在界面按语言显示，数据键不变。数据层仍是 `fact` 与 `sop`，界面文案取 `kind.fact` 与 `kind.sop`，中文为“事实”“经验”，英文为 Fact、Skill。索引占用的图例标签同样本地化，取 `usage.label.head`、`usage.label.rules`、`usage.label.facts`、`usage.label.sops`。

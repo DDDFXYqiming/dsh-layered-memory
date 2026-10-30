@@ -15,6 +15,8 @@ Layered memory carries facts and operating procedures across sessions in a works
 
 - [Install](#install)
 - [Use](#use)
+- [Memory Management Page](#memory-management-page)
+- [Interface Language](#interface-language)
 - [Configuration](#configuration)
 - [Understand the implementation](#understand-the-implementation)
 - [Further Exploration](#further-exploration)
@@ -69,6 +71,28 @@ memory_rollback({entry, snapshot_id: "Choose a returned snapshot id"})
 Search covers active entries in the current and global spaces. Pass `include_archived:true` to reach archived content, then read the returned entry. A read reports its line range, total lines, revision, completeness and the next line offset. Global rules and complete indexes remain readable through the `rules`, `index` and `policy` entry kinds.
 
 The bundle includes an independent Memory status component that can be toggled on the plugins page. A compact line below the Web composer shows current maintenance activity, changed entry counts or incomplete-run reasons. Sessions without maintenance records show a clickable “Memory ready” entry. The detail panel provides run records, read-only worker history and a stop control for active maintenance.
+
+Browsing and editing entries happens on a separate page. See [Memory Management Page](#memory-management-page).
+
+## Memory Management Page
+
+The Web sidebar carries a “Memory” entry that opens a standalone memory management page. The page reads and writes the storage layer through the remote methods of the status subpackage.
+
+The toolbar across the top holds the namespace picker, a search box over titles and content, entry type filter tabs (All / Fact / Skill) and a switch for showing archived entries. The list on the left shows each entry with its title, type and update time; the detail pane on the right shows the selected entry.
+
+Content and evidence are readable and editable in place. The content area renders Markdown and switches between preview and edit, and evidence is a single input. Saving calls `updateEntry` with the `ifRevision` value read earlier, so an entry changed by another session reports a conflict and offers a reload. A “New entry” button next to the page title asks for namespace, type, title, content and evidence.
+
+Archiving removes an entry from the active directory and the index; restoring puts it back. The “Show archived” switch brings archived entries back into the list. Every change stores the previous version first, so the History section lists earlier versions with their time, revision, character count and a change summary. “Preview” expands the stored body, and “Roll back to this version” asks for confirmation before it replaces the current content.
+
+Below the toolbar sits a one-line “Index used” summary: the percentage used on the left, a segmented bar in the middle, and the used and budget character counts on the right. Clicking it expands the breakdown into four sections, header, rules, facts directory and skills directory, each with its own character count. Hovering a section opens a tooltip that says whether it is the index header, the L0 red-line rules, the `facts.md` directory or the `sops/` directory. The facts and skills sections also report an entry count and their share of the used characters, and the remaining sections dim while the pointer stays there.
+
+Usage numbers are per namespace. The `default` namespace is measured against `globalL1MaxChars` and every other namespace against `l1MaxChars`, which matches the budget used when the index is injected into the prompt.
+
+## Interface Language
+
+Interface text follows the host language setting. The dictionaries cover zh, en, ja, es, fr, de, ru and pt. The sidebar entry label, the buttons and hints on the page, and the memory status line in the composer all use the current language.
+
+Entry types are shown per language: Fact and Skill in the English interface, 事实 and 经验 in the Chinese one. The underlying data keys stay `fact` and `sop`, so tool arguments, storage paths and interface fields are unchanged.
 
 ## Configuration
 
@@ -147,7 +171,8 @@ The indexes sit in a stable prefix, so an unchanged snapshot reuses the provider
 - **Maintenance spends model calls**, internal end-of-turn reviews and `reflectionMode: auto` runs invoke subagents that consume tokens. `autoPending: true` records retry candidates on disk for later review. Budget limits apply per maintenance run rather than per session.
 - **Namespace identity is path based**, automatic namespaces derive from workspace identity or canonical root path. Moving a project to another path creates a different namespace until it is migrated explicitly.
 - **Tool access is per session**, basic memory tools are available in each session and the memory skill or `memory_activate` adds optional tools. Historical activation restores the tool mode only; permissions remain user-configured. The directory index is provided in context, while entry bodies are read through tools.
-- **Budget overflow only affects the prompt view**, the on-disk `index.txt` remains the full active directory and heat never reorders it; an `over_limit` flag means the injection budget is short, not that entries were deleted or archived.
+- **Usage numbers are per namespace**, the line on the memory page measures the `index.txt` of the selected namespace only and never combines the `default` and project spaces. Prompt injection budgets the two spaces separately, and the usage line shows one at a time.
+- **Budget overflow only affects the prompt view**, the on-disk `index.txt` always holds the full active directory and heat never reorders it, and the character counts in the usage view are the real length of that file. Going over budget neither deletes nor archives entries; it only trims the view injected into the prompt. An `over_limit` flag means the injection budget is short, not that entries were lost.
 
 ### Dev Note
 

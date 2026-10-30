@@ -112,7 +112,6 @@ export function buildTools(ctx, cfg, io = {}) {
 		}
 		if (!value) return { entry, title: entry.key, content: "", meta: {}, revision: "", complete: false, not_found: true, from_line: 0, to_line: 0, total_lines: 0, next_line: null, oversized_line: false };
 		if (args.if_revision && args.if_revision !== value.revision) throw new Error("条目已变化，请从第1行重新读取");
-		// 维护工作进程的读取是后台整理，不参与热度计分；同会话重复读取由 store 侧按 lastSession 去重。
 		if ((entry.kind === "fact" || entry.kind === "sop") && !io.isMaintenance?.(exec.agent)) bumpAccess(root, `${entry.kind}:${entry.key}`, { halfLifeDays: cfg.heatHalfLifeDays, sessionId: exec.agent?.session.id });
 		return { entry, title: value.title, meta: value.meta, revision: value.revision, not_found: false, ...pageContent(value.content, args) };
 	}, true));

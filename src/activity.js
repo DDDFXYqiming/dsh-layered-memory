@@ -27,7 +27,6 @@ function activityItem(record) {
 	};
 }
 
-/** 维护记录的只读展示源；完成状态始终来自已保存的真实运行记录。 */
 export function createActivitySource(ctx, cfg) {
 	const parents = new Map();
 	const lifetime = new AbortController();
@@ -54,8 +53,6 @@ export function createActivitySource(ctx, cfg) {
 			revision: state.revision,
 			running: items.filter(item => item.status === "running" && item.finishedAt === null),
 			latestChanged: finished.find(item => item.changedEntries > 0) || null,
-			// deferred 是「本轮没压到水位线、留待下一轮续跑」的正常中间态，不算失败；
-			// 只有真正 failed 才报警，否则索引自动收敛期间每轮都会亮红灯。
 			latestFailure: finished[0]?.status === "failed" ? finished[0] : null,
 			records: items,
 		};

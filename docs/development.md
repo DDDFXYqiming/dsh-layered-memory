@@ -7,7 +7,7 @@ npm run build
 npm pack --dry-run
 ```
 
-发布包包含源码、模板和文档。构建脚本 `scripts/build.mjs` 会生成自包含的记忆状态子包 `lib/status/`，并物化主包专用的 bundled 依赖目录，`npm pack` 的 `prepack` 执行同一构建。状态组件使用独立裸包名 `@dsh-external/dsh-layered-memory-status`，供宿主客户端发现器解析。包版本从 `package.json` 读取，实际宿主的启动日志记录版本、路径、记忆根和运行模式。
+发布包包含源码、模板和文档。构建脚本 `scripts/build.mjs` 会生成自包含的记忆状态子包 `lib/status/`，并物化主包专用的 bundled 依赖目录，`npm pack` 的 `prepack` 执行同一构建。状态组件使用独立裸包名 `@dsh-external/dsh-layered-memory-status`，供宿主客户端发现器解析。`scripts/build.mjs` 把 `src/status.js`、`src/status-contract.js`、`client/status.js`、`client/browser.js` 和 `client/status.css`、`client/browser.css` 一起打进 `lib/status/`：`lib/status/index.js` 是宿主侧入口，`lib/status/status-contract.js` 是契约，`lib/status/client.js` 同时包含状态面板与记忆管理页两套客户端。包版本从 `package.json` 读取，实际宿主的启动日志记录版本、路径、记忆根和运行模式。
 
 ## 载入真实宿主
 
@@ -29,6 +29,10 @@ DSH 的客户端模块声明缓存在服务进程中。安装或修复状态子�
 状态入口与浮层的样式参照官方 `ui-chat` 的 `StatsPills.module.css` 和 `stat-dialog.module.css`，颜色、圆角与阴影使用宿主主题变量。按钮、分段切换及定位使用宿主共享的 `@deepseek-ai/dsh-client-ui-primitives`，通过 Web 模块表复用，不打包另一份 React 或控件库。
 
 展示验收须实际打开浮层并查看截图。分别检查宽、窄视口与明暗主题，调整窗口后浮层应继续位于入口上方，保持约 8px 间隔与至少 12px 水平边距；同时检查关闭、重新打开、Escape、点击外部及会话切换后的定位。与官方 Token 用量浮层对比字体、圆角、背景及阴影，并覆盖空记录、已有记录与维护历史。
+
+## 样式
+
+状态面板样式在 `client/status.css`，记忆管理页样式在 `client/browser.css`。管理页里 `.lm-usage-*` 是索引占用样式。
 
 ## 验收环境
 
@@ -72,6 +76,31 @@ dsh --profile memory-e2e --patch ./memory-e2e.patch.yml --json - < scenario.txt
 在宿主页面验证主包包含“分层记忆”与“记忆状态”两个可独立启停的组件。点击紧凑状态行打开插件详情浮层，查看当前阶段、两个固定会话、只读历史和运行记录；真实运行时验证停止与再次恢复。覆盖零变更完成、等待证据、延期及实际错误。状态区按内容占宽，尚无记录时保留可点击的待命入口；宽窄视口下浮层均可用，主会话的正常回答和历史阅读位置保持稳定。切换会话核对归属，关闭组件后确认槽位移除且核心记忆工具继续可用。
 
 插件入口、依赖声明和清理遵循[官方插件教程](https://deepseek-harness.github.io/deepseek-harness/develop/basic/)、[服务与依赖](https://deepseek-harness.github.io/deepseek-harness/develop/framework/service)及[打包指南](https://deepseek-harness.github.io/deepseek-harness/develop/basic/publish)。发布验收安装预构建 tarball，检查 bundle 与状态子包版本一致，并使用官方原版宿主确认公开 API 的实际调用。
+
+## Web 记忆管理页验收
+
+改过 `client/` 后必须重建状态子包，否则页面加载的仍是旧产物。
+
+```bash
+node scripts/build.mjs
+```
+
+构建后刷新宿主页面，从侧栏打开“记忆”页。
+
+页内逐项实测：
+
+- 命名空间切换后列表、详情与索引占用一起刷新。
+- 搜索按标题或正文过滤，清空后恢复全量。
+- 类型过滤在“全部”“事实”“经验”之间切换。
+- “显示已归档”开关打开后归档条目进入列表。
+- 详情编辑保存后正文更新；用过期版本保存时报冲突，并提示重新加载。
+- 新建条目填写命名空间、类型、标题、正文与证据后创建成功。
+- 历史快照可预览正文，回滚需要二次确认。
+- 索引占用常态只显示一行总览：已用百分比、分段细条、已用与预算字符数、展开箭头。点击展开后显示四段明细与各自字符数。悬停某段出气泡，说明该段含义、条数与占已用比例，其余段与图例项联动淡化。
+
+索引占用的预算口径按命名空间核对：`default` 空间用 `globalL1MaxChars`，项目空间用 `l1MaxChars`。
+
+界面文案随宿主语言变化。语言在宿主设置里改，改 profile 的 locale 配置不生效。切一次语言后确认侧栏入口名称与“记忆”页文案变为当前语言，条目类型显示为“事实”“经验”或 Fact、Skill，索引占用的图例标签同步变化。
 
 ## 保存证据
 

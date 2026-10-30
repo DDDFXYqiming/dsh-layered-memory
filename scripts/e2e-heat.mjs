@@ -1,6 +1,3 @@
-#!/usr/bin/env node
-// 热度排序隔离 e2e：临时 memoryDir + 真实 apply() 装配，按 docs/heat-ranking-contract.md 的验收节逐条断言。
-// 运行：node scripts/e2e-heat.mjs
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,10 +7,6 @@ import { readEntries, readMeta, loadAccess } from "../src/store.js";
 import { entryId, pickColdSet, rankEntries, scoreEntries } from "../src/heat.js";
 import { buildTools } from "../src/tools.js";
 
-// ---------------------------------------------------------------------------
-// mock ctx：覆盖 apply() 装配实际用到的服务面。
-// storage.domain.open 返回 Promise，table(name) 提供 get/put/update。
-// ---------------------------------------------------------------------------
 function createMockCtx() {
 	const services = new Map();
 	const tools = new Map();
@@ -138,12 +131,10 @@ function createEnv(config = {}) {
 	return env;
 }
 
-// 写入一条 fact 夹具。
 async function writeFact(env, topic, content, extra = {}) {
 	return await env.call("memory_write", { kind: "fact", topic, content, evidence: "e2e 热度校验", ...extra });
 }
 
-// 从提示视图里提取 fact 条目顺序：完整视图是 [L2] a | b，截断视图是逐行 [fact] a。
 function promptFactOrder(prompt) {
 	const l2 = prompt.split("\n").find(line => line.startsWith("[L2] "));
 	if (l2) return l2.slice(5).split(" | ").filter(Boolean);
@@ -152,9 +143,6 @@ function promptFactOrder(prompt) {
 		.map(line => line.slice(7).trim());
 }
 
-// ---------------------------------------------------------------------------
-// 断言与输出
-// ---------------------------------------------------------------------------
 function createCase(id, title) {
 	const failures = [];
 	const notes = [];
@@ -186,9 +174,6 @@ function firstDiff(actual, expected) {
 	return "首个差异@" + at + " 实际…" + actual.slice(Math.max(0, at - 10), at + 30) + "… 期望…" + expected.slice(Math.max(0, at - 10), at + 30) + "…";
 }
 
-// ---------------------------------------------------------------------------
-// 用例 1：全量底座
-// ---------------------------------------------------------------------------
 async function case1(c) {
 	const env = createEnv({ defaultNamespace: "", globalL1MaxChars: 512 });
 	try {
@@ -229,9 +214,6 @@ async function case1(c) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// 用例 9：无 options 时 buildPromptIndex 输出与旧行为一致（黄金串）
-// ---------------------------------------------------------------------------
 function goldenIndexText() {
 	const facts = Array.from({ length: 20 }, (_, i) => "fact-" + String(i + 1).padStart(2, "0") + "-alpha");
 	const sops = Array.from({ length: 8 }, (_, i) => "sops/sop-" + String(i + 1).padStart(2, "0") + "-beta.md");
@@ -248,7 +230,6 @@ function goldenIndexText() {
 		"- 规则丙保持原样",
 	].join("\n");
 }
-// 黄金串由改动前的 buildPromptIndex 逐字节生成，用于锁定无 options 的旧行为。
 const OLD_BEHAVIOR_GOLDEN = [
 	[450, "记忆 [default]：fact 20 条，sop 8 条。\n## 规则\n- 规则甲必须最先出现\n- 规则乙不可省略\n- 规则丙保持原样\n[fact] （较早的 13 条已省略；memory_list 可列举全部）\n[fact] fact-14-alpha\n[fact] fact-15-alpha\n[fact] fact-16-alpha\n[fact] fact-17-alpha\n[fact] fact-18-alpha\n[fact] fact-19-alpha\n[fact] fact-20-alpha\n[sop] （较早的 7 条已省略；memory_list 可列举全部）\n[sop] sop-08-beta\n本视图受 450 字符预算限制：省略已写进对应层；完整索引与规则用 memory_read 读取；memory_list / memory_search 返回可读 entry。"],
 	[350, "记忆 [default]：fact 20 条，sop 8 条。\n## 规则\n- 规则甲必须最先出现\n- 规则乙不可省略\n- 规则丙保持原样\n[fact] （较早的 17 条已省略；memory_list 可列举全部）\n[fact] fact-18-alpha\n[fact] fact-19-alpha\n[fact] fact-20-alpha\n[sop] （较早的 8 条已省略；memory_list 可列举全部）\n本视图受 350 字符预算限制：省略已写进对应层；完整索引与规则用 memory_read 读取；memory_list / memory_search 返回可读 entry。"],
@@ -267,9 +248,6 @@ async function case9(c) {
 	c.note("golden_caps", OLD_BEHAVIOR_GOLDEN.map(([cap]) => cap).join("/"));
 }
 
-// ---------------------------------------------------------------------------
-// 用例 2：排序，高热度靠前，预算够时全部出现
-// ---------------------------------------------------------------------------
 async function case2(c) {
 	const env = createEnv({ defaultNamespace: "", globalL1MaxChars: 4096, heatNewEntryBonus: 0 });
 	try {
@@ -287,9 +265,6 @@ async function case2(c) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// 用例 3：冷条目探索位，不同 sessionSeed 轮换
-// ---------------------------------------------------------------------------
 async function case3(c) {
 	const env = createEnv({ defaultNamespace: "", globalL1MaxChars: 900, heatNewEntryBonus: 0 });
 	try {
@@ -300,7 +275,6 @@ async function case3(c) {
 			keys.push(key);
 			await writeFact(env, key, "第 " + i + " 条冷条目正文。");
 		}
-		// 按 apply 的同款规则算出当前排序的最冷端，作为探索位候选池（最冷 24 条）。
 		const entries = readEntries(env.root);
 		const scores = scoreEntries(entries, { access: loadAccess(env.root), meta: readMeta(env.root), heat: {}, newEntryBonus: 0 });
 		const ranks = rankEntries(entries, scores);
@@ -314,10 +288,8 @@ async function case3(c) {
 			const prompt = await env.prompt(env.agent(sessionId));
 			const order = promptFactOrder(prompt);
 			const shown = new Set(order);
-			// prompt 未经 inbox，回合序号为 0；与 apply 完全一致的种子：sessionId|epoch|namespace。
 			const expectedCold = [...pickColdSet(orderedIds, { sessionSeed: sessionId + "|0|default" })];
 			const shownCold = expectedCold.filter(id => shown.has(id.slice(id.indexOf(":") + 1)));
-			// 序号 24 以后的最冷条目不可能靠热条目预算进入视图，出现即证明探索位生效。
 			for (const id of shownCold) if (orderedIds.indexOf(id) >= 24) deepShown.add(id.slice(id.indexOf(":") + 1));
 			shownSets.push(shownCold.map(id => id.slice(id.indexOf(":") + 1)));
 			c.note(sessionId + " 显示", order.length + "/" + total + "，冷命中 " + shownCold.length + "/" + expectedCold.length);
@@ -351,9 +323,6 @@ async function case3(c) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// 用例 4：计分（同会话只 +1，维护读与 search 不计）
-// ---------------------------------------------------------------------------
 async function case4(c) {
 	const env = createEnv({ defaultNamespace: "" });
 	try {
@@ -386,9 +355,6 @@ async function case4(c) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// 用例 5：related 小额加分且封顶；新条目新手保护
-// ---------------------------------------------------------------------------
 async function case5(c) {
 	const env = createEnv({ defaultNamespace: "", heatNewEntryBonus: 0 });
 	try {
@@ -427,9 +393,6 @@ async function case5(c) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// 用例 6：用户回合快照，同回合顺序不变、下一用户回合刷新
-// ---------------------------------------------------------------------------
 async function case6(c) {
 	const env = createEnv({ defaultNamespace: "", globalL1MaxChars: 4096, heatNewEntryBonus: 0 });
 	try {
@@ -457,9 +420,6 @@ async function case6(c) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// 用例 7：召回段
-// ---------------------------------------------------------------------------
 async function case7(c) {
 	const env = createEnv({ defaultNamespace: "", globalL1MaxChars: 4096, heatNewEntryBonus: 0 });
 	try {
@@ -481,9 +441,6 @@ async function case7(c) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// 用例 8：规则段最先且完整
-// ---------------------------------------------------------------------------
 async function case8(c) {
 	const env = createEnv({ defaultNamespace: "", globalL1MaxChars: 640, heatNewEntryBonus: 0 });
 	try {
@@ -514,9 +471,6 @@ async function case8(c) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// 用例注册表：九项验收全部实现。
-// ---------------------------------------------------------------------------
 const CASES = [
 	{ id: 1, title: "全量底座：小预算截断后 index.txt / memory_list / memory_search 仍含全部活跃条目", ready: true, run: case1 },
 	{ id: 2, title: "排序：高热度条目在提示视图靠前；预算够时所有条目仍出现", ready: true, run: case2 },

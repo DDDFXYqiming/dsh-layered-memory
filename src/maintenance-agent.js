@@ -156,15 +156,12 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 		const proposed = new Map(job.results);
 		for (const result of args.entries || []) proposed.set(refKey(result.entry), result);
 		const progress = checkpoint(job, { entries: [...proposed.values()], remaining: args.remaining });
-		// 一次任务内消掉缺口：只要索引还高于水位线、预算还有剩，就不允许收工。
-		// 否则每轮只动几条就结束，下一轮又要重扫目录、重读正文，token 全花在重建上下文上。
 		const gapLeft = Number(job.work?.gapChars) || 0;
 		const wantsToStop = args.status === "deferred" || progress.remaining.length > 0;
 		if (gapLeft > 0 && wantsToStop) {
 			const writesLeft = job.writeBudget - job.mutations;
 			const callsLeft = job.callBudget - job.workCalls;
 			const secondsLeft = Math.ceil((job.deadline - Date.now()) / 1000);
-			// 最多拦两次，避免模型与预算判据打架时空转。
 			if (writesLeft > 0 && callsLeft > 2 && secondsLeft > 60 && (job.keepGoingRefusals ?? 0) < 2) {
 				job.keepGoingRefusals = (job.keepGoingRefusals ?? 0) + 1;
 				throw new Error(`MEMORY_KEEP_GOING: 索引仍高于水位线，还差 ${gapLeft} 字符，而本轮还有 ${writesLeft} 次写入、${callsLeft} 次调用、${secondsLeft} 秒。请继续处理 remaining 里的候选（优先合并同主题族，其次归档确认失效的条目），把缺口压到 0 再提交完成；只有预算真正用尽、或确认剩余条目都不可合并也不该归档时，才允许 deferred 并在 summary 里说明原因。`);
@@ -338,7 +335,6 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 				return { status: "cooldown" };
 			}
 			const agentOptions = { maxTokens: cfg.maintenanceMaxTokens };
-			// 两项都显式配置才覆盖路由；未配置时不写 provider/model，由 maintenance-workers.js 的 resolveChildAgentOptions 继承父会话当前模型。
 			if (!turnReview && cfg.maintenanceLlmProvider && cfg.maintenanceModel) Object.assign(agentOptions, { provider: cfg.maintenanceLlmProvider, model: cfg.maintenanceModel });
 			const reasoning = turnReview ? cfg.turnReviewReasoningEffort : cfg.maintenanceReasoningEffort;
 			if (reasoning) agentOptions.reasoningEffort = reasoning;
@@ -350,14 +346,10 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 				deadline: Date.now() + cfg.maintenanceTimeoutSeconds * 1000, remainingEntries: new Map(), reviewSources: new Map(), turnReview,
 				workIds: record.workIds || [], pendingNames: assignedPending, work: turnReview ? { jobs: [], ready: false, waiting: 0 } : { ...work, pendingNames: assignedPending },
 				saved: new Set(), links: new Map(), queue: Promise.resolve(), disposers: [], agentId: null, session: null, names: [], childId: null };
-			// 写入额度按缺口放大：缺口越大，一轮允许落地的改动越多。
-			// 固定 6 次写入会把「缺口 1200 字符」这种活拆成五六轮，而每轮都要重扫标题目录、重新选题，
-			// 固定开销远大于实际产能，看起来就是永远整理不完。缺口为 0（含 turnReview）时保持原额度。
 			const gapForBudget = Number(job.work?.gapChars) || 0;
 			job.writeBudget = gapForBudget > 0
 				? Math.min(40, Math.max(cfg.maintenanceMaxWrites, Math.ceil(gapForBudget / CHARS_PER_ENTRY) + 4))
 				: cfg.maintenanceMaxWrites;
-			// 每次写入前通常还要读一次正文，按 3 倍预留；缺口大时同步放宽总调用额度。
 			job.callBudget = Math.max(cfg.maintenanceMaxCalls, job.writeBudget * 3);
 			job.progress = createMaintenanceProgress(namespace, entry => currentRevision(job, entry));
 			Object.assign(job, { reads: job.progress.reads, changes: job.progress.changes, results: job.progress.results });
@@ -370,7 +362,6 @@ export function createMaintenanceRunner(ctx, cfg, io) {
 				if (currentRevision(job, entry) !== null) job.remainingEntries.set(refKey(entry), entry);
 			}
 			const handoff = JSON.stringify(previous);
-			// 索引水量取自 work 视图；字段未提供时降级为“未知”，不影响本轮执行。
 			const indexWork = { indexChars: job.work.indexChars ?? null, targetChars: job.work.targetChars ?? null, gapChars: job.work.gapChars ?? null,
 				activeEntries: job.work.catalog?.length || null, candidateLimit: job.work.candidateLimit ?? 8 };
 			const text = turnReview ? [

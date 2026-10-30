@@ -96,7 +96,6 @@ export function createLayeredMemoryStore(cfg) {
 		async namespaceStats({ namespace } = {}) {
 			return run("读取索引占用", async () => {
 				const name = safeNs(namespace);
-				// 预算口径与注入一致：default 空间走全局预算，项目空间走项目预算。
 				const budget = name === "default" ? (cfg.globalL1MaxChars ?? GLOBAL_L1_MAX_CHARS_DEFAULT) : maxChars;
 				return { namespace: name, ...indexStats(nsRoot(cfg.memoryDir, name), budget) };
 			});

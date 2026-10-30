@@ -42,8 +42,6 @@ export const Config = Schema.object({
 	reflectSopsThreshold: Schema.natural().default(40),
 	l1MaxChars: Schema.number().min(1024).default(L1_MAX_CHARS_DEFAULT),
 	globalL1MaxChars: Schema.natural().min(512).default(2048),
-	// 索引整理的目标水位线比例：目标字符 = l1MaxChars × 本值，默认 0.9。
-	// 预算是硬上限、不靠抬高它回避整理；水位线给新记忆留出继续写入的空间。
 	indexTargetRatio: Schema.number().min(0.5).max(1).default(0.9),
 	reflectCooldownTurns: Schema.natural().default(10),
 	nearDupeThreshold: Schema.number().min(0).max(1).default(NEAR_DUPE_THRESHOLD),
@@ -64,7 +62,6 @@ const READ_TOOLS = new Set(["memory_read", "memory_list", "memory_search", "memo
 const CORE_TOOLS = new Set(["memory_read", "memory_list", "memory_search", "memory_write", "memory_update"]);
 const COMMON_TOOLS = new Set(["memory_read", "memory_list", "memory_search", "memory_stats", "memory_write", "memory_update", "memory_review"]);
 const skillGesture = message => message?.source?.kind === "user" && message.content.some(block => block.type === "text" && /(^|\s)\/memory(?=\s|$)/.test(block.text));
-// pre-step 的 messages 是本步将要发给模型的整批消息；取最后一条真正的用户输入作为召回 query。
 function latestUserText(messages) {
 	let latest;
 	for (const message of messages || []) {
@@ -115,15 +112,12 @@ function apply(ctx, config = {}) {
 		const cwd = agent?.session.header.cwd;
 		return { root: resolveRoot(cwd), namespace: resolveNamespace(cfg, undefined, cwd) };
 	}
-	// 回合热度快照：同一用户回合内反复装配保持顺序；下一条 user 消息开启新回合并刷新。
-	// 长会话因此既能保住单回合内的提示词稳定性，也能持续吸收新的使用热度。
 	const SESSION_RANK_LIMIT = 200;
-	const sessionRanks = new Map(); // sessionId -> Map<namespace, Map<id, rank>>
-	const sessionEpochs = new Map(); // sessionId -> 当前用户回合序号
-	const latestRequest = new Map(); // agent -> 最新 user 文本，作为召回 query
-	// 召回缓存：同会话同空间同 query 且条目内容未变时直接复用 BM25 结果。
+	const sessionRanks = new Map();
+	const sessionEpochs = new Map();
+	const latestRequest = new Map();
 	const RECALL_CACHE_LIMIT = 50;
-	const recallCache = new Map(); // "sessionId|namespace|query" -> { signature, rows }
+	const recallCache = new Map();
 	function heatScores(root, entries) {
 		return scoreEntries(entries, {
 			access: loadAccess(root), meta: readMeta(root), heat: cfg.heat,
@@ -137,7 +131,6 @@ function apply(ctx, config = {}) {
 		if (!sessionId) return { entries, rank: rankEntries(entries, heatScores(root, entries)) };
 		let buckets = sessionRanks.get(sessionId);
 		if (!buckets) {
-			// 会话上限：Map 按插入顺序淘汰最早的那个会话。
 			if (sessionRanks.size >= SESSION_RANK_LIMIT) sessionRanks.delete(sessionRanks.keys().next().value);
 			buckets = new Map();
 			sessionRanks.set(sessionId, buckets);
@@ -148,7 +141,6 @@ function apply(ctx, config = {}) {
 	}
 	function recallCached(namespace, sessionId, query, entries) {
 		const key = `${sessionId ?? ""}|${namespace}|${query}`;
-		// 条目 revision 变（新增/更新/归档）即视为内容版本变化，下一轮重新建 BM25 索引。
 		const signature = hashText(entries.map(entry => entry.kind + ":" + entry.key + ":" + entry.revision).join("|"));
 		const cached = recallCache.get(key);
 		if (cached && cached.signature === signature) return cached.rows;
@@ -163,7 +155,6 @@ function apply(ctx, config = {}) {
 		const query = agent ? latestRequest.get(agent) : "";
 		return namespace => {
 			const { entries, rank } = rankFor(namespace, sessionId);
-			// rank 里没有的新条目按 -Infinity 置顶；冷探索位按当前回合种子在热窗口之外轮转。
 			const orderedIds = entries.filter(entry => !entry.meta?.archived).map(entry => entryId(entry.kind, entry.key))
 				.sort((a, b) => (rank.get(a) ?? -Infinity) - (rank.get(b) ?? -Infinity));
 			const cold = pickColdSet(orderedIds, { sessionSeed: `${sessionId ?? ""}|${epoch}|${namespace}`, ratio: cfg.l1ColdExploreRatio });
@@ -253,8 +244,6 @@ function apply(ctx, config = {}) {
 	}));
 	disposers.push(ctx.on("agent/created", async ({ agent }) => { await prepareWorkspace(agent); }));
 	disposers.push(ctx.on("agent/inbox/inserted", ({ agent, message }) => {
-		// 系统提示在 pre-step 之前组装，入箱时就记下 user 文本，首步召回才不会晚一轮。
-		// 每条真实 user 消息只在这里开启一次新回合；pre-step 会带历史消息，不能重复递增。
 		if (message?.source?.kind === "user" && agent?.session?.id) {
 			const sessionId = agent.session.id;
 			sessionEpochs.set(sessionId, (sessionEpochs.get(sessionId) ?? 0) + 1);

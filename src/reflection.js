@@ -15,7 +15,6 @@ function markdownNames(path) {
 	catch (error) { if (error.code === "ENOENT") return []; throw error; }
 }
 
-// 来源事件、访问次数和维护报告不改变正文版本。
 export function computeContentRevision(root) {
 	const parts = readEntries(root).map(entry => [entry.kind, entry.key, entry.revision]);
 	parts.push(["index.txt", readOptional(join(root, "index.txt"))]);
@@ -45,7 +44,6 @@ export function collectReflectionSignals(root) {
 	return { sops, pending: markdownNames(join(root, PENDING_DIR)).length, indexChars: readOptional(join(root, "index.txt")).trimEnd().length };
 }
 
-// 数量触发扫描；索引压力另由持久化语义审阅作业决定是否调用模型。
 export function reflectionBuckets(signals, cfg = {}) {
 	const buckets = [];
 	if (cfg.reflectPendingThreshold > 0 && signals.pending >= cfg.reflectPendingThreshold) buckets.push("pending");

@@ -78,11 +78,7 @@ export function runMaintain(root, maxChars = L1_MAX_CHARS_DEFAULT, opts = {}) {
 			const stats = computeNamespaceStats(root, entries);
 			const cold = findColdEntries(root, { ...opts, days: opts.coldReviewDays ?? COLD_REVIEW_DAYS, entries });
 			const counts = { pending: pendingNames(root).length, conflicts: dedupe.conflicts.length, exact_duplicates: dedupe.exactDuplicates.length, near_duplicates: dedupe.nearDuplicates.length, merge_candidates: mergeCandidates.length };
-			// 整理目标不是「不超上限」而是「压到水位线以下」：水位线 = l1MaxChars × indexTargetRatio。
-			// 只判 over_limit 会让索引长期贴着上限，新记忆写一条就再次超限。
 			const targetChars = Math.max(0, Math.floor(maxChars * (opts.indexTargetRatio ?? 0.9)));
-			// 触发要留滞后区间：正常写几条记忆就会让索引略微超过水位线，若一超就开班整理，
-			// 会变成「每写两条就整理一次」。超过水位线 2%（且不少于 80 字符）才真正开工。
 			const triggerChars = targetChars + Math.max(80, Math.floor(targetChars * 0.02));
 			const aboveTarget = index.index_chars > triggerChars;
 			const review = syncReview(root, { overLimit: index.over_limit, aboveTarget, targetChars, indexChars: index.index_chars, entries, origin: opts.origin });

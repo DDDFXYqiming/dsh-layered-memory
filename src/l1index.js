@@ -20,7 +20,6 @@ export function sections(text) {
 }
 export function readRules(root) { return sections(readIndex(root)).rules; }
 
-// 索引占用统计：按 AUTO 标记与 [RULES] 标记切分；头部说明、规则、L2、L3 四段合计覆盖 index.txt 全文。
 export function indexStats(root, budgetChars = L1_MAX_CHARS_DEFAULT) {
 	const text = readIndex(root);
 	const { head, auto, rules } = sections(text);
@@ -43,7 +42,6 @@ export function buildAutoLines(facts, sops) {
 	return [`[L2] ${facts.join(" | ") || "（空）"}`, `[L3] ${sops.map(key => `sops/${key}.md`).join(" | ") || "（空）"}`];
 }
 
-// Disk keeps the full catalog and rules; only the prompt view is budgeted.
 export function syncIndex(root, maxChars = L1_MAX_CHARS_DEFAULT, entries) {
 	return withNsWriteLock(root, () => {
 		const current = readIndex(root);
@@ -61,13 +59,9 @@ function layerNames(auto, layer) {
 		.flatMap(line => line.slice(4).trim().split(" | ")).filter(name => name && name !== "（空）");
 }
 
-// 每行加入视图的字符代价（含与前一行之间的换行）。
 function sumCost(lines) {
 	return lines.reduce((total, line, index) => total + line.length + (index ? 1 : 0), 0);
 }
-// 预算够就整层给出；不够就按方向取舍：rules 保最早的（红线在前），
-// 条目保最新的（写入顺序里新的在尾部，旧条目被省略比新记忆隐身好），
-// 省略时腾出一行说明省略条数与完整目录的读取入口。
 function viewLayer(lines, cap, label, marker, keepNewest) {
 	const full = lines.join("\n");
 	if (full.length <= cap) return { text: full, omitted: 0 };
@@ -80,7 +74,6 @@ function viewLayer(lines, cap, label, marker, keepNewest) {
 	}
 	if (keepNewest) kept = kept.reverse();
 	const draw = () => `${label}${marker(lines.length - kept.length)}`;
-	// 说明行自己也要占预算：腾不出空间时继续丢条目，直到说明行能放下。
 	while (kept.length && kept.join("\n").length + 1 + draw().length > cap) {
 		if (keepNewest) kept.shift(); else kept.pop();
 	}
@@ -89,8 +82,6 @@ function viewLayer(lines, cap, label, marker, keepNewest) {
 	return { text: text.length <= cap ? text : notice.slice(0, cap), omitted: lines.length - kept.length };
 }
 export const INDEX_TRUNCATION_NOTE = "完整索引与规则用 memory_read 读取；memory_list / memory_search 返回可读 entry。";
-// 规则是红线，先按需保底；条目层（fact / sop）分剩余预算：
-// 先按各自真实需要等比分担，再让需要少的层把富余让给另一层（避免固定比例饿死某一层）。
 const RULES_MIN_RATIO = 0.25;
 function splitEntryBudget(room, factsNeed, sopsNeed) {
 	const total = factsNeed + sopsNeed;
@@ -103,7 +94,6 @@ function idOfLine(kind, line) {
 	const name = kind === "sop" ? line.replace(/^sops\//, "").replace(/\.md$/, "") : line;
 	return kind + ":" + name;
 }
-// 按热度序号排序；rank 里没有的 id 视为新条目，置顶。
 function orderLayer(lines, kind, rank) {
 	if (!rank) return { entries: lines.map((line, index) => ({ line, index, id: idOfLine(kind, line), rank: index })) };
 	return lines.map((line, index) => {
@@ -112,10 +102,6 @@ function orderLayer(lines, kind, rank) {
 		return { line, index, id, rank: value === undefined ? -Infinity : value };
 	}).sort((a, b) => (a.rank === b.rank ? a.index - b.index : a.rank - b.rank));
 }
-/**
- * 热度视图的整层裁剪：热条目按序号优先，冷探索位预留一部分预算单独补进来，
- * 保证低热度条目轮换曝光而不是永久隐身。输出顺序仍是热 → 冷。
- */
 function viewLayerHeat(entries, cap, label, marker, cold, ratio) {
 	const full = entries.map(entry => entry.line).join("\n");
 	if (full.length <= cap) return { text: full, omitted: 0, coldShown: 0 };
@@ -143,7 +129,6 @@ function viewLayerHeat(entries, cap, label, marker, cold, ratio) {
 	let coldShown = 0;
 	for (const entry of coldPool) if (push(entry)) coldShown += 1;
 	for (const entry of hot) push(entry);
-	// 说明行放不下时从尾部丢条目，直到能放下。
 	const notice = () => noticeFor(entries.length - kept.length).length;
 	while (kept.length && used + notice() > cap) {
 		const dropped = kept.pop();
@@ -176,7 +161,6 @@ export function buildPromptIndex(indexText, maxChars = L1_MAX_CHARS_DEFAULT, nam
 	const { head, auto, rules } = sections(indexText);
 	const facts = layerNames(auto, "L2"), sops = layerNames(auto, "L3");
 	if (!ranked && !cold && !recall) {
-		// 兼容路径：保持旧版逐字节行为。
 		const intro = `记忆 [${namespace}]：fact ${facts.length} 条，sop ${sops.length} 条。\n`;
 		const note = `\n完整内容：memory_read({entry:{namespace:${JSON.stringify(namespace)},kind:"index",key:"index"},full:true})；规则入口 kind:"rules",key:"rules"）。`;
 		if (intro.length + note.length > cap) return `${intro}${INDEX_TRUNCATION_NOTE}`.slice(0, cap);
@@ -195,7 +179,6 @@ export function buildPromptIndex(indexText, maxChars = L1_MAX_CHARS_DEFAULT, nam
 		return (intro + parts.join("\n") + tail).slice(0, cap);
 	}
 
-	// 热度路径：重建 AUTO 段（head 与 rules 原样保留），条目按热度排序。
 	const recallIds = new Set(Array.isArray(options.recall?.ids) ? options.recall.ids : []);
 	const factEntries = orderLayer(facts, "fact", options.rank).filter(entry => !recallIds.has(entry.id));
 	const sopEntries = orderLayer(sops, "sop", options.rank).filter(entry => !recallIds.has(entry.id));
@@ -205,7 +188,6 @@ export function buildPromptIndex(indexText, maxChars = L1_MAX_CHARS_DEFAULT, nam
 	if (full.length + (recallText ? recallText.length + 1 : 0) <= cap) {
 		return recallText ? full.replace(head, `${head}\n${recallText}`) : full;
 	}
-	// 预算不够：规则优先 + 召回 + 两层分预算，冷条目走探索位。
 	const intro = `记忆 [${namespace}]：fact ${facts.length} 条，sop ${sops.length} 条。\n`;
 	const note = `\n完整内容：memory_read({entry:{namespace:${JSON.stringify(namespace)},kind:"index",key:"index"},full:true})；规则入口 kind:"rules",key:"rules"）。`;
 	if (intro.length + note.length > cap) return `${intro}${INDEX_TRUNCATION_NOTE}`.slice(0, cap);

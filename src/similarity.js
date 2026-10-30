@@ -1,5 +1,4 @@
 // 无模型红线：本文件不引入任何模型依赖，检索与相似度必须是纯 JS 计算。
-// 中文没有空格边界，bigram 是无模型条件下最稳的召回单元。
 
 /** 只用于检索/相似度评分，**不用于"是否同一内容"的归档判定**。 */
 export function normalizeText(text) {
@@ -7,9 +6,8 @@ export function normalizeText(text) {
 }
 
 /**
- * 自动去重判定专用，与 normalizeText（检索用）分离：适合搜索的归一化不适合
- * 决定某条记忆是否可以被隐藏。不折叠大小写、不合并正文空白——路径、命令、
- * 参数里的大小写与空格都是语义（/srv/App 与 /srv/app 是两个目录）。
+ * 自动去重判定专用，与 normalizeText（检索用）分离：不折叠大小写、不合并正文空白——
+ * 路径、命令、参数里的大小写与空格都是语义（/srv/App 与 /srv/app 是两个目录）。
  */
 export function exactNormalize(text) {
 	return String(text ?? "")
@@ -26,8 +24,6 @@ export function tokenize(text) {
 	for (const m of s.matchAll(/[a-z0-9_+\-./]{2,}|\d/g)) {
 		const token = m[0];
 		tokens.push(token);
-		// [0.6.8] 复合标识符额外索引拆分后的子词：完整名字仍能命中（dsh-layered-memory），
-		// 拆开写法也能命中（layered memory）。此前只有整体词元，拆开查询零结果。
 		if (/[._+/-]/.test(token)) {
 			for (const part of token.split(/[._+/-]+/)) {
 				if (part.length >= 2) tokens.push(part);
@@ -51,14 +47,13 @@ export function jaccard(a, b) {
 	return union === 0 ? 0 : inter / union;
 }
 
-/** Okapi BM25 全文检索索引。 */
 export class BM25Index {
 	constructor({ k1 = 1.2, b = 0.75 } = {}) {
 		this.k1 = k1;
 		this.b = b;
-		this.docs = new Map(); // id -> Map(term -> tf)
-		this.docLen = new Map(); // id -> length
-		this.df = new Map(); // term -> doc frequency
+		this.docs = new Map();
+		this.docLen = new Map();
+		this.df = new Map();
 		this.totalLen = 0;
 	}
 

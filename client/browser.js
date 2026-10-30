@@ -143,15 +143,12 @@ export function createMemoryBrowserClient(require, styles) {
 		return result.value;
 	}
 	const identity = entry => JSON.stringify([entry.namespace, entry.kind, entry.key]);
-	// 与界面语言一致的时间格式，避免中文界面出现美式日期
 	const time = value => {
 		if (!value) return "—";
 		const lang = (typeof document !== "undefined" && document.documentElement.lang) || "zh-CN";
 		return new Date(value).toLocaleString(lang, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 	};
-	// kind 数据键（fact / sop）在界面上的本地化显示，未知 kind 原样返回。
 	const kindText = (kind, t) => (kind === "fact" || kind === "sop" ? t("kind." + kind) : kind);
-	// 字符数紧凑写法：9003 → 9.0K，12288 → 12.3K，120000 → 120K
 	function compactChars(value) {
 		const number = Number(value);
 		if (!Number.isFinite(number) || number <= 0) return "0";
@@ -159,7 +156,6 @@ export function createMemoryBrowserClient(require, styles) {
 		const scaled = number / 1000;
 		return (scaled >= 100 ? String(Math.round(scaled)) : scaled.toFixed(1)) + "K";
 	}
-	// 极简 Markdown → React 元素，零依赖，覆盖标题/粗斜体/行内代码/列表/链接/引用/分隔线
 	function renderInline(text, keyPrefix) {
 		const parts = [];
 		let rest = text;
@@ -297,13 +293,11 @@ export function createMemoryBrowserClient(require, styles) {
 					h(Field, { label: t("evidence") }, h(Input, { value: form.evidence, placeholder: t("evidencePlaceholder"), disabled: busy, onChange: event => update("evidence", event.target.value) })),
 					h("div", { className: "lm-browser-modal-actions" }, h(Button, { variant: "outline", type: "button", disabled: busy, onClick: onClose }, t("cancel")), h(Button, { variant: "primary", type: "submit", disabled: busy || !form.namespace }, busy ? t("creating") : t("create"))))));
 	}
-	// 索引占用：常态一行总览，点击展开分段明细；分段悬停高亮，术语沿用插件其余处的 head/rules/facts/sops。
 	function IndexUsage({ stats, t }) {
 		const [open, setOpen] = React.useState(false);
 		const [hovered, setHovered] = React.useState(null);
 		const used = Number(stats?.indexChars) || 0;
 		const budget = Number(stats?.budgetChars) || 0;
-		// 取数失败或索引为空时不渲染。
 		if (!stats || used <= 0 || budget <= 0) return null;
 		const percent = Math.round((used / budget) * 100);
 		const over = percent > 100;
@@ -314,7 +308,6 @@ export function createMemoryBrowserClient(require, styles) {
 			["sops", t("usage.label.sops"), Number(stats.sopsChars) || 0, Number(stats.sopCount) || 0],
 		];
 		const dimmed = kind => hovered !== null && hovered !== kind;
-		// 气泡文案：术语含义 + 条目数（facts/sops）+ 占已用比例。
 		const tipFor = (kind, value, count) => [
 			t("usage.tip." + kind),
 			count === null ? "" : t("usage.count", { count }),
@@ -435,7 +428,6 @@ export function createMemoryBrowserClient(require, styles) {
 			}, 160);
 			return () => { active = false; clearTimeout(timer); };
 		}, [controls, namespace, kind, query, includeArchived, listVersion]);
-		// 命名空间切换与条目写入都会改变索引，listVersion 变化时同步刷新占用数据。
 		React.useEffect(() => {
 			if (!namespace) { setUsage(null); return; }
 			let active = true;

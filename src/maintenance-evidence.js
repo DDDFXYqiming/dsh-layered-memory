@@ -4,11 +4,8 @@ import { hashText, readEntry } from "./store.js";
 import { parsePending, readPending, redactSecretLines } from "./memory-ops.js";
 
 const MAX_REFS = 128;
-// 一次任务要处理的条目越多，需要的来源引用越多。固定 128 会让「缺口大」的任务读到一半被迫中断，
-// 再开一轮重新扫目录、重新选题，token 全花在重建上下文上。按写入额度放大，与缺口对齐。
 const refBudgetFor = job => {
 	const writes = Number(job?.writeBudget) || 0;
-	// 下限 384：即使缺口不大，一次任务也要读几十条正文来确认能否合并，128 会在半路掐断。
 	return Math.min(1024, Math.max(384, writes * 16));
 };
 const TEXT_BUDGET = 12000;
@@ -165,8 +162,6 @@ export async function createMaintenanceEvidence(ctx, job) {
 		let value;
 		try { value = await load(ref, job.controller.signal); }
 		catch (error) {
-			// 历史条目 meta 里可能留着早期会话的引用，那些事件类型未必还能当证据用。
-			// 跳过该来源即可，不该让整轮维护因此失败；没有可用证据时模型会保守不改。
 			if (String(error?.message ?? "").includes("维护来源仅支持")) { remainingWeight -= ref.task ? 4 : 1; continue; }
 			throw error;
 		}

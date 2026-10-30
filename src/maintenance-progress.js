@@ -32,7 +32,6 @@ export function createMaintenanceProgress(namespace, revisionOf) {
 		const key = entryKey(entry);
 		if (!changes.has(key)) changes.set(key, []);
 		changes.get(key).push({ before, after, tool });
-		// The model just authored this complete version; a second read of its own write is unnecessary.
 		if (after !== null) reads.set(key, after);
 		const previous = results.get(key);
 		const result = { entry, status: "changed", reason: `${tool} 已保存`, revision: changes.get(key)[0].before ?? after, currentRevision: after,

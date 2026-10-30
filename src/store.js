@@ -1,4 +1,3 @@
-// 文件存储与条目身份。正文变更由命名空间锁串行化，索引是可重建的派生数据。
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, cpSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, basename, dirname, resolve } from "node:path";
@@ -100,7 +99,6 @@ export function rewriteFile(path, compute) {
   });
 }
 
-// 多文件提交先完整暂存；运行期提交出错时恢复旧文件，并保留原始错误。
 function commitFiles(root, changes) {
   return withNsWriteLock(root, () => {
     const staged = [];
@@ -213,7 +211,6 @@ export function parseEntryBody(kind, key, raw) {
     }
   }
   content = stripArchiveBanner(content).trim();
-  // 只剥离文件格式的尾部证据块；正文中间的引用不变。
   for (;;) {
     const marker = content.lastIndexOf("\n\n> 证据:");
     if (marker < 0 || !content.slice(marker + 2).split("\n").every(line => !line.trim() || line.startsWith(">"))) break;
@@ -247,7 +244,6 @@ function factTextWith(text, key, content) {
   lines.splice(spans[0].start, spans[0].end - spans[0].start, "## " + key, content.trim(), "");
   return lines.join("\n");
 }
-/** 内部正文写入原语。重复段的每份内容先单独保存，再合并。 */
 export function upsertFact(root, key, content) {
   assertEntryKey("fact", key);
   return withNsWriteLock(root, () => {
@@ -327,7 +323,6 @@ export function restoreEntry(root, kind, key, snapshotId) {
     const current = readEntry(root, kind, key);
     const history = current ? snapshotEntry(root, kind, key).path : "";
     const now = new Date().toISOString();
-    // 旧快照无来源时明确标未知，不能把新版本证据冒充旧版证据。
     const meta = { ...(record.meta || {}), sourceSession: record.meta?.sourceSession || null, sourceSeqs: record.meta?.sourceSeqs || [], evidence: record.meta?.evidence || "", restoredFrom: record.id, createdAt: record.meta?.createdAt || record.createdAt, updatedAt: now };
     const raw = meta.archived ? withArchiveBanner(record.raw) : stripArchiveBanner(record.raw);
     if (kind === "fact" && /^##\s+/m.test(raw)) throw new Error("Historical fact contains section headings; inspect its snapshot before restoring");
@@ -362,7 +357,6 @@ export function entryHeat(access, meta, kind, key, heat = {}) {
   const age = created ? Date.now() - Date.parse(created) : Infinity;
   return age >= 0 && age <= (heat.recencyWindowMs ?? RECENCY_WINDOW_MS) ? RECENCY_BONUS : 0;
 }
-// 真实读取才计分；同一会话同一条目只计一次，避免反复读同一条把热度刷爆。
 export function bumpAccess(root, key, { halfLifeDays = HEAT_HALF_LIFE_DAYS, sessionId = null } = {}) {
   return withNsWriteLock(root, () => {
     const access = loadAccess(root), previous = access[key];
@@ -421,8 +415,6 @@ export function backfillMeta(root, { namespace = "default", now = new Date() } =
         const file = join(root, kind === "fact" ? "facts.md" : "sops/" + key + ".md");
         const mtimeIso = new Date(Math.min(statSync(file).mtimeMs, now.getTime())).toISOString();
         if (bucket[key]) {
-          // 老条目已有 meta 但缺 createdAt：热度排序要用创建时间做新手保护与同分排序，
-          // 缺了这些条目永远拿不到新手保护。文件 mtime 是可得的最佳近似。
           if (!bucket[key].createdAt) {
             bucket[key] = { ...bucket[key], createdAt: mtimeIso };
             added.push(kind + ":" + key);
@@ -437,7 +429,6 @@ export function backfillMeta(root, { namespace = "default", now = new Date() } =
     return added;
   });
 }
-/** 定向修复库存状态：孤儿元数据保存在历史中，只给缺标记的已归档正文补横幅。 */
 export function reconcileEntries(root) {
   return withNsWriteLock(root, () => {
     const entries = readEntries(root), meta = readMeta(root);

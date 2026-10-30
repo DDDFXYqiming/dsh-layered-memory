@@ -11,9 +11,7 @@ const refOf = entry => ({ kind: entry.kind, key: entry.key });
 const now = () => new Date().toISOString();
 const fingerprint = entry => hashText(JSON.stringify([entry.title, entry.content.replace(/\s+/g, " ").trim()]));
 const emptyState = () => ({ version: 1, pressure: null, completedPressure: [], conflicts: [], ordinaryChanges: {}, baseline: {}, overLimit: false, aboveTarget: false, targetChars: null, indexChars: null, stallRounds: 0, exhausted: false });
-// 平均一个条目名在索引里约占的字符数（含分隔符），用于把「还差多少字符」换算成「还要动多少条」。
 export const CHARS_PER_ENTRY = 35;
-// 候选上限按缺口放大：缺口越大，一轮该看的条目越多，避免小步挪动永远追不上。
 export function candidateLimitFor(gapChars) {
 	const gap = Number(gapChars) || 0;
 	return Math.min(24, Math.max(REVIEW_CANDIDATE_LIMIT, Math.ceil(gap / CHARS_PER_ENTRY)));
@@ -97,9 +95,7 @@ function summary(state, workIds) {
 		ready: jobs.some(job => job.status === "pending"),
 		waiting: jobs.filter(job => job.status !== "complete").reduce((n, job) => n + (job.items || []).filter(item => item.status === "waiting_evidence").length, 0),
 		ordinaryChanges: Object.keys(state.ordinaryChanges).length,
-		// 水位线信息：目标字符、当前字符与缺口，提示词与候选数都据此决定规模。
 		aboveTarget: state.aboveTarget === true,
-		// 已到可压缩极限：缺口还在，但连续两轮几乎压不动，需要人工决定是否接受或重组条目结构。
 		exhausted: state.exhausted === true,
 		stallRounds: state.stallRounds ?? 0,
 		targetChars: state.targetChars ?? null,
@@ -121,26 +117,19 @@ export function syncReview(root, { overLimit, aboveTarget = overLimit, targetCha
 		state.indexChars = indexChars ?? null;
 		const gapChars = targetChars == null || indexChars == null ? null : Math.max(0, indexChars - targetChars);
 		const progressed = state.pressure?.items?.some(item => item.status === "changed") === true;
-		// 停滞保护：剩下的条目若已不可合并、也不该归档，续派只会无限空转。
-		// 用「上一轮起点与本轮实际字符」判断收益：收益不足 3%（且不足 40 字符）记一次停滞，连续两次就停止续派。
 		const lastJob = state.pressure?.status === "complete" ? state.pressure : state.completedPressure.at(-1);
 		const lastStart = Number(lastJob?.startChars);
 		const gain = Number.isFinite(lastStart) && indexChars != null ? lastStart - indexChars : null;
-		// 阈值按缺口算而不是按总量：缺口 1200 时一轮至少该省 60 字符（约两条），省不到就算没进展。
 		const stallFloor = Math.max(40, Math.floor((gapChars ?? 0) * 0.05));
-		// 收益为负说明期间又写了新条目，属正常增长，重置计数。
 		if (gain == null || gain <= 0) state.stallRounds = 0;
 		else state.stallRounds = gain < stallFloor ? (state.stallRounds ?? 0) + 1 : 0;
 		state.exhausted = (state.stallRounds ?? 0) >= 2;
-		// 收敛判据：作业目标是压到水位线以下，不是「不超过上限」。上一轮真的改动过条目说明还能继续收敛，直接续派；
-		// 整轮零改动才回落到日常变更门槛，避免空转烧 token。停滞到极限后不再续派。
 		if (aboveTarget && !state.exhausted && (!state.pressure || state.pressure.status === "complete" && (progressed || Object.keys(state.ordinaryChanges).length >= REVIEW_CHANGE_THRESHOLD))) {
 			if (state.pressure) state.completedPressure.push(state.pressure);
 			state.pressure = { id: randomUUID(), kind: "index_pressure", status: "pending", createdAt: now(), items: null, reviewed: [],
 				startChars: indexChars ?? null, targetChars: targetChars ?? null, gapChars,
 				...(origin?.memoryChanges.length ? { ownerSession: origin.parentSession, trigger: origin.trigger } : {}) };
 		} else if (state.pressure && state.pressure.status !== "complete" && state.pressure.items === null) {
-			// 还没选题的待办：每轮扫描把起点与缺口刷新到最新，避免用过期缺口决定候选规模。
 			state.pressure.startChars = indexChars ?? null;
 			state.pressure.targetChars = targetChars ?? null;
 			state.pressure.gapChars = gapChars;
@@ -213,7 +202,6 @@ function workView(state, entries, namespace, workIds) {
 		...job, items: job.items?.map(attach) ?? null, reviewed: job.reviewed.map(attach),
 	}));
 	const view = summary(state, workIds);
-	// 候选规模由缺口决定：缺口越大，一轮能动的条目越多，才追得上水位线。
 	return { ...view, jobs, candidateLimit: candidateLimitFor(view.gapChars ?? 0),
 		catalog: jobs.some(job => job.kind === "index_pressure" && job.items === null) ? entries.filter(entry => !entry.meta.archived).map(entry => ({ entry: { namespace, ...refOf(entry) }, title: entry.title, revision: entry.revision })) : [],
 	};

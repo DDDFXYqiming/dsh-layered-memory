@@ -1,4 +1,3 @@
-// 正式记忆写入和候选读写。正文、证据、来源和快照按同一条目身份提交。
 import { existsSync, readFileSync } from "node:fs";
 import { join, basename } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -41,11 +40,6 @@ export function detectSecret(text) {
 	return "";
 }
 
-/**
- * [0.6.9] 逐行脱敏：命中疑似密钥的行整行替换为模式标识（只留模式，不留内容）。
- * 用于 evidence/related 这类"来源摘录"字段——它们常是工具输出复制，误杀整条写入
- * 会惩罚真实证据，所以采取脱敏而非拒写；正文仍保持拒写（正文是用户自己组织的措辞）。
- */
 export function redactSecretLines(text) {
 	return String(text ?? "").split("\n").map((line) => {
 		const hit = detectSecret(line);
@@ -53,15 +47,13 @@ export function redactSecretLines(text) {
 	}).join("\n");
 }
 
-// 新关系使用类型化身份；旧字符串保持原样，读取方展示为未解析。
 export function normalizeRelatedKey(value) {
 	return typeof value === "string" ? value.trim() : entryIdentity(value.namespace, value.kind, value.key);
 }
 
 /**
- * [0.6.9] evidence 逐行引用编码：每一行都以 "> " 引用（空行用 ">"），
- * 持久化后不可能再被 facts.md 解析成 "## " 新 section。首行保留
- * "> 证据: " 前缀以兼容既有正文字体与人工阅读习惯。
+ * evidence 逐行引用编码：每一行都以 "> " 引用（空行用 ">"），
+ * 持久化后不可能再被 facts.md 解析成 "## " 新 section。
  */
 export function quoteEvidence(evidenceText) {
 	const lines = String(evidenceText ?? "").split("\n");
@@ -71,11 +63,10 @@ export function quoteEvidence(evidenceText) {
 }
 
 /**
- * topic 控制字符判据（单一来源）。[0.6.1 M4] 提取自 writeMemory：topic 会进
- * facts.md 的 ## section 与 L1 索引（再注入 system prompt），含换行/控制字符会
- * 让 section 解析错位并成为提示词注入载体。所有以 topic 为条目名的工具
- * （write/update 经 writeMemory；accept/promote/archive/expand/rollback）必须复用
- * 本校验——rollback 曾绕过它，把 "x\n## evil" 拼进 facts.md 造出幽灵 section。
+ * topic 控制字符判据（单一来源）：topic 会进 facts.md 的 ## section 与 L1 索引
+ * （再注入 system prompt），含换行/控制字符会让 section 解析错位并成为提示词注入载体。
+ * 所有以 topic 为条目名的工具（write/update 经 writeMemory；accept/promote/archive/
+ * expand/rollback）必须复用本校验。
  */
 export const TOPIC_CONTROL_CHARS = /[\n\r\u0000-\u001f\u007f]/;
 
@@ -128,7 +119,6 @@ export function writeMemory(root, {
     if (detectSecret(title)) throw new Error("Entry title contains a credential");
     if (RESERVED_ENTRY_NAMES.has(title.toLowerCase()) || (entryType === "sop" && RESERVED_ENTRY_NAMES.has(entryKey))) throw new Error("Reserved entry name: " + title);
 
-    // 接受纯正文，也规范化由已有文件复制来的包装；不会剥掉不同名的正文标题。
     const supplied = String(content ?? "").trim();
     const body = parseEntryBody(entryType, entryKey, entryType === "sop" ? "# " + title + "\n\n" + supplied : supplied).content;
     if (!body) throw new Error("Entry content must not be empty");
@@ -161,11 +151,6 @@ export function writeMemory(root, {
   });
 }
 
-/**
- * 生成 pending 候选内容。
- * [v0.5] 只为「有价值的信号」生成候选：同工具先失败后成功的重试序列（附错误/结果尾部摘要）。
- * [v0.6] autoPending 默认关闭：实测 6 天累积 108 条、消费≈0，且内容多为工具用法噪声。
- */
 export function pendingContent({ sourceSession, sourceSeqs, retries, reason }) {
 	const lines = [
 		"# Pending Memory Candidate",
@@ -191,12 +176,6 @@ export function pendingContent({ sourceSession, sourceSeqs, retries, reason }) {
 	return lines.join("\n");
 }
 
-/**
- * [0.6.1 N12] 尾部摘要的密钥消毒：autoPending 开启时错误/结果尾部会原样进
- * pending/*.md 落盘；若工具错误回显了凭证，此前要到 accept 侧才被 detectSecret 拦
- * （已持久化）。与「宁可响亮拒写，也不让凭证明文进记忆库」同标准——落盘前过同一个
- * detectSecret，命中即整段替换为 [redacted:<pattern>]（只留模式标识，不留内容）。
- */
 function redactSecretTail(text) {
 	const s = String(text ?? "");
 	const hit = detectSecret(s);

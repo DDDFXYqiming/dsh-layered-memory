@@ -50,7 +50,6 @@ if (existsSync(bundled)) {
 		throw new Error("状态依赖目录已有其他包，拒绝覆盖");
 	}
 }
-// 独立文件让 npm pack 避免生成部分 pnpm 安装器会解为空文件的 tar 硬链接。
 for (const directory of [output, bundled]) {
 	try {
 		for (const [name, content] of artifacts) {

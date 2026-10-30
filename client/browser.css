@@ -20,7 +20,6 @@
 .lm-browser-namespace { flex: 0 1 220px; min-width: 150px; }
 .lm-browser-input { width: 100%; height: 36px; border: .5px solid var(--dsw-alias-border-l3); border-radius: 12px; outline: none; padding: 0 10px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); font: inherit; }
 .lm-browser-input:focus { border-color: var(--dsw-alias-state-business-primary); }
-/* 官方 Menu 下拉触发器：与工具栏其它控件同高同圆角，按钮内容左值右箭头 */
 .lm-browser-select-trigger.lm-browser-select-trigger { width: 100%; height: 36px; justify-content: space-between; gap: 8px; padding: 0 10px; border-radius: 12px; border: .5px solid var(--dsw-alias-border-l3); color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); font: inherit; font-weight: 400; }
 .lm-browser-select-trigger.lm-browser-select-trigger:hover { border-color: var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-base); }
 .lm-browser-select-trigger.lm-browser-select-trigger[aria-expanded="true"] { border-color: var(--dsw-alias-state-business-primary); }
@@ -42,7 +41,6 @@
 .lm-browser-filter-tab.is-active { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); }
 .lm-browser-archived-toggle { display: inline-flex; align-items: center; gap: 8px; flex: none; color: var(--dsw-alias-label-secondary); font-size: 13px; cursor: pointer; }
 .lm-browser-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin: 0 clamp(24px, 4vw, 48px) 12px; }
-/* 索引占用：常态只有一行总览，点击展开分段明细；不设卡片容器，跟随页面留白与字号 */
 .lm-browser-usage { flex: none; padding: 0 clamp(24px, 4vw, 48px) 12px; }
 .lm-usage-summary { box-sizing: border-box; display: flex; align-items: center; gap: 10px; width: calc(100% + 16px); margin: 0 -8px; padding: 4px 8px; background: 0 0; border: 0; border-radius: var(--dsw-radius-sm); color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .lm-usage-summary:hover, .lm-usage-summary[aria-expanded="true"] { background: var(--dsw-alias-interactive-bg-hover); }

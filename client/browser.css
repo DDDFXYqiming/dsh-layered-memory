@@ -42,6 +42,25 @@
 .lm-browser-filter-tab.is-active { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); }
 .lm-browser-archived-toggle { display: inline-flex; align-items: center; gap: 8px; flex: none; color: var(--dsw-alias-label-secondary); font-size: 13px; cursor: pointer; }
 .lm-browser-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin: 0 clamp(24px, 4vw, 48px) 12px; }
+/* 索引占用：常驻卡片，沿用官方「上下文已用」组件的排版、堆叠进度条与图例小方块 */
+.lm-browser-usage { flex: none; display: flex; padding: 0 clamp(24px, 4vw, 48px) 12px; }
+.lm-usage-card { box-sizing: border-box; width: min(340px, 100%); padding: 12px; border-radius: var(--dsw-radius-lg); background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 20px; --dsw-elevation-stroke-color: var(--dsw-alias-border-l1); box-shadow: var(--dsw-elevation-prominent); }
+.lm-usage-header { display: flex; align-items: center; gap: 6px; }
+.lm-usage-headline { color: var(--dsw-alias-label-tertiary); }
+.lm-usage-percent { color: var(--dsw-alias-label-primary); font-weight: 500; font-variant-numeric: tabular-nums; }
+.lm-usage-figures { margin-left: auto; color: var(--dsw-alias-label-primary); font-weight: 500; font-variant-numeric: tabular-nums; }
+.lm-usage-over { margin: 6px 0 0; color: var(--dsw-alias-state-error-primary); font-size: 12px; line-height: 18px; }
+.lm-usage-bar { display: flex; gap: 1px; height: 4px; margin: 10px 0 12px; overflow: hidden; border-radius: 999px; background: var(--dsw-alias-interactive-bg-hover); corner-shape: round; }
+.lm-usage-segment { flex: none; min-width: 2px; height: 100%; border-radius: 1px; background: var(--meter-tint, var(--dsw-alias-label-tertiary)); }
+.lm-usage-color-note { --meter-tint: var(--dsw-static-neutral-bluish-400); }
+.lm-usage-color-rules { --meter-tint: var(--dsw-static-violet-400); }
+.lm-usage-color-facts { --meter-tint: var(--dsw-static-blue-450); }
+.lm-usage-color-episodes { --meter-tint: var(--dsw-static-amber-400); }
+.lm-usage-legend { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 16px; }
+.lm-usage-legend-item { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.lm-usage-swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--meter-tint); vertical-align: baseline; }
+.lm-usage-legend-label { color: var(--dsw-alias-label-secondary); }
+.lm-usage-legend-chars { margin-left: auto; color: var(--dsw-alias-label-primary); font-variant-numeric: tabular-nums; }
 .lm-browser-body { display: flex; flex: 1; min-width: 0; min-height: 0; border-top: .5px solid var(--dsw-alias-border-l3); }
 .lm-browser-list-pane { flex: 0 0 39%; min-width: 260px; min-height: 0; overflow: auto; padding: 14px clamp(16px, 2.5vw, 32px) 32px; scrollbar-gutter: stable; --dsh-scrollbar-width: 9px; --dsh-scrollbar-thumb-border: 2px; }
 .lm-browser-list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }

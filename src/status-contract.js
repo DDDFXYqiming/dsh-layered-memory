@@ -162,6 +162,28 @@ function parseNamespaces(value) {
 	}
 	return value;
 }
+function parseNamespaceInput(value) {
+	inputObject(value, ["namespace"]);
+	text(value.namespace);
+	return value;
+}
+// 容错解析：缺字段或类型不符按 0 处理，避免旧服务端数据让整个面板报错。
+function parseNamespaceStats(value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("索引占用统计必须是对象");
+	const chars = key => (Number.isSafeInteger(value[key]) && value[key] >= 0 ? value[key] : 0);
+	return {
+		namespace: typeof value.namespace === "string" ? value.namespace : "",
+		indexChars: chars("indexChars"),
+		budgetChars: chars("budgetChars"),
+		headChars: chars("headChars"),
+		rulesChars: chars("rulesChars"),
+		factsChars: chars("factsChars"),
+		sopsChars: chars("sopsChars"),
+		rulesLines: chars("rulesLines"),
+		factCount: chars("factCount"),
+		sopCount: chars("sopCount"),
+	};
+}
 function parseEntries(value) {
 	if (!Array.isArray(value)) throw new TypeError("记忆列表必须是数组");
 	for (const row of value) {
@@ -241,6 +263,7 @@ export const STORE_REMOTE = {
 	package: STATUS_PACKAGE,
 	descriptors: [
 		storeDescriptor("listNamespaces", parseNamespaces),
+		storeDescriptor("namespaceStats", parseNamespaceStats, parseNamespaceInput),
 		storeDescriptor("listEntries", parseEntries, parseListEntriesInput),
 		storeDescriptor("readEntry", parseReadEntry, parseEntryInput),
 		storeDescriptor("createEntry", parseCreatedEntry, parseCreateInput),

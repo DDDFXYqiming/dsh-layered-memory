@@ -13,12 +13,32 @@ export function readIndex(root) {
 	return existsSync(path) ? migrateIndexPolicy(readFileSync(path, "utf8")) : "";
 }
 export function indexChars(text) { return text.replace(/\r\n?/g, "\n").trimEnd().length; }
-function sections(text) {
+export function sections(text) {
 	const begin = text.indexOf(AUTO_BEGIN), end = text.indexOf(AUTO_END);
 	if (begin < 0 || end < begin) return { head: "", auto: "", rules: text.trim() };
 	return { head: text.slice(0, begin).trim(), auto: text.slice(begin + AUTO_BEGIN.length, end).trim(), rules: text.slice(end + AUTO_END.length).trim() };
 }
 export function readRules(root) { return sections(readIndex(root)).rules; }
+
+// 索引占用统计：按 AUTO 标记与 [RULES] 标记切分；头部说明、规则、L2、L3 四段合计覆盖 index.txt 全文。
+export function indexStats(root, budgetChars = L1_MAX_CHARS_DEFAULT) {
+	const text = readIndex(root);
+	const { head, auto, rules } = sections(text);
+	const autoLines = auto ? auto.split("\n") : [];
+	const factsLine = autoLines.find(line => line.startsWith("[L2]")) || "";
+	const sopsLine = autoLines.find(line => line.startsWith("[L3]")) || "";
+	return {
+		indexChars: indexChars(text),
+		budgetChars: Math.max(0, Math.floor(budgetChars)),
+		headChars: head.length,
+		rulesChars: rules.length,
+		factsChars: factsLine.length,
+		sopsChars: sopsLine.length,
+		rulesLines: rules ? rules.split("\n").length : 0,
+		factCount: layerNames(auto, "L2").length,
+		sopCount: layerNames(auto, "L3").length,
+	};
+}
 export function buildAutoLines(facts, sops) {
 	return [`[L2] ${facts.join(" | ") || "（空）"}`, `[L3] ${sops.map(key => `sops/${key}.md`).join(" | ") || "（空）"}`];
 }
@@ -209,12 +229,12 @@ export function buildPromptIndex(indexText, maxChars = L1_MAX_CHARS_DEFAULT, nam
 export function buildCombinedPromptIndex(memoryDir, namespace, { projectMaxChars = L1_MAX_CHARS_DEFAULT, globalMaxChars = GLOBAL_L1_MAX_CHARS_DEFAULT, forNamespace } = {}) {
 	const current = safeNs(namespace);
 	const budgets = current === "default" ? [["default", globalMaxChars]] : [["default", globalMaxChars], [current, projectMaxChars]];
-	const sections = budgets.map(([ns, cap]) => {
+	const blocks = budgets.map(([ns, cap]) => {
 		const full = readIndex(nsRoot(memoryDir, ns));
 		const heading = `记忆空间 [${ns}]\n`;
 		const options = typeof forNamespace === "function" ? (forNamespace(ns) || {}) : {};
 		const text = full ? heading + buildPromptIndex(full, cap - heading.length, ns, options) : "";
 		return { namespace: ns, text, totalChars: full.length, shownChars: text.length, maxChars: cap, overLimit: full.length + heading.length > cap };
 	}).filter(section => section.text);
-	return { text: sections.map(section => section.text).join("\n\n"), sections };
+	return { text: blocks.map(section => section.text).join("\n\n"), sections: blocks };
 }

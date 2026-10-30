@@ -61,6 +61,7 @@ class MemoryStatus extends Service {
 		return value;
 	}
 	async listNamespaces(signal) { return this.callStore("listNamespaces", [], signal); }
+	async namespaceStats(args, signal) { return this.callStore("namespaceStats", [args], signal); }
 	async listEntries(args, signal) { return this.callStore("listEntries", [args], signal); }
 	async readEntry(args, signal) { return this.callStore("readEntry", [args], signal); }
 	async createEntry(args, signal) { return this.callStore("createEntry", [args], signal); }

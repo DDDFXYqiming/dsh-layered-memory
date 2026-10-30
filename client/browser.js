@@ -18,6 +18,8 @@ export function createMemoryBrowserClient(require, styles) {
 			topicPlaceholder: "输入条目标题", contentPlaceholder: "输入记忆正文", evidencePlaceholder: "输入本次写入的证据", create: "创建", creating: "创建中…",
 			created: "条目已创建", close: "关闭", createdAt: "创建时间", updatedAt: "更新时间", characters: "{count} 字符",
 			listFailed: "条目列表读取失败", detailFailed: "条目详情读取失败", historyFailed: "历史快照读取失败", noNamespace: "暂无可用命名空间",
+			"usage.used": "索引已用", "usage.total": "{used} / {budget} 字符", "usage.note": "说明", "usage.rules": "规则", "usage.facts": "事实目录",
+			"usage.episodes": "经验目录", "usage.chars": "{count} 字符", "usage.over": "已超注入预算，较早条目不会进入提示词",
 		},
 		en: {
 			title: "Memory", newEntry: "New entry", namespace: "Namespace", search: "Search memory", searchPlaceholder: "Search titles or content", clearSearch: "Clear search",
@@ -29,6 +31,8 @@ export function createMemoryBrowserClient(require, styles) {
 			topicPlaceholder: "Enter an entry title", contentPlaceholder: "Enter memory content", evidencePlaceholder: "Enter evidence for this write", create: "Create", creating: "Creating…",
 			created: "Entry created", close: "Close", createdAt: "Created", updatedAt: "Updated", characters: "{count} characters",
 			listFailed: "Could not load entries", detailFailed: "Could not load entry details", historyFailed: "Could not load history", noNamespace: "No namespaces available",
+			"usage.used": "Index used", "usage.total": "{used} / {budget} chars", "usage.note": "Notes", "usage.rules": "Rules", "usage.facts": "Facts",
+			"usage.episodes": "Episodes", "usage.chars": "{count} chars", "usage.over": "Over the injection budget; older entries stay out of the prompt",
 		},
 	};
 	async function resultValue(request) {
@@ -43,6 +47,14 @@ export function createMemoryBrowserClient(require, styles) {
 		const lang = (typeof document !== "undefined" && document.documentElement.lang) || "zh-CN";
 		return new Date(value).toLocaleString(lang, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 	};
+	// 字符数紧凑写法：9003 → 9.0K，12288 → 12.3K，120000 → 120K
+	function compactChars(value) {
+		const number = Number(value);
+		if (!Number.isFinite(number) || number <= 0) return "0";
+		if (number < 1000) return String(Math.round(number));
+		const scaled = number / 1000;
+		return (scaled >= 100 ? String(Math.round(scaled)) : scaled.toFixed(1)) + "K";
+	}
 	// 极简 Markdown → React 元素，零依赖，覆盖标题/粗斜体/行内代码/列表/链接/引用/分隔线
 	function renderInline(text, keyPrefix) {
 		const parts = [];
@@ -181,6 +193,34 @@ export function createMemoryBrowserClient(require, styles) {
 					h(Field, { label: t("evidence") }, h(Input, { value: form.evidence, placeholder: t("evidencePlaceholder"), disabled: busy, onChange: event => update("evidence", event.target.value) })),
 					h("div", { className: "lm-browser-modal-actions" }, h(Button, { variant: "outline", type: "button", disabled: busy, onClick: onClose }, t("cancel")), h(Button, { variant: "primary", type: "submit", disabled: busy || !form.namespace }, busy ? t("creating") : t("create"))))));
 	}
+	// 索引占用：已用字符 / 生效注入预算 + 说明、规则、事实目录、经验目录四段构成
+	function IndexUsage({ stats, t }) {
+		const used = Number(stats?.indexChars) || 0;
+		const budget = Number(stats?.budgetChars) || 0;
+		// 取数失败或索引为空时整块不渲染。
+		if (!stats || used <= 0 || budget <= 0) return null;
+		const percent = Math.round((used / budget) * 100);
+		const parts = [
+			["note", t("usage.note"), Number(stats.headChars) || 0],
+			["rules", t("usage.rules"), Number(stats.rulesChars) || 0],
+			["facts", t("usage.facts"), Number(stats.factsChars) || 0],
+			["episodes", t("usage.episodes"), Number(stats.sopsChars) || 0],
+		];
+		return h("div", { className: "lm-browser-usage" },
+			h("div", { className: "lm-usage-card" },
+				h("div", { className: "lm-usage-header" },
+					h("span", { className: "lm-usage-headline" }, t("usage.used")),
+					h("span", { className: "lm-usage-percent" }, percent + "%"),
+					h("span", { className: "lm-usage-figures" }, "~" + t("usage.total", { used: compactChars(used), budget: compactChars(budget) }))),
+				percent > 100 ? h("p", { className: "lm-usage-over", role: "status" }, t("usage.over")) : null,
+				h("div", { className: "lm-usage-bar", "aria-hidden": "true" },
+					parts.map(([kind, , value]) => h("span", { key: kind, className: "lm-usage-segment lm-usage-color-" + kind, style: { width: (percent * value / used) + "%" } }))),
+				h("div", { className: "lm-usage-legend" },
+					parts.map(([kind, label, value]) => h("span", { key: kind, className: "lm-usage-legend-item" },
+						h("span", { className: "lm-usage-swatch lm-usage-color-" + kind, "aria-hidden": "true" }),
+						h("span", { className: "lm-usage-legend-label" }, label),
+						h("span", { className: "lm-usage-legend-chars" }, "~" + t("usage.chars", { count: compactChars(value) })))))));
+	}
 	function MemoryBrowserPage({ controls, t }) {
 		const [namespaces, setNamespaces] = React.useState([]);
 		const [namespace, setNamespace] = React.useState(null);
@@ -191,6 +231,7 @@ export function createMemoryBrowserClient(require, styles) {
 		const [kind, setKind] = React.useState("");
 		const [includeArchived, setIncludeArchived] = React.useState(false);
 		const [entries, setEntries] = React.useState([]);
+		const [usage, setUsage] = React.useState(null);
 		const [listBusy, setListBusy] = React.useState(false);
 		const [listError, setListError] = React.useState(null);
 		const [selectedId, setSelectedId] = React.useState(null);
@@ -263,6 +304,16 @@ export function createMemoryBrowserClient(require, styles) {
 			}, 160);
 			return () => { active = false; clearTimeout(timer); };
 		}, [controls, namespace, kind, query, includeArchived, listVersion]);
+		// 命名空间切换与条目写入都会改变索引，listVersion 变化时同步刷新占用数据。
+		React.useEffect(() => {
+			if (!namespace) { setUsage(null); return; }
+			let active = true;
+			controls.namespaceStats({ namespace }).then(value => {
+				if (!active) return;
+				setUsage(value);
+			}).catch(() => { if (active) setUsage(null); });
+			return () => { active = false; };
+		}, [controls, namespace, listVersion]);
 		React.useEffect(() => {
 			const request = ++detailRequest.current;
 			const selected = entries.find(row => identity(row.entry) === selectedId);
@@ -407,6 +458,7 @@ export function createMemoryBrowserClient(require, styles) {
 				h("div", { className: "lm-browser-search" }, h(Input, { type: "search", icon: h(IconSearchOutlineRegular, { size: 14 }), "aria-label": t("search"), placeholder: t("searchPlaceholder"), value: query, onChange: event => setQuery(event.target.value) }), query ? h(Button, { variant: "ghost", size: "sm", className: "lm-browser-search-clear", "aria-label": t("clearSearch"), onClick: () => setQuery("") }, h(IconCloseOutlineRegular, { size: 14 })) : null),
 				h("div", { className: "lm-browser-filter-tabs", role: "group", "aria-label": "kind" }, [["", t("all")], ["fact", "fact"], ["sop", "sop"]].map(([value, label]) => h("button", { key: value || "all", type: "button", className: "lm-browser-filter-tab" + (kind === value ? " is-active" : ""), "aria-pressed": kind === value, onClick: () => setKind(value) }, label))),
 				h("label", { className: "lm-browser-archived-toggle" }, h(Switch, { checked: includeArchived, label: t("showArchived"), onChange: next => setIncludeArchived(next) }), h("span", { "aria-hidden": "true" }, t("showArchived")))),
+			h(IndexUsage, { stats: usage, t }),
 			namespaceError ? h("div", { className: "lm-browser-error lm-browser-banner", role: "alert" }, h("span", null, namespaceError), h(Button, { variant: "outline", size: "sm", onClick: () => setNamespaceVersion(value => value + 1) }, t("reload"))) : null,
 			h("div", { className: "lm-browser-body" },
 				h("section", { className: "lm-browser-list-pane", "aria-label": t("entries") },
@@ -452,6 +504,7 @@ export function createMemoryBrowserClient(require, styles) {
 				scope.effect(() => scope.locale.register(locale, dictionaries), "memory-browser: locale");
 				const controls = {
 					listNamespaces: () => resultValue(scope.remote.layeredMemoryStatus.listNamespaces()),
+					namespaceStats: request => resultValue(scope.remote.layeredMemoryStatus.namespaceStats(request)),
 					listEntries: request => resultValue(scope.remote.layeredMemoryStatus.listEntries(request)),
 					readEntry: request => resultValue(scope.remote.layeredMemoryStatus.readEntry(request)),
 					createEntry: request => resultValue(scope.remote.layeredMemoryStatus.createEntry(request)),

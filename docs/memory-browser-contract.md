@@ -11,7 +11,7 @@
   - 服务端通道 src/status.js、src/status-contract.js，存储操作 src/store-service.js
   - 索引切分与统计 src/l1index.js
 - 构建：node scripts/build.mjs，把 src/status.js、src/status-contract.js、client/status.js、client/browser.js、client/status.css、client/browser.css 组装进 lib/status/
-- 当前版本 0.10.0-preview.29
+- 当前版本 0.10.0
 
 ## 服务端 → 前端数据通道
 

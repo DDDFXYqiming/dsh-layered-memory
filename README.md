@@ -77,6 +77,8 @@ The “Index used” line under the toolbar reports how much of the L1 index is 
 
 The bundle also ships a separate Memory status component. Its line at the bottom of the Web composer shows the current session's review progress, the number of real changes or the reason the last run did not finish; clicking it opens run records and read-only history.
 
+![Memory status line in the composer](docs/images/memory-status.png)
+
 ## Configuration
 
 ```yaml

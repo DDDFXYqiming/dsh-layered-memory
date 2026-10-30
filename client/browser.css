@@ -64,7 +64,7 @@
 .lm-usage-legend-wrap.is-dim { opacity: .4; }
 .lm-usage-legend-item { display: inline-flex; align-items: center; gap: 5px; cursor: default; }
 .lm-usage-swatch { display: inline-block; width: 7px; height: 7px; border-radius: 2px; background: var(--meter-tint); }
-.lm-usage-legend-label { color: var(--dsw-alias-label-secondary); font-family: var(--dsh-font-family-mono); font-size: 12px; }
+.lm-usage-legend-label { color: var(--dsw-alias-label-secondary); }
 .lm-usage-legend-chars { color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }
 .lm-usage-over { margin: 6px 0 0; color: var(--dsw-alias-state-error-primary); font-size: 12px; line-height: 18px; }
 .lm-usage-color-note { --meter-tint: var(--dsw-static-neutral-bluish-400); }

@@ -20,6 +20,7 @@ export function createMemoryBrowserClient(require, styles) {
 			listFailed: "条目列表读取失败", detailFailed: "条目详情读取失败", historyFailed: "历史快照读取失败", noNamespace: "暂无可用命名空间",
 			"usage.used": "索引已用", "usage.total": "{used} / {budget} 字符", "usage.over": "已超注入预算，较早条目不会进入提示词",
 			"usage.count": "{count} 条", "usage.share": "占已用 {share}%",
+			"usage.label.head": "说明", "usage.label.rules": "规则", "usage.label.facts": "事实目录", "usage.label.sops": "经验目录",
 			"usage.tip.head": "索引头部说明", "usage.tip.rules": "L0 红线规则", "usage.tip.facts": "事实条目目录（facts.md）", "usage.tip.sops": "任务经验目录（sops/）",
 		},
 		en: {
@@ -34,6 +35,7 @@ export function createMemoryBrowserClient(require, styles) {
 			listFailed: "Could not load entries", detailFailed: "Could not load entry details", historyFailed: "Could not load history", noNamespace: "No namespaces available",
 			"usage.used": "Index used", "usage.total": "{used} / {budget} chars", "usage.over": "Over the injection budget; older entries stay out of the prompt",
 			"usage.count": "{count} entries", "usage.share": "{share}% of used",
+			"usage.label.head": "Header", "usage.label.rules": "Rules", "usage.label.facts": "Facts", "usage.label.sops": "Skills",
 			"usage.tip.head": "Index header", "usage.tip.rules": "L0 red-line rules", "usage.tip.facts": "Fact entries (facts.md)", "usage.tip.sops": "Skill entries (sops/)",
 		},
 	};
@@ -206,10 +208,10 @@ export function createMemoryBrowserClient(require, styles) {
 		const percent = Math.round((used / budget) * 100);
 		const over = percent > 100;
 		const parts = [
-			["head", "head", Number(stats.headChars) || 0, null],
-			["rules", "rules", Number(stats.rulesChars) || 0, null],
-			["facts", "facts", Number(stats.factsChars) || 0, Number(stats.factCount) || 0],
-			["sops", "sops", Number(stats.sopsChars) || 0, Number(stats.sopCount) || 0],
+			["head", t("usage.label.head"), Number(stats.headChars) || 0, null],
+			["rules", t("usage.label.rules"), Number(stats.rulesChars) || 0, null],
+			["facts", t("usage.label.facts"), Number(stats.factsChars) || 0, Number(stats.factCount) || 0],
+			["sops", t("usage.label.sops"), Number(stats.sopsChars) || 0, Number(stats.sopCount) || 0],
 		];
 		const dimmed = kind => hovered !== null && hovered !== kind;
 		// 气泡文案：术语含义 + 条目数（facts/sops）+ 占已用比例。

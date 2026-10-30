@@ -2,11 +2,6 @@
 
 All notable changes to `@dsh-external/dsh-layered-memory` are documented here.
 
-## [0.10.0-preview.22] - 2026-10-30
-
-- 记忆管理页新增「索引占用」常驻卡片：显示 L1 注入预算的占用百分比与「~已用 / 预算 字符」，并按说明、规则、事实目录、经验目录四段拆解占用字符数；样式沿用官方「上下文已用」组件的排版、堆叠进度条与图例小方块，配色走官方设计令牌。
-- 服务端新增 namespaceStats 远程方法：按命名空间返回 index.txt 字符数、生效注入预算（default 空间用 globalL1MaxChars、项目空间用 l1MaxChars）与四段字符数。
-
 ## [0.10.0-preview.21] - 2026-10-29
 
 - 旧条目补齐 createdAt：早于该字段的存量条目在加载时按文件 mtime 回填，使它们也能参与新手保护与同分排序，不再恒排在最后。

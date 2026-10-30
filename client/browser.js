@@ -19,7 +19,7 @@ export function createMemoryBrowserClient(require, styles) {
 			created: "条目已创建", close: "关闭", createdAt: "创建时间", updatedAt: "更新时间", characters: "{count} 字符",
 			listFailed: "条目列表读取失败", detailFailed: "条目详情读取失败", historyFailed: "历史快照读取失败", noNamespace: "暂无可用命名空间",
 			"usage.used": "索引已用", "usage.total": "{used} / {budget} 字符", "usage.note": "说明", "usage.rules": "规则", "usage.facts": "事实目录",
-			"usage.episodes": "经验目录", "usage.chars": "{count} 字符", "usage.over": "已超注入预算，较早条目不会进入提示词",
+			"usage.episodes": "经验目录", "usage.over": "已超注入预算，较早条目不会进入提示词", "usage.hint": "统计每轮注入系统提示词的 L1 记忆索引；超出预算时较早条目不会进入提示词。",
 		},
 		en: {
 			title: "Memory", newEntry: "New entry", namespace: "Namespace", search: "Search memory", searchPlaceholder: "Search titles or content", clearSearch: "Clear search",
@@ -32,7 +32,7 @@ export function createMemoryBrowserClient(require, styles) {
 			created: "Entry created", close: "Close", createdAt: "Created", updatedAt: "Updated", characters: "{count} characters",
 			listFailed: "Could not load entries", detailFailed: "Could not load entry details", historyFailed: "Could not load history", noNamespace: "No namespaces available",
 			"usage.used": "Index used", "usage.total": "{used} / {budget} chars", "usage.note": "Notes", "usage.rules": "Rules", "usage.facts": "Facts",
-			"usage.episodes": "Episodes", "usage.chars": "{count} chars", "usage.over": "Over the injection budget; older entries stay out of the prompt",
+			"usage.episodes": "Episodes", "usage.over": "Over the injection budget; older entries stay out of the prompt", "usage.hint": "L1 memory index injected into the system prompt each turn; over budget, older entries stay out.",
 		},
 	};
 	async function resultValue(request) {
@@ -193,33 +193,54 @@ export function createMemoryBrowserClient(require, styles) {
 					h(Field, { label: t("evidence") }, h(Input, { value: form.evidence, placeholder: t("evidencePlaceholder"), disabled: busy, onChange: event => update("evidence", event.target.value) })),
 					h("div", { className: "lm-browser-modal-actions" }, h(Button, { variant: "outline", type: "button", disabled: busy, onClick: onClose }, t("cancel")), h(Button, { variant: "primary", type: "submit", disabled: busy || !form.namespace }, busy ? t("creating") : t("create"))))));
 	}
-	// 索引占用：已用字符 / 生效注入预算 + 说明、规则、事实目录、经验目录四段构成
+	// 索引占用：常态只占一行（总览），点击后展开分段明细；分段悬停高亮同色进度段。
 	function IndexUsage({ stats, t }) {
+		const [open, setOpen] = React.useState(false);
+		const [hovered, setHovered] = React.useState(null);
 		const used = Number(stats?.indexChars) || 0;
 		const budget = Number(stats?.budgetChars) || 0;
-		// 取数失败或索引为空时整块不渲染。
+		// 取数失败或索引为空时不渲染。
 		if (!stats || used <= 0 || budget <= 0) return null;
 		const percent = Math.round((used / budget) * 100);
+		const over = percent > 100;
 		const parts = [
 			["note", t("usage.note"), Number(stats.headChars) || 0],
 			["rules", t("usage.rules"), Number(stats.rulesChars) || 0],
 			["facts", t("usage.facts"), Number(stats.factsChars) || 0],
 			["episodes", t("usage.episodes"), Number(stats.sopsChars) || 0],
 		];
-		return h("div", { className: "lm-browser-usage" },
-			h("div", { className: "lm-usage-card" },
-				h("div", { className: "lm-usage-header" },
-					h("span", { className: "lm-usage-headline" }, t("usage.used")),
-					h("span", { className: "lm-usage-percent" }, percent + "%"),
-					h("span", { className: "lm-usage-figures" }, "~" + t("usage.total", { used: compactChars(used), budget: compactChars(budget) }))),
-				percent > 100 ? h("p", { className: "lm-usage-over", role: "status" }, t("usage.over")) : null,
-				h("div", { className: "lm-usage-bar", "aria-hidden": "true" },
-					parts.map(([kind, , value]) => h("span", { key: kind, className: "lm-usage-segment lm-usage-color-" + kind, style: { width: (percent * value / used) + "%" } }))),
-				h("div", { className: "lm-usage-legend" },
-					parts.map(([kind, label, value]) => h("span", { key: kind, className: "lm-usage-legend-item" },
-						h("span", { className: "lm-usage-swatch lm-usage-color-" + kind, "aria-hidden": "true" }),
-						h("span", { className: "lm-usage-legend-label" }, label),
-						h("span", { className: "lm-usage-legend-chars" }, "~" + t("usage.chars", { count: compactChars(value) })))))));
+		const dimmed = kind => hovered !== null && hovered !== kind;
+		return h("div", { className: "lm-browser-usage" + (open ? " is-open" : "") },
+			h("button", {
+				type: "button", className: "lm-usage-summary",
+				"aria-expanded": open, "aria-controls": "lm-usage-detail",
+				onClick: () => setOpen(!open),
+			},
+				h("span", { className: "lm-usage-label" }, t("usage.used")),
+				h("span", { className: "lm-usage-percent" + (over ? " is-over" : "") }, percent + "%"),
+				h("span", { className: "lm-usage-bar", "aria-hidden": "true" },
+					parts.map(([kind, , value]) => h("span", {
+						key: kind,
+						className: "lm-usage-segment lm-usage-color-" + kind + (dimmed(kind) ? " is-dim" : ""),
+						style: { width: (percent * value / used) + "%" },
+					}))),
+				h("span", { className: "lm-usage-figures" }, "~" + t("usage.total", { used: compactChars(used), budget: compactChars(budget) })),
+				h(IconChevronDownOutlineRegular, { size: 12, className: "lm-usage-chevron" })),
+			h("div", { className: "lm-usage-detail", id: "lm-usage-detail", "aria-hidden": open ? undefined : "true" },
+				h("div", { className: "lm-usage-detail-inner" },
+					h("div", { className: "lm-usage-legend" },
+						parts.map(([kind, label, value]) => h("span", {
+							key: kind,
+							className: "lm-usage-legend-item" + (dimmed(kind) ? " is-dim" : ""),
+							onMouseEnter: () => setHovered(kind),
+							onMouseLeave: () => setHovered(null),
+						},
+							h("span", { className: "lm-usage-swatch lm-usage-color-" + kind, "aria-hidden": "true" }),
+							h("span", { className: "lm-usage-legend-label" }, label),
+							h("span", { className: "lm-usage-legend-chars" }, compactChars(value)),
+							h("span", { className: "lm-usage-legend-share" }, Math.round((value / used) * 100) + "%")))),
+					over ? h("p", { className: "lm-usage-over", role: "status" }, t("usage.over")) : null,
+					h("p", { className: "lm-usage-hint" }, t("usage.hint")))));
 	}
 	function MemoryBrowserPage({ controls, t }) {
 		const [namespaces, setNamespaces] = React.useState([]);

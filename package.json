@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-layered-memory",
-  "version": "0.10.0-preview.22",
+  "version": "0.10.0-preview.23",
   "description": "DSH 跨会话记忆：项目与全局视图、结构化条目标识、证据溯源、可恢复历史及按需维护。",
   "type": "module",
   "main": "lib/index.js",

@@ -67,7 +67,7 @@
 .lm-usage-legend-label { color: var(--dsw-alias-label-secondary); }
 .lm-usage-legend-chars { color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }
 .lm-usage-over { margin: 6px 0 0; color: var(--dsw-alias-state-error-primary); font-size: 12px; line-height: 18px; }
-.lm-usage-color-note { --meter-tint: var(--dsw-static-neutral-bluish-400); }
+.lm-usage-color-head { --meter-tint: var(--dsw-static-neutral-bluish-400); }
 .lm-usage-color-rules { --meter-tint: var(--dsw-static-violet-400); }
 .lm-usage-color-facts { --meter-tint: var(--dsw-static-blue-450); }
 .lm-usage-color-sops { --meter-tint: #b78535; }

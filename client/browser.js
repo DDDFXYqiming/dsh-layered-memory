@@ -545,7 +545,7 @@ export function createMemoryBrowserClient(require, styles) {
 					rollbackEntry: request => resultValue(scope.remote.layeredMemoryStatus.rollbackEntry(request)),
 				};
 				scope.slots.inject("main", () => scope.slots.register({ name: "main", key: "layered-memory", locale, inject: () => ({ controls }) }, MemoryBrowserPage));
-				scope.slots.inject("sidebar.panellist", () => scope.slots.register({ name: "sidebar.panellist", id: "layered-memory", order: 20, locale, label: () => "记忆" }, MemoryBrowserIcon));
+				scope.slots.inject("sidebar.panellist", () => scope.slots.register({ name: "sidebar.panellist", id: "layered-memory", order: 20, locale, label: () => scope.locale.translate(locale, "title") }, MemoryBrowserIcon));
 			});
 			try { await ui; }
 			catch (error) { await ui.dispose(); throw error; }

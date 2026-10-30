@@ -1,7 +1,7 @@
 export function createMemoryBrowserClient(require, styles) {
 	const React = require("react");
 	const {
-		Button, Input, Menu, MenuItemButton, Switch,
+		Button, Input, Menu, MenuItemButton, Switch, Tooltip,
 		IconPlusOutlineRegular, IconSearchOutlineRegular, IconCloseOutlineRegular,
 		IconChevronDownOutlineRegular, IconCheckOutlineRegular,
 	} = require("@deepseek-ai/dsh-client-ui-primitives");
@@ -18,8 +18,9 @@ export function createMemoryBrowserClient(require, styles) {
 			topicPlaceholder: "输入条目标题", contentPlaceholder: "输入记忆正文", evidencePlaceholder: "输入本次写入的证据", create: "创建", creating: "创建中…",
 			created: "条目已创建", close: "关闭", createdAt: "创建时间", updatedAt: "更新时间", characters: "{count} 字符",
 			listFailed: "条目列表读取失败", detailFailed: "条目详情读取失败", historyFailed: "历史快照读取失败", noNamespace: "暂无可用命名空间",
-			"usage.used": "索引已用", "usage.total": "{used} / {budget} 字符", "usage.note": "说明", "usage.rules": "规则", "usage.facts": "事实目录",
-			"usage.episodes": "经验目录", "usage.over": "已超注入预算，较早条目不会进入提示词", "usage.hint": "统计每轮注入系统提示词的 L1 记忆索引；超出预算时较早条目不会进入提示词。",
+			"usage.used": "索引已用", "usage.total": "{used} / {budget} 字符", "usage.over": "已超注入预算，较早条目不会进入提示词",
+			"usage.count": "{count} 条", "usage.share": "占已用 {share}%",
+			"usage.tip.head": "索引头部说明", "usage.tip.rules": "L0 红线规则", "usage.tip.facts": "事实条目目录（facts.md）", "usage.tip.sops": "任务经验目录（sops/）",
 		},
 		en: {
 			title: "Memory", newEntry: "New entry", namespace: "Namespace", search: "Search memory", searchPlaceholder: "Search titles or content", clearSearch: "Clear search",
@@ -31,8 +32,9 @@ export function createMemoryBrowserClient(require, styles) {
 			topicPlaceholder: "Enter an entry title", contentPlaceholder: "Enter memory content", evidencePlaceholder: "Enter evidence for this write", create: "Create", creating: "Creating…",
 			created: "Entry created", close: "Close", createdAt: "Created", updatedAt: "Updated", characters: "{count} characters",
 			listFailed: "Could not load entries", detailFailed: "Could not load entry details", historyFailed: "Could not load history", noNamespace: "No namespaces available",
-			"usage.used": "Index used", "usage.total": "{used} / {budget} chars", "usage.note": "Notes", "usage.rules": "Rules", "usage.facts": "Facts",
-			"usage.episodes": "Episodes", "usage.over": "Over the injection budget; older entries stay out of the prompt", "usage.hint": "L1 memory index injected into the system prompt each turn; over budget, older entries stay out.",
+			"usage.used": "Index used", "usage.total": "{used} / {budget} chars", "usage.over": "Over the injection budget; older entries stay out of the prompt",
+			"usage.count": "{count} entries", "usage.share": "{share}% of used",
+			"usage.tip.head": "Index header", "usage.tip.rules": "L0 red-line rules", "usage.tip.facts": "Fact entries (facts.md)", "usage.tip.sops": "Skill entries (sops/)",
 		},
 	};
 	async function resultValue(request) {
@@ -193,7 +195,7 @@ export function createMemoryBrowserClient(require, styles) {
 					h(Field, { label: t("evidence") }, h(Input, { value: form.evidence, placeholder: t("evidencePlaceholder"), disabled: busy, onChange: event => update("evidence", event.target.value) })),
 					h("div", { className: "lm-browser-modal-actions" }, h(Button, { variant: "outline", type: "button", disabled: busy, onClick: onClose }, t("cancel")), h(Button, { variant: "primary", type: "submit", disabled: busy || !form.namespace }, busy ? t("creating") : t("create"))))));
 	}
-	// 索引占用：常态只占一行（总览），点击后展开分段明细；分段悬停高亮同色进度段。
+	// 索引占用：常态一行总览，点击展开分段明细；分段悬停高亮，术语沿用插件其余处的 head/rules/facts/sops。
 	function IndexUsage({ stats, t }) {
 		const [open, setOpen] = React.useState(false);
 		const [hovered, setHovered] = React.useState(null);
@@ -204,12 +206,18 @@ export function createMemoryBrowserClient(require, styles) {
 		const percent = Math.round((used / budget) * 100);
 		const over = percent > 100;
 		const parts = [
-			["note", t("usage.note"), Number(stats.headChars) || 0],
-			["rules", t("usage.rules"), Number(stats.rulesChars) || 0],
-			["facts", t("usage.facts"), Number(stats.factsChars) || 0],
-			["episodes", t("usage.episodes"), Number(stats.sopsChars) || 0],
+			["head", "head", Number(stats.headChars) || 0, null],
+			["rules", "rules", Number(stats.rulesChars) || 0, null],
+			["facts", "facts", Number(stats.factsChars) || 0, Number(stats.factCount) || 0],
+			["sops", "sops", Number(stats.sopsChars) || 0, Number(stats.sopCount) || 0],
 		];
 		const dimmed = kind => hovered !== null && hovered !== kind;
+		// 气泡文案：术语含义 + 条目数（facts/sops）+ 占已用比例。
+		const tipFor = (kind, value, count) => [
+			t("usage.tip." + kind),
+			count === null ? "" : t("usage.count", { count }),
+			t("usage.share", { share: Math.round((value / used) * 100) }),
+		].filter(Boolean).join(" · ");
 		return h("div", { className: "lm-browser-usage" + (open ? " is-open" : "") },
 			h("button", {
 				type: "button", className: "lm-usage-summary",
@@ -229,18 +237,18 @@ export function createMemoryBrowserClient(require, styles) {
 			h("div", { className: "lm-usage-detail", id: "lm-usage-detail", "aria-hidden": open ? undefined : "true" },
 				h("div", { className: "lm-usage-detail-inner" },
 					h("div", { className: "lm-usage-legend" },
-						parts.map(([kind, label, value]) => h("span", {
+						parts.map(([kind, term, value, count]) => h("span", {
 							key: kind,
-							className: "lm-usage-legend-item" + (dimmed(kind) ? " is-dim" : ""),
+							className: "lm-usage-legend-wrap" + (dimmed(kind) ? " is-dim" : ""),
 							onMouseEnter: () => setHovered(kind),
 							onMouseLeave: () => setHovered(null),
 						},
-							h("span", { className: "lm-usage-swatch lm-usage-color-" + kind, "aria-hidden": "true" }),
-							h("span", { className: "lm-usage-legend-label" }, label),
-							h("span", { className: "lm-usage-legend-chars" }, compactChars(value)),
-							h("span", { className: "lm-usage-legend-share" }, Math.round((value / used) * 100) + "%")))),
-					over ? h("p", { className: "lm-usage-over", role: "status" }, t("usage.over")) : null,
-					h("p", { className: "lm-usage-hint" }, t("usage.hint")))));
+							h(Tooltip, { label: tipFor(kind, value, count), side: "bottom", delayMs: 120 },
+								h("span", { className: "lm-usage-legend-item" },
+									h("span", { className: "lm-usage-swatch lm-usage-color-" + kind, "aria-hidden": "true" }),
+									h("span", { className: "lm-usage-legend-label" }, term),
+									h("span", { className: "lm-usage-legend-chars" }, compactChars(value))))))),
+					over ? h("p", { className: "lm-usage-over", role: "status" }, t("usage.over")) : null)));
 	}
 	function MemoryBrowserPage({ controls, t }) {
 		const [namespaces, setNamespaces] = React.useState([]);

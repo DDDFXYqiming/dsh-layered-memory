@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-layered-memory-status",
-  "version": "0.10.0-preview.25",
+  "version": "0.10.0-preview.26",
   "type": "module",
   "main": "index.js",
   "description": "会话输入区的记忆维护活动、固定会话与只读历史。",

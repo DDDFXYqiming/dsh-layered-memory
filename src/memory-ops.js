@@ -13,7 +13,9 @@ import {
 	commitEntry,
 	ensureNamespaceLayout,
 	entryIdentity,
+	assertRuleContentLength,
 } from "./store.js";
+export { RULE_MAX_CHARS, ruleContentChars, assertRuleContentLength } from "./store.js";
 import { syncIndex, L1_MAX_CHARS_DEFAULT } from "./l1index.js";
 
 /** 疑似密钥形态（宁可响亮拒写，也不让凭证明文进记忆库再被检索回灌进上下文）。 */
@@ -107,6 +109,8 @@ export function writeMemory(root, {
 }) {
   if (!["rule", "fact", "sop"].includes(entryType)) throw new Error("entryType must be rule, fact or sop");
   if (!["create", "update"].includes(mode)) throw new Error("mode must be create or update");
+  const ruleBody = entryType === "rule" ? parseEntryBody("rule", key, String(content ?? "").trim(), { stripEvidence: false }).content : null;
+  if (entryType === "rule") assertRuleContentLength(ruleBody);
   ensureNamespaceLayout(root);
   return withNsWriteLock(root, () => {
     const entryKey = key ?? (entryType === "sop" ? slugify(topic) : String(topic ?? "").trim());
@@ -120,7 +124,7 @@ export function writeMemory(root, {
     if (RESERVED_ENTRY_NAMES.has(title.toLowerCase()) || (entryType === "sop" && RESERVED_ENTRY_NAMES.has(entryKey))) throw new Error("Reserved entry name: " + title);
 
     const supplied = String(content ?? "").trim();
-    const body = parseEntryBody(entryType, entryKey, entryType === "sop" ? "# " + title + "\n\n" + supplied : supplied, { stripEvidence: entryType !== "rule" }).content;
+    const body = ruleBody ?? parseEntryBody(entryType, entryKey, entryType === "sop" ? "# " + title + "\n\n" + supplied : supplied, { stripEvidence: entryType !== "rule" }).content;
     if (!body) throw new Error("Entry content must not be empty");
     if (detectSecret(body)) throw new Error("Entry content contains a credential; store a reference instead");
     if (entryType === "fact" && /^##\s+/m.test(body)) throw new Error('Fact content cannot contain "## " section headings');

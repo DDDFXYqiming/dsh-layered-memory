@@ -6,6 +6,13 @@ import { atomicWriteFileSync, stageWrite, commitStaged } from "./atomic-write.js
 import { acquireProcessLock } from "./process-lock.js";
 import { AUTO_END, FACTS_TEMPLATE, INDEX_TEMPLATE, L0_TEMPLATE, RULES_TEMPLATE } from "./templates.js";
 
+export const RULE_MAX_CHARS = 100;
+export function ruleContentChars(value) { return Array.from(String(value ?? "").trim()).length; }
+export function assertRuleContentLength(content) {
+  const chars = ruleContentChars(content);
+  if (chars > RULE_MAX_CHARS) throw new Error(`规则正文${chars}字符，上限${RULE_MAX_CHARS}。请精简表达并保留适用条件与例外，原条目未修改。`);
+}
+
 export const META_FILE = "memory-meta.json";
 export const PENDING_DIR = "pending";
 export const ARCHIVE_DIR = "archive";
@@ -320,9 +327,14 @@ export function upsertFact(root, key, content) {
     return duplicates.length > 1 ? "merged" : duplicates.length ? "updated" : "created";
   });
 }
+function assertEntryWriteLength(kind, key, raw, meta) {
+  if (kind === "rule") assertRuleContentLength(parseEntryBody(kind, key, raw, { stripEvidence: Boolean(meta?.evidence) }).content);
+}
+
 /** 正文与元数据一起提交；meta 为完整的新版本。索引由上层在同一锁内重建。 */
 export function commitEntry(root, kind, key, raw, entryMeta) {
   assertEntryKey(kind, key);
+  assertEntryWriteLength(kind, key, raw, entryMeta);
   return withNsWriteLock(root, () => {
     const meta = readMeta(root);
     const path = entryFile(root, kind, key);
@@ -386,6 +398,7 @@ export function restoreEntry(root, kind, key, snapshotId) {
     const records = historyRecords(root, kind, key);
     const record = snapshotId ? records.find(item => item.id === snapshotId) : records.at(-1);
     if (!record) return { restored: false, entry: null };
+    assertEntryWriteLength(kind, key, record.raw, record.meta);
     const current = readEntry(root, kind, key);
     const history = current ? snapshotEntry(root, kind, key).path : "";
     const now = new Date().toISOString();
@@ -400,6 +413,7 @@ export function archiveEntry(root, kind, key, { unarchive = false, replacement }
   return withNsWriteLock(root, () => {
     const previous = readEntry(root, kind, key);
     if (!previous) return { archived: false, unarchived: false, entry: null };
+    if (kind === "rule") assertRuleContentLength(previous.content);
     const history = snapshotEntry(root, kind, key).path;
     const now = new Date().toISOString();
     const meta = { ...previous.meta, archived: !unarchive, updatedAt: now };
@@ -498,6 +512,9 @@ export function backfillMeta(root, { namespace = "default", now = new Date() } =
 export function reconcileEntries(root) {
   return withNsWriteLock(root, () => {
     const entries = readEntries(root), meta = readMeta(root);
+    for (const entry of entries) {
+      if (entry.kind === "rule" && entry.meta.archived && !hasArchiveBanner(entry.raw)) assertRuleContentLength(entry.content);
+    }
     const found = new Set(entries.map(entry => JSON.stringify([entry.kind, entry.key])));
     const orphans = [];
     for (const [kind, bucket] of [["rule", meta.rules], ["fact", meta.facts], ["sop", meta.sops]]) {

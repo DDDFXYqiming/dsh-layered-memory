@@ -116,6 +116,11 @@
 .lm-browser-textarea:focus { border-color: var(--dsw-alias-state-business-primary); }
 .lm-browser-content { min-height: 260px; font-family: var(--dsh-font-family-mono, ui-monospace, SFMono-Regular, Consolas, monospace); font-size: 13px; line-height: 22px; }
 .lm-browser-create-content { min-height: 96px; font-family: var(--dsh-font-family-mono, ui-monospace, SFMono-Regular, Consolas, monospace); }
+.lm-browser-rule-length { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 20px; }
+.lm-browser-rule-count { flex: none; font-variant-numeric: tabular-nums; }
+.lm-browser-rule-length.is-near { color: var(--dsw-alias-state-warn-primary); }
+.lm-browser-rule-length.is-over { color: var(--dsw-alias-state-error-primary); }
+.lm-browser-textarea[aria-invalid="true"] { border-color: var(--dsw-alias-state-error-primary); }
 .lm-browser-error { margin: 8px 0; color: var(--dsw-alias-state-error-primary); font-size: 13px; line-height: 21px; letter-spacing: normal; text-align: left; }
 .lm-browser-notice { margin: 8px 0; color: var(--dsw-alias-label-tertiary); font-size: 13px; }
 .lm-browser-conflict { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0; padding: 10px 12px; border-radius: 10px; color: var(--dsw-alias-state-error-primary); background: var(--dsw-alias-bg-layer-1); font-size: 13px; }

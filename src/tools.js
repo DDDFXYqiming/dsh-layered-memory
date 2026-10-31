@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, copyFileSync, rmSync, mkdirSync } from "node:fs";
 import { join, basename } from "node:path";
 import { defineTool } from "@deepseek-ai/dsh-tools";
+import { RULE_ENTRY_POLICY } from "./templates.js";
 import { atomicWriteFileSync } from "./atomic-write.js";
 import {
 	PENDING_DIR, ARCHIVE_DIR, safeNs, nsRoot, resolveNamespace, ensureNamespaceLayout, slugify,
@@ -145,7 +146,7 @@ export function buildTools(ctx, cfg, io = {}) {
 		return { namespaces, results: searchNamespaces(cfg.memoryDir, namespaces, args.query, { limit, includeArchived: args.include_archived ?? false }) };
 	}, true));
 
-	defs.push(tool("memory_write", "创建新的rule、fact或SOP。已有条目使用memory_update；evidence填写规则对应的用户要求或事实验证依据。", {
+	defs.push(tool("memory_write", `创建新rule/fact/sop；已有条目用memory_update，evidence填写对应依据。${RULE_ENTRY_POLICY}`, {
 		namespace: namespaceArg, kind: req(memoryKind), topic: req(str), content: req(str), evidence: req(str), related: arr(entryRef), ...sourceArgs,
 	}, mutationOutput, async (args, exec) => {
 		const namespace = nsOf(args, exec), root = nsRoot(cfg.memoryDir, namespace);
@@ -160,7 +161,7 @@ export function buildTools(ctx, cfg, io = {}) {
 		});
 	}));
 
-	defs.push(tool("memory_update", "仅更新已有entry并保存旧版本，保持原展示标题及key。仅整理措辞时省略evidence保留原来源；规则要求变更或新增事实须给新evidence。", {
+	defs.push(tool("memory_update", `更新已有entry并保存旧版本，保持标题及key。仅整理措辞时省略evidence沿用原来源；要求变更或新增事实须给新evidence。${RULE_ENTRY_POLICY}`, {
 		entry: refArg, content: req(str), evidence: str, related: arr(entryRef), if_revision: str, ...sourceArgs,
 	}, mutationOutput, async (args, exec) => {
 		const entry = ref(args.entry), root = rootOf(entry);

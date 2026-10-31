@@ -9,6 +9,7 @@ export function createMemoryBrowserClient(require, styles) {
 	const locale = "layered-memory";
 	const dictionaries = {
 		zh: {
+			ruleContentCount: "当前 {count} / {limit} 字符", ruleContentNearLimit: "接近规则正文上限，请保留完整适用条件。", ruleContentOverLimit: "规则正文超过 {limit} 字符，请精简后保存。",
 			title: "记忆", newEntry: "新建条目", namespace: "命名空间", search: "搜索记忆", searchPlaceholder: "搜索标题或正文", clearSearch: "清空搜索",
 			all: "全部", showArchived: "显示已归档", entries: "记忆条目", loading: "正在读取…", empty: "没有匹配的记忆条目", emptyDetail: "从左侧选择一条记忆",
 			archived: "已归档", content: "内容", evidence: "证据", save: "保存", saving: "保存中…", archive: "归档", restore: "恢复",
@@ -25,6 +26,7 @@ export function createMemoryBrowserClient(require, styles) {
 			"usage.tip.head": "索引头部说明", "usage.tip.rules": "L0 红线规则", "usage.tip.facts": "事实条目目录（facts.md）", "usage.tip.sops": "任务经验目录（sops/）",
 		},
 		en: {
+			ruleContentCount: "Current {count} / {limit} characters", ruleContentNearLimit: "Approaching the rule limit; keep all applicability conditions.", ruleContentOverLimit: "The rule exceeds {limit} characters. Shorten it before saving.",
 			title: "Memory", newEntry: "New entry", namespace: "Namespace", search: "Search memory", searchPlaceholder: "Search titles or content", clearSearch: "Clear search",
 			all: "All", showArchived: "Show archived", entries: "Memory entries", loading: "Loading…", empty: "No matching memory entries", emptyDetail: "Select a memory entry on the left",
 			archived: "Archived", content: "Content", evidence: "Evidence", save: "Save", saving: "Saving…", archive: "Archive", restore: "Restore",
@@ -41,6 +43,7 @@ export function createMemoryBrowserClient(require, styles) {
 			"usage.tip.head": "Index header", "usage.tip.rules": "L0 red-line rules", "usage.tip.facts": "Fact entries (facts.md)", "usage.tip.sops": "Skill entries (sops/)",
 		},
 		ja: {
+			ruleContentCount: "現在 {count} / {limit} 文字", ruleContentNearLimit: "ルール本文の上限に近づいています。適用条件をすべて保持してください。", ruleContentOverLimit: "ルール本文が {limit} 文字を超えています。短くして保存してください。",
 			"title": "メモリ", "newEntry": "新規エントリ", "namespace": "名前空間", "search": "メモリを検索", "searchPlaceholder": "タイトルまたは本文を検索", "clearSearch": "検索をクリア",
 			"all": "すべて", "showArchived": "アーカイブを表示", "entries": "メモリエントリ", "loading": "読み込み中…", "empty": "一致するエントリがありません", "emptyDetail": "左からエントリを選択",
 			"archived": "アーカイブ済み", "content": "内容", "evidence": "根拠", "save": "保存", "saving": "保存中…", "archive": "アーカイブ", "restore": "復元",
@@ -57,6 +60,7 @@ export function createMemoryBrowserClient(require, styles) {
 			"usage.tip.head": "インデックスのヘッダー", "usage.tip.rules": "L0 の必須ルール", "usage.tip.facts": "ファクト項目のディレクトリ（facts.md）", "usage.tip.sops": "タスク経験のディレクトリ（sops/）",
 		},
 		es: {
+			ruleContentCount: "Actual: {count} / {limit} caracteres", ruleContentNearLimit: "Cerca del límite de la regla; conserva todas las condiciones de aplicación.", ruleContentOverLimit: "La regla supera los {limit} caracteres. Acórtala antes de guardar.",
 			"title": "Memoria", "newEntry": "Nueva entrada", "namespace": "Espacio de nombres", "search": "Buscar en la memoria", "searchPlaceholder": "Buscar títulos o contenido", "clearSearch": "Limpiar búsqueda",
 			"all": "Todo", "showArchived": "Mostrar archivados", "entries": "Entradas de memoria", "loading": "Cargando…", "empty": "No hay entradas coincidentes", "emptyDetail": "Selecciona una entrada a la izquierda",
 			"archived": "Archivado", "content": "Contenido", "evidence": "Evidencia", "save": "Guardar", "saving": "Guardando…", "archive": "Archivar", "restore": "Restaurar",
@@ -73,6 +77,7 @@ export function createMemoryBrowserClient(require, styles) {
 			"usage.tip.head": "Encabezado del índice", "usage.tip.rules": "Reglas esenciales L0", "usage.tip.facts": "Directorio de hechos (facts.md)", "usage.tip.sops": "Directorio de experiencias (sops/)",
 		},
 		fr: {
+			ruleContentCount: "Actuellement {count} / {limit} caractères", ruleContentNearLimit: "La limite approche ; conservez toutes les conditions d’application de la règle.", ruleContentOverLimit: "La règle dépasse {limit} caractères. Raccourcissez-la avant d’enregistrer.",
 			"title": "Mémoire", "newEntry": "Nouvelle entrée", "namespace": "Espace de noms", "search": "Rechercher dans la mémoire", "searchPlaceholder": "Rechercher titres ou contenu", "clearSearch": "Effacer la recherche",
 			"all": "Tout", "showArchived": "Afficher les archivés", "entries": "Entrées mémoire", "loading": "Chargement…", "empty": "Aucune entrée correspondante", "emptyDetail": "Sélectionnez une entrée à gauche",
 			"archived": "Archivé", "content": "Contenu", "evidence": "Preuve", "save": "Enregistrer", "saving": "Enregistrement…", "archive": "Archiver", "restore": "Restaurer",
@@ -89,6 +94,7 @@ export function createMemoryBrowserClient(require, styles) {
 			"usage.tip.head": "En-tête de l’index", "usage.tip.rules": "Règles essentielles L0", "usage.tip.facts": "Répertoire des faits (facts.md)", "usage.tip.sops": "Répertoire des expériences (sops/)",
 		},
 		de: {
+			ruleContentCount: "Aktuell {count} / {limit} Zeichen", ruleContentNearLimit: "Die Regel nähert sich dem Limit. Alle Geltungsbedingungen beibehalten.", ruleContentOverLimit: "Die Regel überschreitet {limit} Zeichen. Vor dem Speichern kürzen.",
 			"title": "Speicher", "newEntry": "Neuer Eintrag", "namespace": "Namespace", "search": "Speicher durchsuchen", "searchPlaceholder": "Titel oder Inhalt durchsuchen", "clearSearch": "Suche löschen",
 			"all": "Alle", "showArchived": "Archivierte anzeigen", "entries": "Speichereinträge", "loading": "Wird geladen…", "empty": "Keine passenden Einträge", "emptyDetail": "Eintrag links auswählen",
 			"archived": "Archiviert", "content": "Inhalt", "evidence": "Nachweis", "save": "Speichern", "saving": "Speichern…", "archive": "Archivieren", "restore": "Wiederherstellen",
@@ -105,6 +111,7 @@ export function createMemoryBrowserClient(require, styles) {
 			"usage.tip.head": "Index-Kopfzeile", "usage.tip.rules": "L0-Grundregeln", "usage.tip.facts": "Verzeichnis der Fakten (facts.md)", "usage.tip.sops": "Verzeichnis der Erfahrungen (sops/)",
 		},
 		ru: {
+			ruleContentCount: "Сейчас {count} / {limit} символов", ruleContentNearLimit: "Правило близко к лимиту. Сохраните все условия применения.", ruleContentOverLimit: "Правило превышает {limit} символов. Сократите его перед сохранением.",
 			"title": "Память", "newEntry": "Новая запись", "namespace": "Пространство имён", "search": "Поиск в памяти", "searchPlaceholder": "Поиск по заголовкам или тексту", "clearSearch": "Очистить поиск",
 			"all": "Все", "showArchived": "Показать архивные", "entries": "Записи памяти", "loading": "Загрузка…", "empty": "Нет подходящих записей", "emptyDetail": "Выберите запись слева",
 			"archived": "В архиве", "content": "Содержимое", "evidence": "Доказательство", "save": "Сохранить", "saving": "Сохранение…", "archive": "В архив", "restore": "Восстановить",
@@ -121,6 +128,7 @@ export function createMemoryBrowserClient(require, styles) {
 			"usage.tip.head": "Заголовок индекса", "usage.tip.rules": "Базовые правила L0", "usage.tip.facts": "Каталог фактов (facts.md)", "usage.tip.sops": "Каталог опыта (sops/)",
 		},
 		pt: {
+			ruleContentCount: "Atual: {count} / {limit} caracteres", ruleContentNearLimit: "Perto do limite da regra; preserve todas as condições de aplicação.", ruleContentOverLimit: "A regra excede {limit} caracteres. Encurte-a antes de salvar.",
 			"title": "Memória", "newEntry": "Nova entrada", "namespace": "Namespace", "search": "Pesquisar memória", "searchPlaceholder": "Pesquisar títulos ou conteúdo", "clearSearch": "Limpar pesquisa",
 			"all": "Tudo", "showArchived": "Mostrar arquivados", "entries": "Entradas de memória", "loading": "Carregando…", "empty": "Nenhuma entrada correspondente", "emptyDetail": "Selecione uma entrada à esquerda",
 			"archived": "Arquivado", "content": "Conteúdo", "evidence": "Evidência", "save": "Salvar", "saving": "Salvando…", "archive": "Arquivar", "restore": "Restaurar",
@@ -148,6 +156,9 @@ export function createMemoryBrowserClient(require, styles) {
 		const lang = (typeof document !== "undefined" && document.documentElement.lang) || "zh-CN";
 		return new Date(value).toLocaleString(lang, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 	};
+	const ruleContentLimit = 100;
+	const ruleContentLength = content => Array.from(content.trim()).length;
+	const ruleContentOverLimit = (kind, content) => kind === "rule" && ruleContentLength(content) > ruleContentLimit;
 	const entryKinds = ["rule", "fact", "sop"];
 	const kindText = (kind, t) => (entryKinds.includes(kind) ? t("kind." + kind) : kind);
 	function compactChars(value) {
@@ -236,6 +247,15 @@ export function createMemoryBrowserClient(require, styles) {
 			h("path", { d: "M5 4.5A2.5 2.5 0 0 1 7.5 2H20v17H7.5A2.5 2.5 0 0 0 5 21.5z" }),
 			h("path", { d: "M5 4.5v17M8.5 6H16M8.5 10H16M8.5 14H13" }));
 	}
+	function RuleContentHint({ kind, content, id, t }) {
+		if (kind !== "rule") return null;
+		const count = ruleContentLength(content);
+		const over = count > ruleContentLimit;
+		const near = count >= ruleContentLimit * 0.9;
+		return h("span", { id, className: "lm-browser-rule-length" + (over ? " is-over" : near ? " is-near" : ""), role: over ? "alert" : "status", "aria-live": "polite", "aria-atomic": true },
+			h("span", { className: "lm-browser-rule-count" }, t("ruleContentCount", { count, limit: ruleContentLimit })),
+			near ? h("span", null, t(over ? "ruleContentOverLimit" : "ruleContentNearLimit", { limit: ruleContentLimit })) : null);
+	}
 	function Field({ label, children, className = "" }) {
 		return h("label", { className: "lm-browser-field " + className }, h("span", { className: "lm-browser-field-label" }, label), children);
 	}
@@ -282,6 +302,7 @@ export function createMemoryBrowserClient(require, styles) {
 		}, [open, busy, onClose]);
 		if (!open) return null;
 		const update = (key, value) => setForm(current => ({ ...current, [key]: value }));
+		const ruleTooLong = ruleContentOverLimit(form.kind, form.content);
 		return h("div", { className: "lm-browser-modal-backdrop", onMouseDown: event => { if (event.target === event.currentTarget && !busy) onClose(); } },
 			h("section", { className: "lm-browser-modal", role: "dialog", "aria-modal": true, "aria-labelledby": "lm-browser-create-title" },
 				h("div", { className: "lm-browser-modal-heading" }, h("h2", { id: "lm-browser-create-title" }, t("createTitle")), h(Button, { variant: "ghost", size: "sm", "aria-label": t("close"), disabled: busy, onClick: onClose }, h(IconCloseOutlineRegular, { size: 16 }))),
@@ -290,9 +311,9 @@ export function createMemoryBrowserClient(require, styles) {
 					h(Field, { label: t("namespace") }, h(SelectMenu, { value: form.namespace, options: namespaces.map(row => ({ value: row.namespace, label: row.namespace })), disabled: busy, onChange: value => update("namespace", value), ariaLabel: t("namespace"), triggerClassName: "lm-browser-input" })),
 					h(Field, { label: t("kindLabel") }, h(SelectMenu, { value: form.kind, options: entryKinds.map(value => ({ value, label: kindText(value, t) })), disabled: busy, onChange: value => update("kind", value), ariaLabel: t("kindLabel"), triggerClassName: "lm-browser-input" })),
 					h(Field, { label: t("topic") }, h(Input, { value: form.topic, placeholder: t("topicPlaceholder"), disabled: busy, onChange: event => update("topic", event.target.value) })),
-					h(Field, { label: t("content") }, h("textarea", { className: "lm-browser-textarea lm-browser-create-content", value: form.content, placeholder: t("contentPlaceholder"), disabled: busy, onChange: event => update("content", event.target.value) })),
+					h(Field, { label: t("content") }, h("textarea", { className: "lm-browser-textarea lm-browser-create-content", value: form.content, placeholder: t("contentPlaceholder"), disabled: busy, "aria-describedby": form.kind === "rule" ? "lm-create-rule-length" : undefined, "aria-invalid": ruleTooLong || undefined, onChange: event => update("content", event.target.value) }), h(RuleContentHint, { kind: form.kind, content: form.content, id: "lm-create-rule-length", t })),
 					h(Field, { label: t("evidence") }, h(Input, { value: form.evidence, placeholder: t(form.kind === "rule" ? "ruleEvidencePlaceholder" : "evidencePlaceholder"), disabled: busy, onChange: event => update("evidence", event.target.value) })),
-					h("div", { className: "lm-browser-modal-actions" }, h(Button, { variant: "outline", type: "button", disabled: busy, onClick: onClose }, t("cancel")), h(Button, { variant: "primary", type: "submit", disabled: busy || !form.namespace }, busy ? t("creating") : t("create"))))));
+					h("div", { className: "lm-browser-modal-actions" }, h(Button, { variant: "outline", type: "button", disabled: busy, onClick: onClose }, t("cancel")), h(Button, { variant: "primary", type: "submit", disabled: busy || !form.namespace || ruleTooLong }, busy ? t("creating") : t("create"))))));
 	}
 	function IndexUsage({ stats, t }) {
 		const [open, setOpen] = React.useState(false);
@@ -485,6 +506,7 @@ export function createMemoryBrowserClient(require, styles) {
 			setCreateOpen(true);
 		}
 		async function createEntry() {
+			if (ruleContentOverLimit(createForm.kind, createForm.content)) return;
 			if (!createForm.namespace || !createForm.topic.trim() || !createForm.content.trim() || !createForm.evidence.trim()) {
 				setCreateError(t("requiredFields"));
 				return;
@@ -504,7 +526,7 @@ export function createMemoryBrowserClient(require, styles) {
 			finally { setBusy(null); }
 		}
 		async function saveEntry() {
-			if (!detail) return;
+			if (!detail || ruleContentOverLimit(detail.entry.kind, content)) return;
 			setBusy("save");
 			setActionError(null);
 			setNotice(null);
@@ -576,6 +598,7 @@ export function createMemoryBrowserClient(require, styles) {
 				expanded ? h("pre", { className: "lm-browser-history-preview" }, snapshot.preview || t("noPreview")) : null);
 		}
 		const dirty = detail && (content !== detail.content || evidence !== detail.evidence);
+		const ruleTooLong = detail && ruleContentOverLimit(detail.entry.kind, content);
 		return h("section", { className: "lm-browser-page", "aria-label": t("title"), "data-memory-browser": true },
 			h("style", null, styles),
 			h("header", { className: "lm-browser-heading" }, h("h1", null, t("title")), h(Button, { variant: "primary", size: "sm", className: "lm-browser-new", icon: h(IconPlusOutlineRegular, { size: 13 }), disabled: !namespaces.length, onClick: openCreate }, t("newEntry"))),
@@ -604,16 +627,17 @@ export function createMemoryBrowserClient(require, styles) {
 							h("div", { className: "lm-browser-detail-actions" },
 								notice ? h("span", { className: "lm-browser-inline-notice", role: "status" }, notice) : null,
 								h(Button, { variant: "outline", size: "sm", disabled: Boolean(busy), onClick: toggleArchived }, detail.archived ? t("restore") : t("archive")),
-								h(Button, { variant: "primary", size: "sm", disabled: Boolean(busy) || !dirty, onClick: saveEntry }, busy === "save" ? t("saving") : t("save")))),
+								h(Button, { variant: "primary", size: "sm", disabled: Boolean(busy) || !dirty || ruleTooLong, onClick: saveEntry }, busy === "save" ? t("saving") : t("save")))),
 						conflict ? h("div", { className: "lm-browser-conflict", role: "alert" }, h("span", null, t("conflict")), h(Button, { variant: "outline", size: "sm", onClick: reloadDetail }, t("reload"))) : null,
-						actionError && !conflict ? h("p", { className: "lm-browser-error", role: "alert" }, actionError) : null,
+						actionError ? h("p", { className: "lm-browser-error", role: "alert" }, actionError) : null,
 						h("dl", { className: "lm-browser-readonly" }, [["namespace", detail.entry.namespace], ["kind", kindText(detail.entry.kind, t)], ["key", detail.entry.key]].map(([label, value]) => h("div", { key: label }, h("dt", null, label), h("dd", null, value)))),
 						h(Field, { label: h("span", { style: { display: "inline-flex", alignItems: "center", gap: 8 } }, t("content"), h("span", { className: "lm-browser-seg-toggle" },
 													h("button", { type: "button", className: "lm-browser-seg-btn" + (contentPreview ? " is-active" : ""), onClick: () => setContentPreview(true) }, t("previewMode")),
 													h("button", { type: "button", className: "lm-browser-seg-btn" + (!contentPreview ? " is-active" : ""), onClick: () => setContentPreview(false) }, t("editMode")))) },
 									contentPreview
 										? h("div", { className: "lm-browser-md-preview", onClick: () => setContentPreview(false) }, renderMarkdown(content))
-										: h("textarea", { className: "lm-browser-textarea lm-browser-content", value: content, disabled: Boolean(busy), onChange: event => setContent(event.target.value), onBlur: () => setContentPreview(true) })),
+										: h("textarea", { className: "lm-browser-textarea lm-browser-content", value: content, disabled: Boolean(busy), "aria-describedby": detail.entry.kind === "rule" ? "lm-edit-rule-length" : undefined, "aria-invalid": ruleTooLong || undefined, onChange: event => setContent(event.target.value), onBlur: () => setContentPreview(true) }),
+									h(RuleContentHint, { kind: detail.entry.kind, content, id: "lm-edit-rule-length", t })),
 						h(Field, { label: t("evidence") }, h(Input, { value: evidence, disabled: Boolean(busy), placeholder: t(detail.entry.kind === "rule" ? "ruleEvidencePlaceholder" : "evidencePlaceholder"), onChange: event => setEvidence(event.target.value) })),
 						h("section", { className: "lm-browser-history" },
 							h("h3", null, t("history")),

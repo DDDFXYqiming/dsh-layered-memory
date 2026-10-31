@@ -1,12 +1,13 @@
 export const AUTO_BEGIN = "<!-- AUTO-BEGIN -->";
 export const AUTO_END = "<!-- AUTO-END -->";
 
+export const RULE_ENTRY_POLICY = "rule 只记录用户明确提出、需要持续遵守的行为要求，保留其适用范围和例外。每条一个独立要求，通常一句，正文最多100字符。背景、原因、案例和操作过程不展开在规则正文中。已有规则能覆盖时更新原条；不得自行制定、扩大要求，或为绕过上限机械拆条。事实是否重要、结论是否确定，都不构成升级成规则的理由。“记下来”本身不代表要新增规则。单次任务指令只用于当前任务。";
 export const WRITE_POLICY = "把记忆当作留给后续任务的工作笔记：需要时查阅，发现旧结论过时就修正，有值得接续的新信息再补充。已有条目用 memory_update，新的条目用 memory_write；完成任务不要求新增记忆。";
 export const LEGACY_WRITE_POLICY = "任务完成且【行动验证成功】时主动 memory_write 沉淀（无需等用户提醒；无验证信息则不写）";
 
 export const L0_TEMPLATE = `# 记忆管理
 
-记忆分为用户规则 rule、环境事实 fact 和任务经验 sop。规则保留用户明确要求及其适用条件，事实和经验保存经过行动验证、未来可复用的信息，依据随版本保存。
+记忆分为用户规则 rule、环境事实 fact 和任务经验 sop。${RULE_ENTRY_POLICY}事实和经验保存经过行动验证、未来可复用的信息，依据随版本保存。
 
 - 已知条目用返回的 entry 读取；关键词检索用 memory_search；浏览目录用 memory_list。
 - entry = {namespace, kind, key}，直接复用工具返回值。显示标题可以含标点，不要自行把标题转换成文件名。
@@ -21,6 +22,7 @@ export const L0_TEMPLATE = `# 记忆管理
 
 export const INDEX_TEMPLATE = `# Memory Index
 用户规则在 rules.md，环境事实在 facts.md，任务经验在 sops/；正文按需读取。
+${RULE_ENTRY_POLICY}
 ${WRITE_POLICY}
 基础记忆读写工具可直接使用；管理操作调用 memory_activate({mode:"manage"})。
 ${AUTO_BEGIN}

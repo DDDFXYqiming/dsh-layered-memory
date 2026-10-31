@@ -1,4 +1,4 @@
-import { L0_TEMPLATE } from "./templates.js";
+import { L0_TEMPLATE, RULE_ENTRY_POLICY } from "./templates.js";
 
 export const SKILL_NAME = "memory";
 export const SKILL_DESCRIPTION = "跨会话记忆：按项目与全局检索用户规则、已验证事实和经验，用稳定条目标识读取、更新、追溯证据和恢复历史。";
@@ -21,7 +21,7 @@ export const SKILL_CONTENT = `${L0_TEMPLATE}
 - memory_expand({entry})：展开该版本的源事件；有后续页时按返回指针继续。
 - memory_review({entry,reason,evidence_call_ids?})：规则冲突可引用本轮原用户要求；事实冲突先实际验证，再传entry和reason登记复核；插件自动绑定相应依据，返回sources精确引用。已有调用id时可显式选择。
 
-rule保存用户明确要求，fact保存事实，sop保存操作经验，共用上述入口。规则的evidence填写原用户明确要求；省略显式来源时引用当前回合原用户消息，引用先前要求时成对提供sourceSession/sourceSeqs。保存新实测时填写evidence说明；已有精确引用时可提供evidence_call_ids。memory_review通常省略该字段，由插件解析当前回合相应依据。来源的session和seq由插件记录。只调整措辞且没有新证据时沿用原来源。related使用entry数组。
+rule/fact/sop共用上述入口。${RULE_ENTRY_POLICY}fact保存事实，sop保存操作经验。规则的evidence填写原用户明确要求；省略显式来源时引用当前回合原用户消息，引用先前要求时成对提供sourceSession/sourceSeqs。保存新实测时填写evidence说明；已有精确引用时可提供evidence_call_ids。memory_review通常省略该字段，由插件解析当前回合相应依据。来源的session和seq由插件记录。只调整措辞且没有新证据时沿用原来源。related使用entry数组。
 
 ## 管理操作
 

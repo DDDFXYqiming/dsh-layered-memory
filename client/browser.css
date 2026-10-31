@@ -35,7 +35,7 @@
 .lm-browser-search input:focus-visible { outline: none; }
 .lm-browser-search input::-webkit-search-cancel-button { display: none; }
 .lm-browser-search-clear { flex: none; width: 28px; height: 28px; margin-right: -6px; padding: 0; }
-.lm-browser-filter-tabs { display: flex; flex: none; align-items: center; gap: 4px; }
+.lm-browser-filter-tabs { display: flex; flex: none; flex-wrap: wrap; align-items: center; max-width: 100%; gap: 4px; }
 .lm-browser-filter-tab { display: inline-flex; align-items: center; flex: none; height: 28px; padding: 0 10px; border: 0; border-radius: 14px; color: var(--dsw-alias-label-tertiary); background: transparent; font: inherit; font-size: 14px; line-height: 22px; white-space: nowrap; cursor: pointer; }
 .lm-browser-filter-tab:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .lm-browser-filter-tab.is-active { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); }

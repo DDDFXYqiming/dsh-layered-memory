@@ -41,7 +41,7 @@ function compareEntries(entries, opts) {
 			const score = jaccard(a.tokens, b.tokens);
 			const row = { kind: a.kind, a: a.key, b: b.key, similarity: Number(score.toFixed(4)) };
 			if (score >= near) report.nearDuplicates.push(row);
-			if (a.kind === "sop" && score >= merge) mergeCandidates.push(row);
+			if (["rule", "sop"].includes(a.kind) && score >= merge) mergeCandidates.push(row);
 		}
 	}
 	const descending = (a, b) => b.similarity - a.similarity || a.a.localeCompare(b.a);
@@ -57,7 +57,7 @@ export function findColdEntries(root, { heat = {}, days = COLD_REVIEW_DAYS, limi
 	const access = loadAccess(root), meta = readMeta(root), now = Date.now();
 	const rows = [];
 	for (const entry of entries) {
-		if (entry.meta.archived) continue;
+		if (entry.kind === "rule" || entry.meta.archived) continue;
 		const created = Date.parse(entry.meta.createdAt);
 		const age = Number.isFinite(created) ? (now - created) / 86400000 : null;
 		const score = entryHeat(access, meta, entry.kind, entry.key, heat);
@@ -81,7 +81,7 @@ export function runMaintain(root, maxChars = L1_MAX_CHARS_DEFAULT, opts = {}) {
 			const targetChars = Math.max(0, Math.floor(maxChars * (opts.indexTargetRatio ?? 0.9)));
 			const triggerChars = targetChars + Math.max(80, Math.floor(targetChars * 0.02));
 			const aboveTarget = index.index_chars > triggerChars;
-			const review = syncReview(root, { overLimit: index.over_limit, aboveTarget, targetChars, indexChars: index.index_chars, entries, origin: opts.origin });
+			const review = syncReview(root, { overLimit: index.over_limit, aboveTarget, targetChars, indexChars: index.index_chars, entries });
 			const previous = readReflectionState(root);
 			const reviewed = previous.scanVersion === 2 && previous.reviewedRevision === computeContentRevision(root);
 			const reasons = reviewed ? [] : Object.keys(counts).filter(key => counts[key] > 0);

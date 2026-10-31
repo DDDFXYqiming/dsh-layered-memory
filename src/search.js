@@ -16,11 +16,11 @@ export function snippetAround(text, query, width = 180) {
 
 export function listNamespaces(memoryDir) {
 	if (!existsSync(memoryDir)) return [];
-	const names = existsSync(join(memoryDir, "facts.md")) || existsSync(join(memoryDir, "index.txt")) ? ["default"] : [];
+	const names = existsSync(join(memoryDir, "rules.md")) || existsSync(join(memoryDir, "facts.md")) || existsSync(join(memoryDir, "index.txt")) ? ["default"] : [];
 	for (const dir of readdirSync(memoryDir, { withFileTypes: true })) {
 		if (!dir.isDirectory() || dir.name !== safeNs(dir.name)) continue;
 		const root = join(memoryDir, dir.name);
-		if (existsSync(join(root, "facts.md")) || existsSync(join(root, "index.txt"))) names.push(dir.name);
+		if (existsSync(join(root, "rules.md")) || existsSync(join(root, "facts.md")) || existsSync(join(root, "index.txt"))) names.push(dir.name);
 	}
 	return [...new Set(names)].sort();
 }

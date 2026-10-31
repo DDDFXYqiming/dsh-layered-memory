@@ -15,7 +15,7 @@ function turnActivity(events, turn, endSeq, inheritedEventCount, parentSession) 
 	function accept(name, args, callId, seq, content, isError, meta) {
 		if (typeof args === "string") args = JSON.parse(args);
 		const { value, failed } = toolResult(content, isError, name);
-		if (name === "memory_read" && !failed && !value?.not_found && ["fact", "sop"].includes(args.entry?.kind)) memories.set(JSON.stringify(args.entry), args.entry);
+		if (name === "memory_read" && !failed && !value?.not_found && ["rule", "fact", "sop"].includes(args.entry?.kind)) memories.set(JSON.stringify(args.entry), args.entry);
 		if (MEMORY_SAVES.has(name) && !failed) {
 			for (const id of args.evidence_call_ids || []) savedCalls.add(id);
 			if (args.sourceSession === parentSession) for (const sourceSeq of args.sourceSeqs || []) savedSeqs.add(sourceSeq);
@@ -45,7 +45,7 @@ function turnActivity(events, turn, endSeq, inheritedEventCount, parentSession) 
 }
 
 export function createTurnReviewer(ctx, cfg, io) {
-	return async (agent, turn, endSeq) => {
+	return async (agent, turn, endSeq, { allowDispatch = true } = {}) => {
 		if (agent.session.header.origin === "subagent" || !io.canWrite(agent)) return;
 		const query = ctx.get("sessionQuery");
 		if (!query) throw new Error("记忆收尾检查需要宿主 sessionQuery 服务");
@@ -56,7 +56,7 @@ export function createTurnReviewer(ctx, cfg, io) {
 		finally { observation[Symbol.dispose](); }
 		if (!activity) return;
 		const { root, namespace } = io.scope(agent);
-		const prepared = prepareTurnReview(root, { parentSession, namespace, activity, enabled: cfg.turnReviewEnabled, minEvidence: cfg.turnReviewMinEvidence ?? 6, timeoutSeconds: cfg.maintenanceTimeoutSeconds ?? 300 });
+		const prepared = prepareTurnReview(root, { parentSession, namespace, activity, enabled: cfg.turnReviewEnabled && allowDispatch, minEvidence: cfg.turnReviewMinEvidence ?? 6, timeoutSeconds: cfg.maintenanceTimeoutSeconds ?? 300 });
 		activity.hasNewEvidence = prepared.hasNewEvidence;
 		const claim = prepared.claim;
 		if (!claim) return { activity, result: null };

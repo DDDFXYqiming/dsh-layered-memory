@@ -4,10 +4,10 @@ const sourceKey = source => JSON.stringify([source.sourceSession, source.seq]);
 export function createMaintenanceProgress(namespace, revisionOf) {
 	const reads = new Map(), coverage = new Map(), changes = new Map(), results = new Map();
 	function checkEntry(entry) {
-		if (entry.namespace !== namespace || !["fact", "sop", "pending"].includes(entry.kind)) throw new Error(`MEMORY_ENTRY_SCOPE ${JSON.stringify(entry)}: 请使用本次空间的精确条目。`);
+		if (entry.namespace !== namespace || !["rule", "fact", "sop", "pending"].includes(entry.kind)) throw new Error(`MEMORY_ENTRY_SCOPE ${JSON.stringify(entry)}: 请使用本次空间的精确条目。`);
 	}
 	function read(value) {
-		if (!value.entry || !["fact", "sop", "pending"].includes(value.entry.kind) || value.not_found) return false;
+		if (!value.entry || !["rule", "fact", "sop", "pending"].includes(value.entry.kind) || value.not_found) return false;
 		const key = entryKey(value.entry);
 		if (value.revision !== revisionOf(value.entry)) return false;
 		let page = coverage.get(key);

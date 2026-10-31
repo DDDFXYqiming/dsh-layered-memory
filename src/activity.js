@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { nsRoot, resolveNamespace } from "./store.js";
+import { readReflectionState } from "./reflection.js";
 
 const RUN_LIMIT = 50;
 const SESSION_LIMIT = 128;
@@ -39,18 +40,25 @@ export function createActivitySource(ctx, cfg) {
 	function stateFor(parentSessionId) {
 		let state = parents.get(parentSessionId);
 		if (!state) {
-			state = { revision: 0, runs: new Map(), hydrated: new Set(), listeners: new Set() };
+			state = { revision: 0, runs: new Map(), hydrated: new Set(), listeners: new Set(), reflection: [] };
 			parents.set(parentSessionId, state);
 			prune(parentSessionId);
 		}
 		return state;
 	}
 	function snapshot(parentSessionId, state) {
+		const namespaces = new Set([...state.hydrated, ...[...state.runs.values()].map(run => run.namespace)]);
+		const reflection = [...namespaces].map(namespace => {
+			const current = readReflectionState(nsRoot(cfg.memoryDir, namespace));
+			return { namespace, nextEligibleAt: current.nextEligibleAt || null, retryCount: current.retryCount || 0, retryReason: current.retryReason || null };
+		});
+		if (JSON.stringify(state.reflection) !== JSON.stringify(reflection)) { state.reflection = reflection; state.revision++; }
 		const items = [...state.runs.values()].sort((a, b) => finishedTime(b).localeCompare(finishedTime(a)));
 		const finished = items.filter(item => item.finishedAt !== null);
 		return {
 			parentSessionId,
 			revision: state.revision,
+			reflection: state.reflection,
 			running: items.filter(item => item.status === "running" && item.finishedAt === null),
 			latestChanged: finished.find(item => item.changedEntries > 0) || null,
 			latestFailure: finished[0]?.status === "failed" ? finished[0] : null,
@@ -69,9 +77,12 @@ export function createActivitySource(ctx, cfg) {
 		if (lifetime.signal.aborted) return;
 		if (!record.parentSession || !record.id) throw new Error("记忆状态记录缺少父会话或运行标识");
 		const state = stateFor(record.parentSession);
-		if (!store(state, activityItem(record))) return;
-		const value = snapshot(record.parentSession, state);
-		for (const listener of state.listeners) listener(value);
+		store(state, activityItem(record));
+		for (const [parentSessionId, current] of parents) {
+			if (parentSessionId !== record.parentSession && (!current.listeners.size || !current.hydrated.has(record.namespace))) continue;
+			const value = snapshot(parentSessionId, current);
+			for (const listener of current.listeners) listener(value);
+		}
 		prune(record.parentSession);
 	}
 	async function getSnapshot(parentSessionId, signal = lifetime.signal) {

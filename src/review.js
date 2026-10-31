@@ -4,13 +4,16 @@ import { join } from "node:path";
 import { readEntries, readEntry, rewriteFile, hashText } from "./store.js";
 
 export const REVIEW_STATE_FILE = "review-state.json";
-export const REVIEW_CHANGE_THRESHOLD = 20;
 export const REVIEW_CANDIDATE_LIMIT = 8;
 const keyOf = entry => JSON.stringify([entry.kind, entry.key]);
 const refOf = entry => ({ kind: entry.kind, key: entry.key });
 const now = () => new Date().toISOString();
-const fingerprint = entry => hashText(JSON.stringify([entry.title, entry.content.replace(/\s+/g, " ").trim()]));
-const emptyState = () => ({ version: 1, pressure: null, completedPressure: [], conflicts: [], ordinaryChanges: {}, baseline: {}, overLimit: false, aboveTarget: false, targetChars: null, indexChars: null, stallRounds: 0, exhausted: false });
+const emptyState = () => ({ version: 1, pressure: null, completedPressure: [], conflicts: [], overLimit: false, aboveTarget: false, targetChars: null, indexChars: null });
+const LEGACY_FIELDS = ["exhausted", "stallRounds", "ordinaryChanges", "baseline"];
+const COMPLETED_PRESSURE_LIMIT = 20;
+function pressureDue(state) {
+	return state.aboveTarget === true && (!state.pressure || state.pressure.status === "complete");
+}
 export const CHARS_PER_ENTRY = 35;
 export function candidateLimitFor(gapChars) {
 	const gap = Number(gapChars) || 0;
@@ -52,7 +55,7 @@ function rememberWaiting(state, item, reviewed) {
 	}
 	return conflict.id;
 }
-function settle(state, entries) {
+function settle(state) {
 	for (const job of [state.pressure, ...state.conflicts].filter(Boolean)) {
 		if (job.status === "complete" || job.items === null) continue;
 		const pending = job.items.some(item => item.status === "pending");
@@ -63,13 +66,7 @@ function settle(state, entries) {
 		}
 		job.status = pending ? "pending" : job === state.pressure ? "complete"
 			: job.items.some(item => item.status === "waiting_evidence") ? "waiting_evidence" : "complete";
-		if (job.status === "complete") {
-			job.completedAt = now();
-			if (job === state.pressure) {
-				state.ordinaryChanges = {};
-				state.baseline = Object.fromEntries(entries.filter(entry => !entry.meta.archived).map(entry => [keyOf(entry), fingerprint(entry)]));
-			}
-		}
+		if (job.status === "complete") job.completedAt = now();
 	}
 }
 function refresh(state, entries) {
@@ -86,7 +83,7 @@ function refresh(state, entries) {
 			}
 		}
 	}
-	settle(state, entries);
+	settle(state);
 }
 function summary(state, workIds) {
 	const jobs = [state.pressure, ...state.conflicts].filter(job => job && (!workIds || workIds.includes(job.id)));
@@ -94,10 +91,7 @@ function summary(state, workIds) {
 	return {
 		ready: jobs.some(job => job.status === "pending"),
 		waiting: jobs.filter(job => job.status !== "complete").reduce((n, job) => n + (job.items || []).filter(item => item.status === "waiting_evidence").length, 0),
-		ordinaryChanges: Object.keys(state.ordinaryChanges).length,
 		aboveTarget: state.aboveTarget === true,
-		exhausted: state.exhausted === true,
-		stallRounds: state.stallRounds ?? 0,
 		targetChars: state.targetChars ?? null,
 		indexChars: state.indexChars ?? null,
 		gapChars: state.targetChars == null || state.indexChars == null ? null : Math.max(0, state.indexChars - state.targetChars),
@@ -108,64 +102,36 @@ function summary(state, workIds) {
 	};
 }
 
-export function syncReview(root, { overLimit, aboveTarget = overLimit, targetChars = null, indexChars = null, entries = readEntries(root), origin }) {
+export function syncReview(root, { overLimit, aboveTarget = overLimit, targetChars = null, indexChars = null, entries = readEntries(root) }) {
 	return update(root, state => {
 		refresh(state, entries);
-		state.overLimit = overLimit;
-		state.aboveTarget = aboveTarget === true;
-		state.targetChars = targetChars ?? null;
-		state.indexChars = indexChars ?? null;
+		for (const field of LEGACY_FIELDS) delete state[field];
 		const gapChars = targetChars == null || indexChars == null ? null : Math.max(0, indexChars - targetChars);
-		const progressed = state.pressure?.items?.some(item => item.status === "changed") === true;
-		const lastJob = state.pressure?.status === "complete" ? state.pressure : state.completedPressure.at(-1);
-		const lastStart = Number(lastJob?.startChars);
-		const gain = Number.isFinite(lastStart) && indexChars != null ? lastStart - indexChars : null;
-		const stallFloor = Math.max(40, Math.floor((gapChars ?? 0) * 0.05));
-		if (gain == null || gain <= 0) state.stallRounds = 0;
-		else state.stallRounds = gain < stallFloor ? (state.stallRounds ?? 0) + 1 : 0;
-		state.exhausted = (state.stallRounds ?? 0) >= 2;
-		if (aboveTarget && !state.exhausted && (!state.pressure || state.pressure.status === "complete" && (progressed || Object.keys(state.ordinaryChanges).length >= REVIEW_CHANGE_THRESHOLD))) {
-			if (state.pressure) state.completedPressure.push(state.pressure);
-			state.pressure = { id: randomUUID(), kind: "index_pressure", status: "pending", createdAt: now(), items: null, reviewed: [],
-				startChars: indexChars ?? null, targetChars: targetChars ?? null, gapChars,
-				...(origin?.memoryChanges.length ? { ownerSession: origin.parentSession, trigger: origin.trigger } : {}) };
-		} else if (state.pressure && state.pressure.status !== "complete" && state.pressure.items === null) {
-			state.pressure.startChars = indexChars ?? null;
-			state.pressure.targetChars = targetChars ?? null;
-			state.pressure.gapChars = gapChars;
+		const pressureActive = aboveTarget === true || gapChars > 0 && (state.pressureActive === true || state.pressure?.status === "pending");
+		Object.assign(state, { overLimit, aboveTarget: pressureActive, pressureActive, targetChars: targetChars ?? null, indexChars: indexChars ?? null });
+		if (!pressureActive && state.pressure?.status !== "complete" && state.pressure) {
+			Object.assign(state.pressure, { status: "complete", completedAt: now(), resolvedReason: "索引已回到目标水位" });
 		}
-		if (origin) {
-			const changed = new Set(origin.memoryChanges.map(item => keyOf(item.entry)));
-			for (const job of [state.pressure, ...state.conflicts].filter(job => job?.status === "pending")) {
-				if (origin.reviewRequests.includes(job.id) || job.items?.some(item => changed.has(keyOf(item.entry)))) {
-					job.ownerSession = origin.parentSession;
-					job.trigger = origin.trigger;
-				}
-			}
+		if (pressureDue(state)) {
+			if (state.pressure) state.completedPressure = [...state.completedPressure, state.pressure].slice(-COMPLETED_PRESSURE_LIMIT);
+			state.pressure = { id: randomUUID(), kind: "index_pressure", status: "pending", createdAt: now(), items: null, reviewed: [],
+				startChars: indexChars ?? null, targetChars: targetChars ?? null, gapChars };
+		} else if (state.pressure && state.pressure.status !== "complete" && state.pressure.items === null) {
+			Object.assign(state.pressure, { startChars: indexChars ?? null, targetChars: targetChars ?? null, gapChars });
 		}
 		return summary(state);
 	});
 }
 export function hasReviewWork(root) {
 	return update(root, state => {
-		refresh(state, readEntries(root));
-		const progressed = state.pressure?.items?.some(item => item.status === "changed") === true;
-		return summary(state).ready || state.aboveTarget === true && state.pressure?.status === "complete"
-			&& (progressed || Object.keys(state.ordinaryChanges).length >= REVIEW_CHANGE_THRESHOLD);
-	});
-}
-export function recordOrdinaryChange(root, { entry, revision }) {
-	return update(root, state => {
-		const current = readEntry(root, entry.kind, entry.key);
-		if (!current || current.meta.archived || current.revision !== revision || state.pressure?.status !== "complete") return summary(state);
-		const key = keyOf(entry);
-		if (state.baseline[key] !== fingerprint(current)) state.ordinaryChanges[key] = revision;
-		return summary(state);
+		const entries = readEntries(root);
+		refresh(state, entries);
+		return summary(state).ready || pressureDue(state);
 	});
 }
 
 export function enqueueReview(root, { entry, reason, evidence = [], revision }) {
-	if (!["fact", "sop"].includes(entry.kind) || !reason?.trim()) throw new Error("审阅需要精确 fact/sop entry 和原因");
+	if (!["rule", "fact", "sop"].includes(entry.kind) || !reason?.trim()) throw new Error("审阅需要精确 rule/fact/sop entry 和原因");
 	for (const source of evidence) {
 		if (!source.text?.trim() || !source.sourceSession || !source.sourceSeqs?.length) throw new Error("审阅证据需要正文及精确来源会话与事件序号");
 	}
@@ -191,7 +157,7 @@ export function enqueueReview(root, { entry, reason, evidence = [], revision }) 
 				if (candidate.status === "waiting_evidence" && keyOf(candidate.entry) === keyOf(entry) && previousEvidence !== hashText(JSON.stringify(job.evidence))) candidate.status = "pending";
 			}
 		}
-		settle(state, readEntries(root));
+		settle(state);
 		return { queued: true, changed, id: job.id, status: job.status, entry, revision: current.revision };
 	});
 }
@@ -215,23 +181,15 @@ export function reviewWork(root, namespace, workIds) {
 	});
 }
 
-export function claimReviewWork(root, namespace, { parentSession, trigger, activity, runs }) {
+export function claimReviewWork(root, namespace) {
 	return update(root, state => {
 		const entries = readEntries(root);
 		refresh(state, entries);
-		const manual = trigger.kind === "manual";
 		const selected = [];
 		for (const job of [state.pressure, ...state.conflicts].filter(job => job?.status === "pending")) {
-			if (manual) {
-				job.ownerSession = parentSession;
-				job.trigger = trigger;
-			}
-			if (job.ownerSession !== parentSession) continue;
-			const fresh = JSON.stringify(job.trigger) === JSON.stringify(trigger);
-			const previous = runs.findLast(run => run.workIds?.includes(job.id));
-			const unattempted = !previous || JSON.stringify(previous.workTriggers[job.id]) !== JSON.stringify(job.trigger);
-			const continuing = activity?.hasNewEvidence && (unattempted || previous.progressedWorkIds.includes(job.id));
-			if (manual || fresh || continuing) selected.push(job.id);
+			delete job.ownerSession;
+			delete job.trigger;
+			selected.push(job.id);
 		}
 		return workView(state, entries, namespace, selected);
 	});
@@ -239,11 +197,10 @@ export function claimReviewWork(root, namespace, { parentSession, trigger, activ
 
 export function checkpointReview(root, { candidates, selectionReason, entries: results = [] }, work) {
 	return update(root, state => {
-		const currentEntries = readEntries(root);
 		const pressure = state.pressure;
 		if (candidates !== undefined) {
 			if (!pressure || pressure.id !== work.pressure?.id || pressure.items !== null) throw new Error("本次没有待选候选的索引审阅");
-			if (!selectionReason?.trim() || candidates.length > REVIEW_CANDIDATE_LIMIT || new Set(candidates.map(keyOf)).size !== candidates.length || !candidates.length && work.catalog.length) throw new Error("请说明选题理由并选取少量具体候选");
+			if (!selectionReason?.trim() || candidates.length > (work.candidateLimit ?? REVIEW_CANDIDATE_LIMIT) || new Set(candidates.map(keyOf)).size !== candidates.length || !candidates.length && work.catalog.length) throw new Error("请说明选题理由并选取少量具体候选");
 			pressure.items = candidates.map(entry => {
 				const found = work.catalog.find(item => keyOf(item.entry) === keyOf(entry));
 				if (!found) throw new Error("候选不在本次完整标题目录中");
@@ -252,7 +209,7 @@ export function checkpointReview(root, { candidates, selectionReason, entries: r
 			pressure.selectionReason = selectionReason;
 		}
 		for (const result of results) {
-			if (result.status === "waiting_evidence" && ["fact", "sop"].includes(result.entry.kind) && ![pressure, ...state.conflicts].some(job => job?.status !== "complete" && job?.items?.some(item => keyOf(item.entry) === keyOf(result.entry)))) {
+			if (result.status === "waiting_evidence" && ["rule", "fact", "sop"].includes(result.entry.kind) && ![pressure, ...state.conflicts].some(job => job?.status !== "complete" && job?.items?.some(item => keyOf(item.entry) === keyOf(result.entry)))) {
 				rememberWaiting(state, { entry: refOf(result.entry), revision: result.currentRevision, status: "waiting_evidence", reason: result.reason },
 					[{ ...result, entry: refOf(result.entry), reviewedAt: now() }]);
 			}
@@ -266,7 +223,7 @@ export function checkpointReview(root, { candidates, selectionReason, entries: r
 				job.reviewed.push({ ...result, entry: refOf(result.entry), reviewedAt: now() });
 			}
 		}
-		settle(state, currentEntries);
+		settle(state);
 		return summary(state);
 	});
 }

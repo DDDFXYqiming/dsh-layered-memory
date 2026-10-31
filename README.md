@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Layered memory carries facts and operating procedures from one session into the next. Facts live under second-level headings in `facts.md`, procedures in `sops/*.md`; entries are addressed by `{namespace, kind, key}`, carry evidence, and keep the previous version before a write, so history can be reviewed and rolled back.
+Layered memory carries rules, facts and operating procedures from one session into the next. Rules live in `rules.md`, facts under second-level headings in `facts.md`, and procedures in `sops/*.md`. All three use `{namespace, kind, key}` and the same memory tools, with sources and restorable history.
 
 ## Table of Contents
 
@@ -34,7 +34,7 @@ Desktop runs the same install through its bundled `dsh` command with the `deskto
 
 The basic `memory_search/list/read/write/update` tools are available in each session. Load the `memory` skill or call `memory_activate({mode:"common"})` to add the status and conflict tools; management operations use `mode:"manage"`. User configuration controls access through `memoryAccess` and `subagentMemoryAccess`, with child agents read-only by default.
 
-Entries are addressed by the `entry` object returned from search, list or create. Reuse that object instead of rebuilding it from a title.
+Entries are addressed by the `entry` object returned from search, list or create. Reuse that object instead of rebuilding it from a title. Use `kind: "rule"` for ongoing requirements, `fact` for known findings, and `sop` for reusable procedures. A rule can cite the original user instruction as its evidence.
 
 ```js
 memory_write({
@@ -63,11 +63,11 @@ memory_rollback({entry, snapshot_id: "Choose a returned snapshot id"})
 | Process candidates | memory_pending, memory_accept, memory_discard |
 | Inspect and maintain | memory_stats, memory_index, memory_maintain, memory_review |
 
-Search covers active entries in the current and global spaces. Pass `include_archived:true` to reach archived content, then read the returned entry. A read reports its line range, total lines, revision, completeness and the next line offset. Global rules and complete indexes remain readable through the `rules`, `index` and `policy` entry kinds.
+Search covers active entries in the current and global spaces. Pass `include_archived:true` to reach archived content, then read the returned entry. A read reports its line range, total lines, revision, completeness and the next line offset. Use `rule` for an individual rule; `rules`, `index` and `policy` remain read-only views of the complete rule layer, index and management guidance. Existing index rules migrate on the first namespace initialization, and the index rule section is generated from active rule entries.
 
 ## Memory Management Page
 
-The Web sidebar carries a “Memory” entry that opens a standalone page: the entry list on the left, the detail on the right. Search, filter by type, show archived entries, edit content and evidence in place, archive and restore, and review history snapshots with a rollback. Interface text follows the host language, and entry types show as Fact/Skill or 事实/经验 depending on it. The data channel and the page rules live in the [memory page contract](docs/memory-browser-contract.md).
+The Web sidebar carries a “Memory” entry that opens a standalone page: the entry list on the left, the detail on the right. Search, filter by type, show archived entries, edit content and evidence in place, archive and restore, and review history snapshots with a rollback. Interface text follows the host language, and entry types show as Rule/Fact/Skill or 规则/事实/经验 depending on it. The data channel and the page rules live in the [memory page contract](docs/memory-browser-contract.md).
 
 ![Memory management page](docs/images/memory-page.png)
 

@@ -29,9 +29,17 @@ function item(value) {
 	return value;
 }
 export function parseActivitySnapshot(value) {
-	exactObject(value, ["parentSessionId", "revision", "running", "latestChanged", "latestFailure", "records"]);
+	exactObject(value, ["parentSessionId", "revision", "reflection", "running", "latestChanged", "latestFailure", "records"]);
 	text(value.parentSessionId);
 	count(value.revision);
+	if (!Array.isArray(value.reflection)) throw new TypeError("空间整理状态必须是数组");
+	for (const state of value.reflection) {
+		exactObject(state, ["namespace", "nextEligibleAt", "retryCount", "retryReason"]);
+		text(state.namespace);
+		nullableText(state.nextEligibleAt);
+		count(state.retryCount);
+		nullableText(state.retryReason);
+	}
 	for (const key of ["running", "records"]) {
 		if (!Array.isArray(value[key])) throw new TypeError("运行状态必须是数组");
 		for (const row of value[key]) { if (row === null) throw new TypeError("运行状态缺少记录"); item(row); }
@@ -107,14 +115,14 @@ function inputObject(value, required, optional = []) {
 function parseEntry(value) {
 	exactObject(value, ["namespace", "kind", "key"]);
 	text(value.namespace);
-	if (!["fact", "sop"].includes(value.kind)) throw new TypeError("未知的记忆类型");
+	if (!["rule", "fact", "sop"].includes(value.kind)) throw new TypeError("未知的记忆类型");
 	text(value.key);
 	return value;
 }
 function parseListEntriesInput(value) {
 	inputObject(value, ["namespace"], ["kind", "query", "includeArchived"]);
 	text(value.namespace);
-	if (value.kind !== undefined && !["fact", "sop"].includes(value.kind)) throw new TypeError("未知的记忆类型");
+	if (value.kind !== undefined && !["rule", "fact", "sop"].includes(value.kind)) throw new TypeError("未知的记忆类型");
 	if (value.query !== undefined) stringValue(value.query);
 	if (value.includeArchived !== undefined) boolean(value.includeArchived);
 	return value;
@@ -127,7 +135,7 @@ function parseEntryInput(value) {
 function parseCreateInput(value) {
 	inputObject(value, ["namespace", "kind", "topic", "content", "evidence"]);
 	text(value.namespace);
-	if (!["fact", "sop"].includes(value.kind)) throw new TypeError("未知的记忆类型");
+	if (!["rule", "fact", "sop"].includes(value.kind)) throw new TypeError("未知的记忆类型");
 	text(value.topic);
 	stringValue(value.content);
 	stringValue(value.evidence);
@@ -180,6 +188,7 @@ function parseNamespaceStats(value) {
 		factsChars: chars("factsChars"),
 		sopsChars: chars("sopsChars"),
 		rulesLines: chars("rulesLines"),
+		ruleCount: chars("ruleCount"),
 		factCount: chars("factCount"),
 		sopCount: chars("sopCount"),
 	};

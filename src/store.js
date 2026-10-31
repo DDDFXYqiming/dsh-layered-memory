@@ -4,7 +4,7 @@ import { join, basename, dirname, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { atomicWriteFileSync, stageWrite, commitStaged } from "./atomic-write.js";
 import { acquireProcessLock } from "./process-lock.js";
-import { FACTS_TEMPLATE, INDEX_TEMPLATE, L0_TEMPLATE } from "./templates.js";
+import { AUTO_END, FACTS_TEMPLATE, INDEX_TEMPLATE, L0_TEMPLATE, RULES_TEMPLATE } from "./templates.js";
 
 export const META_FILE = "memory-meta.json";
 export const PENDING_DIR = "pending";
@@ -20,6 +20,9 @@ export const HEAT_HALF_LIFE_DAYS = 14;
 export const NAMESPACE_CACHE_TTL_MS_DEFAULT = 60_000;
 const WRITE_LOCK_FILE = ".write.lock";
 const heldWriteLocks = new Set();
+const RULE_ENTRY_MARKER = "<!-- memory-rule -->";
+const META_BUCKETS = { rule: "rules", fact: "facts", sop: "sops" };
+function entryFile(root, kind, key) { return join(root, kind === "sop" ? "sops/" + key + ".md" : kind === "rule" ? "rules.md" : "facts.md"); }
 
 export function defaultMemDir() { return join(homedir(), ".dsh", "memory"); }
 export function hashText(text) { return createHash("sha512").update(String(text ?? "")).digest("hex").slice(0, 32); }
@@ -57,7 +60,6 @@ function markdownNames(dir) {
   catch (error) { if (error.code === "ENOENT") return []; throw error; }
 }
 
-/** 只做创建，不迁移、不删除、不覆盖既有用户文件。 */
 export function ensureNamespaceLayout(root, identity) {
   mkdirSync(root, { recursive: true });
   return withNsWriteLock(root, () => {
@@ -65,7 +67,9 @@ export function ensureNamespaceLayout(root, identity) {
     for (const [name, content] of [["memory_management_sop.md", L0_TEMPLATE], ["index.txt", INDEX_TEMPLATE], ["facts.md", FACTS_TEMPLATE]]) {
       if (!existsSync(join(root, name))) atomicWriteFileSync(join(root, name), content);
     }
+    const migration = migrateRules(root);
     if (identity && !existsSync(join(root, ".namespace.json"))) atomicWriteFileSync(join(root, ".namespace.json"), JSON.stringify(identity, null, 2));
+    return migration;
   });
 }
 
@@ -121,43 +125,89 @@ export function isSafeMemName(value) {
   return typeof value === "string" && Boolean(value.trim()) && !/^[\\\/]|^[a-z]:/i.test(value) && !value.split(/[\\\/]/).includes("..") && !/[\x00-\x1f\x7f]/.test(value);
 }
 function assertEntryKey(kind, key) {
-  if (!["fact", "sop"].includes(kind)) throw new Error(`Unknown entry kind: ${kind}`);
+  if (!["rule", "fact", "sop"].includes(kind)) throw new Error(`Unknown entry kind: ${kind}`);
   if (!key || /[\x00-\x1f\x7f]/.test(key)) throw new Error("Entry key must be nonempty and contain no control characters");
   if (kind === "sop" && (!isSafeMemName(key) || /[\\\/]/.test(key))) throw new Error(`Invalid SOP key: ${key}`);
 }
 export function entryIdentity(namespace, kind, key) { assertEntryKey(kind, key); return { namespace: safeNs(namespace), kind, key }; }
-export function parseFacts(text) {
+export function parseFacts(text, marker = null) {
   const lines = String(text ?? "").split(/\r?\n/);
   const out = [];
   let entry;
   lines.forEach((line, index) => {
     const heading = line.match(/^##\s+(.+)$/);
-    if (heading) {
+    if (heading && (!marker || lines[index + 1] === marker)) {
       if (entry) { entry.end = index; out.push(entry); }
       entry = { key: heading[1].trim(), start: index, lines: [] };
-    } else if (entry) entry.lines.push(line);
+    } else if (entry && !(marker && index === entry.start + 1)) entry.lines.push(line);
   });
   if (entry) { entry.end = lines.length; out.push(entry); }
   return out.map(({ lines: body, ...rest }) => ({ ...rest, raw: body.join("\n").trim() }));
+}
+export function parseRules(text) {
+  const marked = /^##[ \t]+.+\r?\n<!-- memory-rule -->\r?$/m.test(String(text ?? ""));
+  return parseFacts(text, marked ? RULE_ENTRY_MARKER : null);
+}
+export function ruleSections(root) { return parseRules(readText(join(root, "rules.md"))).map(entry => entry.key); }
+export function readRule(root, key) { return parseRules(readText(join(root, "rules.md"))).find(entry => entry.key === key)?.raw ?? null; }
+export function readRulePreamble(root) {
+  const text = readText(join(root, "rules.md")) || "";
+  const first = parseRules(text)[0];
+  const lines = text.split(/\r?\n/);
+  return lines.slice(0, first?.start ?? lines.length).join("\n").replace(/^# Rules(?:\r?\n|$)/, "").trim();
+}
+function migrateRules(root) {
+  const path = join(root, "rules.md");
+  if (existsSync(path)) return null;
+  const index = readText(join(root, "index.txt")) || "";
+  const end = index.indexOf(AUTO_END);
+  const tail = end < 0 ? index : index.slice(end + AUTO_END.length);
+  const marker = tail.match(/(?:^|\n)\[RULES\][ \t]*(?:\r?\n|$)/);
+  const legacy = marker ? tail.slice(marker.index + marker[0].length) : "";
+  if (!legacy.trim()) { atomicWriteFileSync(path, RULES_TEMPLATE); return null; }
+  const starts = [];
+  let offset = 0, fence = null;
+  for (const line of legacy.split(/(?<=\n)/)) {
+    const delimiter = line.match(/^[ \t]{0,3}(\x60{3,}|~{3,})/);
+    if (delimiter) {
+      const run = delimiter[1];
+      if (!fence) fence = run;
+      else if (run[0] === fence[0] && run.length >= fence.length) fence = null;
+    } else if (!fence && /^- \S/.test(line)) starts.push(offset);
+    offset += line.length;
+  }
+  const used = new Set();
+  const blocks = starts.length ? starts.map((start, i) => legacy.slice(start, starts[i + 1] ?? legacy.length)) : [legacy];
+  const preamble = starts.length ? legacy.slice(0, starts[0]) : "";
+  const entries = blocks.map(body => {
+    const firstLine = body.split(/\r?\n/, 1)[0].replace(/^- /, "");
+    const base = starts.length ? slugify(firstLine) : "legacy-rules";
+    let key = base, suffix = 2;
+    while (used.has(key)) key = base + "-" + suffix++;
+    used.add(key);
+    return "## " + key + "\n" + RULE_ENTRY_MARKER + "\n" + body + (body.endsWith("\n") ? "" : "\n");
+  });
+  atomicWriteFileSync(path, RULES_TEMPLATE + preamble + entries.join("\n"));
+  return { rulesMigrated: true, ruleCount: entries.length, rulesPath: path };
 }
 export function factSections(root) { return parseFacts(readText(join(root, "facts.md"))).map(entry => entry.key); }
 export function sopNames(root) { return markdownNames(join(root, "sops")).map(name => name.slice(0, -3)).filter(name => !SOP_RESERVED_NAMES.has(name.toLowerCase())); }
 export function pendingNames(root) { return markdownNames(join(root, PENDING_DIR)); }
 export function readFact(root, topic) { return parseFacts(readText(join(root, "facts.md"))).find(entry => entry.key === topic)?.raw ?? null; }
 export function readSop(root, key) { assertEntryKey("sop", key); return readText(join(root, "sops", key + ".md")); }
-export function entryExists(root, kind, key) { return kind === "fact" ? readFact(root, key) !== null : readSop(root, key) !== null; }
+export function entryExists(root, kind, key) { return readEntry(root, kind, key) !== null; }
 export function readMeta(root) {
-  const meta = readJson(join(root, META_FILE), { facts: {}, sops: {} });
-  if (!meta || typeof meta !== "object" || !meta.facts || !meta.sops || typeof meta.facts !== "object" || typeof meta.sops !== "object" || Array.isArray(meta.facts) || Array.isArray(meta.sops)) throw new Error("Invalid memory metadata structure: " + join(root, META_FILE));
-  Object.setPrototypeOf(meta.facts, null);
-  Object.setPrototypeOf(meta.sops, null);
+  const meta = readJson(join(root, META_FILE), { rules: {}, facts: {}, sops: {} });
+  if (meta && typeof meta === "object" && !Object.hasOwn(meta, "rules")) meta.rules = {};
+  if (!meta || typeof meta !== "object" || Object.values(META_BUCKETS).some(name => !meta[name] || typeof meta[name] !== "object" || Array.isArray(meta[name]))) throw new Error("Invalid memory metadata structure: " + join(root, META_FILE));
+  for (const name of Object.values(META_BUCKETS)) Object.setPrototypeOf(meta[name], null);
   return meta;
 }
-export function getEntryMeta(root, kind, key) { assertEntryKey(kind, key); return readMeta(root)[kind === "fact" ? "facts" : "sops"][key] ?? null; }
+export function getEntryMeta(root, kind, key) { assertEntryKey(kind, key); return readMeta(root)[META_BUCKETS[kind]][key] ?? null; }
 export function setEntryMeta(root, kind, key, patch) {
   assertEntryKey(kind, key);
   return withNsWriteLock(root, () => {
-    const meta = readMeta(root), bucket = kind === "fact" ? meta.facts : meta.sops;
+    const meta = readMeta(root), bucket = meta[META_BUCKETS[kind]];
     const change = typeof patch === "function" ? patch(bucket[key] || null) : patch;
     if (change === null) return bucket[key] || null;
     const now = new Date().toISOString();
@@ -169,7 +219,7 @@ export function setEntryMeta(root, kind, key, patch) {
 export function isArchived(root, kind, key) { return Boolean(getEntryMeta(root, kind, key)?.archived); }
 export function activeEntries(root, entries = readEntries(root)) {
   const all = entries.filter(entry => !entry.meta?.archived);
-  return { facts: all.filter(entry => entry.kind === "fact").map(entry => entry.key), sops: all.filter(entry => entry.kind === "sop").map(entry => entry.key) };
+  return { rules: all.filter(entry => entry.kind === "rule").map(entry => entry.key), facts: all.filter(entry => entry.kind === "fact").map(entry => entry.key), sops: all.filter(entry => entry.kind === "sop").map(entry => entry.key) };
 }
 
 export const ARCHIVE_BANNER_PREFIX = "> [已归档";
@@ -196,7 +246,7 @@ export function withArchiveBanner(text, at = new Date()) {
   return match ? match[1] + "\n\n" + archiveBannerLine(at) + "\n\n" + clean.slice(match[0].length)
     : archiveBannerLine(at) + "\n\n" + clean;
 }
-export function parseEntryBody(kind, key, raw) {
+export function parseEntryBody(kind, key, raw, { stripEvidence = true } = {}) {
   let content = String(raw ?? "").trim(), title = key;
   if (kind === "sop") {
     const first = content.match(/^#\s+(.+)(?:\r?\n|$)/);
@@ -211,7 +261,7 @@ export function parseEntryBody(kind, key, raw) {
     }
   }
   content = stripArchiveBanner(content).trim();
-  for (;;) {
+  for (; stripEvidence;) {
     const marker = content.lastIndexOf("\n\n> 证据:");
     if (marker < 0 || !content.slice(marker + 2).split("\n").every(line => !line.trim() || line.startsWith(">"))) break;
     content = content.slice(0, marker).trimEnd();
@@ -219,20 +269,21 @@ export function parseEntryBody(kind, key, raw) {
   return { title, content };
 }
 function entryFromRaw(kind, key, raw, meta = {}) {
-  const body = parseEntryBody(kind, key, raw);
+  const body = parseEntryBody(kind, key, raw, { stripEvidence: kind !== "rule" || Boolean(meta.evidence) });
   const semantic = { evidence: meta.evidence || "", related: meta.related || [], archived: Boolean(meta.archived), replacedBy: meta.replacedBy || null };
   return { kind, key, ...body, raw, meta, revision: hashText(JSON.stringify([kind, key, raw, semantic])) };
 }
 export function readEntry(root, kind, key) {
   assertEntryKey(kind, key);
-  const raw = kind === "fact" ? readFact(root, key) : readSop(root, key);
+  const raw = kind === "rule" ? readRule(root, key) : kind === "fact" ? readFact(root, key) : readSop(root, key);
   return raw === null ? null : entryFromRaw(kind, key, raw, getEntryMeta(root, kind, key) || {});
 }
 export function readEntries(root) {
   const meta = readMeta(root);
+  const rules = parseRules(readText(join(root, "rules.md"))).map(entry => entryFromRaw("rule", entry.key, entry.raw, meta.rules[entry.key] || {}));
   const facts = parseFacts(readText(join(root, "facts.md"))).map(entry => entryFromRaw("fact", entry.key, entry.raw, meta.facts[entry.key] || {}));
   const sops = sopNames(root).map(key => entryFromRaw("sop", key, readSop(root, key), meta.sops[key] || {}));
-  return [...facts, ...sops];
+  return [...rules, ...facts, ...sops];
 }
 export function entryContentRevision(root, kind, key) { return readEntry(root, kind, key)?.revision ?? null; }
 function factTextWith(text, key, content) {
@@ -242,6 +293,21 @@ function factTextWith(text, key, content) {
   const lines = base.split(/\r?\n/);
   for (const span of spans.slice(1).reverse()) lines.splice(span.start, span.end - span.start);
   lines.splice(spans[0].start, spans[0].end - spans[0].start, "## " + key, content.trim(), "");
+  return lines.join("\n");
+}
+function ruleTextWith(text, key, content) {
+  let base = text ?? RULES_TEMPLATE;
+  if (!/^##[ \t]+.+\r?\n<!-- memory-rule -->\r?$/m.test(base)) {
+    const lines = base.split(/\r?\n/);
+    for (const entry of parseRules(base).reverse()) lines.splice(entry.start + 1, 0, RULE_ENTRY_MARKER);
+    base = lines.join("\n");
+  }
+  const spans = parseRules(base).filter(entry => entry.key === key);
+  const heading = "## " + key + "\n" + RULE_ENTRY_MARKER;
+  if (!spans.length) return base.trimEnd() + "\n\n" + heading + "\n" + content.trim() + "\n";
+  const lines = base.split(/\r?\n/);
+  for (const span of spans.slice(1).reverse()) lines.splice(span.start, span.end - span.start);
+  lines.splice(spans[0].start, spans[0].end - spans[0].start, heading, content.trim(), "");
   return lines.join("\n");
 }
 export function upsertFact(root, key, content) {
@@ -259,14 +325,14 @@ export function commitEntry(root, kind, key, raw, entryMeta) {
   assertEntryKey(kind, key);
   return withNsWriteLock(root, () => {
     const meta = readMeta(root);
-    const path = kind === "fact" ? join(root, "facts.md") : join(root, "sops", key + ".md");
+    const path = entryFile(root, kind, key);
     const previous = readText(path);
-    if (kind === "fact") {
-      for (const duplicate of parseFacts(previous).filter(entry => entry.key === key).slice(1)) saveSnapshot(root, kind, key, duplicate.raw, meta.facts[key]);
+    if (kind !== "sop") {
+      for (const duplicate of (kind === "rule" ? parseRules(previous) : parseFacts(previous)).filter(entry => entry.key === key).slice(1)) saveSnapshot(root, kind, key, duplicate.raw, meta[META_BUCKETS[kind]][key]);
     }
-    meta[kind === "fact" ? "facts" : "sops"][key] = entryMeta;
-    const entry = entryFromRaw(kind, key, kind === "fact" ? raw.trim() : raw, entryMeta);
-    commitFiles(root, [[path, kind === "fact" ? factTextWith(previous, key, raw) : raw], [join(root, META_FILE), JSON.stringify(meta, null, 2)]]);
+    meta[META_BUCKETS[kind]][key] = entryMeta;
+    const entry = entryFromRaw(kind, key, kind !== "sop" ? raw.trim() : raw, entryMeta);
+    commitFiles(root, [[path, kind === "rule" ? ruleTextWith(previous, key, raw) : kind === "fact" ? factTextWith(previous, key, raw) : raw], [join(root, META_FILE), JSON.stringify(meta, null, 2)]]);
     return entry;
   });
 }
@@ -303,8 +369,8 @@ function historyRecords(root, kind, key) {
     const heading = rawFile.match(/^#{1,2}\s+(.+)(?:\r?\n|$)/);
     if (!heading) continue;
     const title = heading[1].trim();
-    if (kind === "fact" ? title !== key : slugify(title) !== key) continue;
-    const raw = kind === "fact" ? rawFile.slice(heading[0].length).trim() : rawFile;
+    if (kind !== "sop" ? title !== key : slugify(title) !== key) continue;
+    const raw = kind !== "sop" ? rawFile.slice(heading[0].length).trim() : rawFile;
     const sidecar = readJson(join(root, HISTORY_DIR, name.replace(/\.md$/, ".meta.json")), null);
     const timestamp = name.match(/-(\d{10,})\.md$/)?.[1];
     records.push({ id: name, path, kind, key, title, raw, meta: sidecar?.missing ? null : sidecar, metaAvailable: Boolean(sidecar && !sidecar.missing), createdAt: timestamp ? new Date(Number(timestamp)).toISOString() : statSync(join(root, path)).mtime.toISOString(), legacy: true });
@@ -353,7 +419,7 @@ export function entryHeat(access, meta, kind, key, heat = {}) {
     const age = Math.max(0, Date.now() - Date.parse(value.lastAt));
     return Number(value.score ?? value.count ?? 0) * Math.pow(0.5, age / (halfLife * 86400000));
   }
-  const created = meta[kind === "fact" ? "facts" : "sops"]?.[key]?.createdAt;
+  const created = meta[META_BUCKETS[kind]]?.[key]?.createdAt;
   const age = created ? Date.now() - Date.parse(created) : Infinity;
   return age >= 0 && age <= (heat.recencyWindowMs ?? RECENCY_WINDOW_MS) ? RECENCY_BONUS : 0;
 }
@@ -395,24 +461,24 @@ function fileBytes(path) {
 }
 export function computeNamespaceStats(root, entries = readEntries(root)) {
   const active = entries.filter(entry => !entry.meta.archived);
-  const contentBytes = ["facts.md", "index.txt", "memory_management_sop.md"].reduce((sum, name) => sum + fileBytes(join(root, name)), 0) + directoryBytes(join(root, "sops"));
+  const contentBytes = ["rules.md", "facts.md", "index.txt", "memory_management_sop.md"].reduce((sum, name) => sum + fileBytes(join(root, name)), 0) + directoryBytes(join(root, "sops"));
   const historyBytes = directoryBytes(join(root, HISTORY_DIR)) + directoryBytes(join(root, ARCHIVE_DIR));
   const pendingBytes = directoryBytes(join(root, PENDING_DIR));
   let metadataBytes = 0;
   try {
     for (const name of readdirSync(root, { withFileTypes: true })) {
-      if (name.isFile() && !["facts.md", "index.txt", "memory_management_sop.md", WRITE_LOCK_FILE, ".maintenance-agent.lock"].includes(name.name) && !name.name.startsWith(".write-owner-")) metadataBytes += statSync(join(root, name.name)).size;
+      if (name.isFile() && !["rules.md", "facts.md", "index.txt", "memory_management_sop.md", WRITE_LOCK_FILE, ".maintenance-agent.lock"].includes(name.name) && !name.name.startsWith(".write-owner-")) metadataBytes += statSync(join(root, name.name)).size;
     }
   } catch (error) { if (error.code !== "ENOENT") throw error; }
-  return { facts: active.filter(entry => entry.kind === "fact").length, sops: active.filter(entry => entry.kind === "sop").length, archived: entries.length - active.length, pending: pendingNames(root).length, size_bytes: contentBytes + historyBytes + pendingBytes + metadataBytes, content_bytes: contentBytes, history_bytes: historyBytes, pending_bytes: pendingBytes, metadata_bytes: metadataBytes, updatedAt: new Date().toISOString() };
+  return { rules: active.filter(entry => entry.kind === "rule").length, facts: active.filter(entry => entry.kind === "fact").length, sops: active.filter(entry => entry.kind === "sop").length, archived: entries.length - active.length, pending: pendingNames(root).length, size_bytes: contentBytes + historyBytes + pendingBytes + metadataBytes, content_bytes: contentBytes, history_bytes: historyBytes, pending_bytes: pendingBytes, metadata_bytes: metadataBytes, updatedAt: new Date().toISOString() };
 }
 export function backfillMeta(root, { namespace = "default", now = new Date() } = {}) {
   return withNsWriteLock(root, () => {
     const meta = readMeta(root), added = [];
-    for (const [kind, names] of [["fact", factSections(root)], ["sop", sopNames(root)]]) {
-      const bucket = meta[kind === "fact" ? "facts" : "sops"];
+    for (const [kind, names] of [["rule", ruleSections(root)], ["fact", factSections(root)], ["sop", sopNames(root)]]) {
+      const bucket = meta[META_BUCKETS[kind]];
       for (const key of names) {
-        const file = join(root, kind === "fact" ? "facts.md" : "sops/" + key + ".md");
+        const file = entryFile(root, kind, key);
         const mtimeIso = new Date(Math.min(statSync(file).mtimeMs, now.getTime())).toISOString();
         if (bucket[key]) {
           if (!bucket[key].createdAt) {
@@ -434,7 +500,7 @@ export function reconcileEntries(root) {
     const entries = readEntries(root), meta = readMeta(root);
     const found = new Set(entries.map(entry => JSON.stringify([entry.kind, entry.key])));
     const orphans = [];
-    for (const [kind, bucket] of [["fact", meta.facts], ["sop", meta.sops]]) {
+    for (const [kind, bucket] of [["rule", meta.rules], ["fact", meta.facts], ["sop", meta.sops]]) {
       for (const key of Object.keys(bucket)) {
         if (found.has(JSON.stringify([kind, key]))) continue;
         orphans.push({ kind, key, meta: bucket[key] });

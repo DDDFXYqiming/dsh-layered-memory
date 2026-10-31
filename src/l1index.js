@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteFileSync } from "./atomic-write.js";
 import { AUTO_BEGIN, AUTO_END, INDEX_TEMPLATE, migrateIndexPolicy } from "./templates.js";
-import { activeEntries, nsRoot, safeNs, withNsWriteLock } from "./store.js";
+import { activeEntries, ensureNamespaceLayout, nsRoot, readEntries, readRulePreamble, safeNs, withNsWriteLock } from "./store.js";
 import { COLD_EXPLORE_RATIO_DEFAULT } from "./heat.js";
 
 export const L1_MAX_CHARS_DEFAULT = 12288;
@@ -18,7 +18,11 @@ export function sections(text) {
 	if (begin < 0 || end < begin) return { head: "", auto: "", rules: text.trim() };
 	return { head: text.slice(0, begin).trim(), auto: text.slice(begin + AUTO_BEGIN.length, end).trim(), rules: text.slice(end + AUTO_END.length).trim() };
 }
-export function readRules(root) { return sections(readIndex(root)).rules; }
+export function readRules(root) {
+	if (!existsSync(join(root, "rules.md"))) return sections(readIndex(root)).rules;
+	const bodies = readEntries(root).filter(entry => entry.kind === "rule" && !entry.meta.archived).map(entry => entry.content);
+	return ["[RULES]", readRulePreamble(root), ...bodies].filter(Boolean).join("\n");
+}
 
 export function indexStats(root, budgetChars = L1_MAX_CHARS_DEFAULT) {
 	const text = readIndex(root);
@@ -34,6 +38,7 @@ export function indexStats(root, budgetChars = L1_MAX_CHARS_DEFAULT) {
 		factsChars: factsLine.length,
 		sopsChars: sopsLine.length,
 		rulesLines: rules ? rules.split("\n").length : 0,
+		ruleCount: activeEntries(root).rules.length,
 		factCount: layerNames(auto, "L2").length,
 		sopCount: layerNames(auto, "L3").length,
 	};
@@ -44,14 +49,16 @@ export function buildAutoLines(facts, sops) {
 
 export function syncIndex(root, maxChars = L1_MAX_CHARS_DEFAULT, entries) {
 	return withNsWriteLock(root, () => {
+		ensureNamespaceLayout(root);
 		const current = readIndex(root);
-		const { head, rules } = sections(current || INDEX_TEMPLATE);
+		const { head } = sections(current || INDEX_TEMPLATE);
+		const rules = readRules(root);
 		const { facts, sops } = activeEntries(root, entries);
 		const rebuilt = [head, AUTO_BEGIN, ...buildAutoLines(facts, sops), AUTO_END, rules].filter(Boolean).join("\n") + "\n";
 		const rewritten = current !== rebuilt;
 		if (rewritten) atomicWriteFileSync(join(root, "index.txt"), rebuilt);
 		const chars = indexChars(rebuilt);
-		return { index_chars: chars, max_chars: maxChars, over_limit: chars > maxChars, facts_listed: facts.length, sops_listed: sops.length, rewritten };
+		return { index_chars: chars, max_chars: maxChars, over_limit: chars > maxChars, facts_listed: facts.length, sops_listed: sops.length, rules_listed: activeEntries(root).rules.length, rewritten };
 	});
 }
 function layerNames(auto, layer) {

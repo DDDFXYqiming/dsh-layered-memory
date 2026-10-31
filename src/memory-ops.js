@@ -97,7 +97,7 @@ export function buildAdvisories({ topic, content, existing, index, maxTopicChars
 }
 
 /**
- * 写入正式记忆（fact/sop），带溯源 meta 与可选关联链接。
+ * 写入正式记忆（rule/fact/sop），带溯源 meta 与可选关联链接。
  * 所有覆盖写都必须经过这里快照（memory_write / memory_update / memory_accept 共用）。
  */
 export function writeMemory(root, {
@@ -105,7 +105,7 @@ export function writeMemory(root, {
   evidenceCallIds, namespace = "default", related, preserveSource = false, mode = "create",
   maxChars = L1_MAX_CHARS_DEFAULT,
 }) {
-  if (!["fact", "sop"].includes(entryType)) throw new Error("entryType must be fact or sop");
+  if (!["rule", "fact", "sop"].includes(entryType)) throw new Error("entryType must be rule, fact or sop");
   if (!["create", "update"].includes(mode)) throw new Error("mode must be create or update");
   ensureNamespaceLayout(root);
   return withNsWriteLock(root, () => {
@@ -120,18 +120,18 @@ export function writeMemory(root, {
     if (RESERVED_ENTRY_NAMES.has(title.toLowerCase()) || (entryType === "sop" && RESERVED_ENTRY_NAMES.has(entryKey))) throw new Error("Reserved entry name: " + title);
 
     const supplied = String(content ?? "").trim();
-    const body = parseEntryBody(entryType, entryKey, entryType === "sop" ? "# " + title + "\n\n" + supplied : supplied).content;
+    const body = parseEntryBody(entryType, entryKey, entryType === "sop" ? "# " + title + "\n\n" + supplied : supplied, { stripEvidence: entryType !== "rule" }).content;
     if (!body) throw new Error("Entry content must not be empty");
     if (detectSecret(body)) throw new Error("Entry content contains a credential; store a reference instead");
     if (entryType === "fact" && /^##\s+/m.test(body)) throw new Error('Fact content cannot contain "## " section headings');
     const evidenceText = redactSecretLines(String(evidence ?? (preserveSource ? previous?.meta.evidence : "") ?? "").trim());
-    if (!evidenceText) throw new Error("Verified evidence is required");
+    if (!evidenceText && !(entryType === "rule" && preserveSource)) throw new Error(entryType === "rule" ? "Rule basis is required" : "Verified evidence is required");
     const relatedList = related === undefined ? previous?.meta.related || [] : related.map(normalizeRelatedKey);
     if (relatedList.some(value => detectSecret(JSON.stringify(value)))) throw new Error("Entry relations contain a credential");
     const history = previous ? snapshotEntry(root, entryType, entryKey).path : "";
     const now = new Date().toISOString();
     const prior = previous?.meta || {};
-    const source = preserveSource
+    const source = preserveSource && previous
       ? { sourceSession: prior.sourceSession || null, sourceSeqs: prior.sourceSeqs || [], ...(prior.sourceCallId ? { sourceCallId: prior.sourceCallId } : {}) }
       : { sourceSession: sourceSession || null, sourceSeqs: Array.isArray(sourceSeqs) ? sourceSeqs : [], ...(sourceCallId ? { sourceCallId } : {}) };
     const meta = { ...prior, ...source, namespace, evidence: evidenceText, related: relatedList, archived: false, createdAt: prior.createdAt || now, updatedAt: now };
@@ -139,12 +139,12 @@ export function writeMemory(root, {
     if (evidenceCallIds) meta.evidenceCallIds = evidenceCallIds;
     else if (!preserveSource) delete meta.evidenceCallIds;
     for (const field of ["archivedAt", "archivedFrom", "replacedBy", "promotedTo", "unarchivedAt"]) delete meta[field];
-    const wrapped = body + "\n\n" + quoteEvidence(evidenceText) + "\n";
+    const wrapped = body + (evidenceText ? "\n\n" + quoteEvidence(evidenceText) : "") + "\n";
     const raw = entryType === "sop" ? "# " + title + "\n\n" + wrapped : wrapped;
     const entry = commitEntry(root, entryType, entryKey, raw, meta);
     const index = syncIndex(root, maxChars);
     return {
-      entry_type: entryType, topic: title, key: entryKey, path: join(root, entryType === "fact" ? "facts.md" : "sops/" + entryKey + ".md"),
+      entry_type: entryType, topic: title, key: entryKey, path: join(root, entryType === "rule" ? "rules.md" : entryType === "fact" ? "facts.md" : "sops/" + entryKey + ".md"),
       action: previous ? "updated" : "created", history: history || undefined, index, entry,
       advisories: buildAdvisories({ topic: title, content: body, existing: Boolean(previous), index }),
     };

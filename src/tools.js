@@ -13,7 +13,7 @@ import { writeMemory, readPending, parsePending, redactSecretLines } from "./mem
 import { enqueueReview, readReviewState } from "./review.js";
 import { runMaintain } from "./maintain.js";
 import { listNamespaces, searchNamespaces } from "./search.js";
-import { readCurrentTurnEvidence, readSuccessfulCallEvidence } from "./maintenance-evidence.js";
+import { readCurrentTurnEvidence, readSuccessfulCallEvidence, readRuleInstructionEvidence } from "./maintenance-evidence.js";
 
 export const MEMORY_MUTATIONS = new Set(["memory_write", "memory_update", "memory_accept", "memory_archive", "memory_rollback", "memory_promote"]);
 
@@ -23,8 +23,8 @@ const obj = properties => ({ type: "object", additionalProperties: false, proper
 const arr = items => ({ type: "array", items });
 const nullable = schema => ({ oneOf: [schema, { type: "null" }] });
 const record = { type: "object", additionalProperties: true };
-const memoryKind = { type: "string", enum: ["fact", "sop"] };
-const readKind = { type: "string", enum: ["fact", "sop", "archive", "pending", "index", "rules", "policy"] };
+const memoryKind = { type: "string", enum: ["rule", "fact", "sop"] };
+const readKind = { type: "string", enum: ["rule", "fact", "sop", "archive", "pending", "index", "rules", "policy"] };
 const entrySchema = kind => obj({ namespace: req(str), kind: req(kind), key: req(str) });
 const entryRef = entrySchema(memoryKind), readableRef = entrySchema(readKind);
 const namespaceArg = { ...str, description: "省略时使用当前工作区命名空间；default为全局" };
@@ -50,13 +50,17 @@ function mustRead(root, entry) {
 	if (!value) throw new Error(`记忆不存在：${entry.namespace}/${entry.kind}/${entry.key}`);
 	return value;
 }
-function source(args, exec, preserve = false) {
+async function source(ctx, args, exec, preserve = false) {
 	if ((args.sourceSession !== undefined) !== (args.sourceSeqs !== undefined)) throw new Error("sourceSession与sourceSeqs必须成对提供");
 	if (args.sourceSession !== undefined) {
 		if (!args.sourceSession.trim() || !args.sourceSeqs.length) throw new Error("显式来源需要会话id及至少一个事件seq");
 		return { sourceSession: args.sourceSession, sourceSeqs: args.sourceSeqs, preserveSource: false };
 	}
 	if (preserve) return { preserveSource: true };
+	if ((args.kind ?? args.entry?.kind) === "rule" && args.evidence_call_ids === undefined) {
+		const evidence = await readRuleInstructionEvidence(ctx.get("sessionQuery"), exec.agent.session.id, exec.signal);
+		return { sourceSession: evidence.sourceSession, sourceSeqs: evidence.sourceSeqs, preserveSource: false };
+	}
 	return { sourceSession: exec.agent.session.id, sourceSeqs: [], sourceCallId: exec.callId, ...(args.evidence_call_ids ? { evidenceCallIds: args.evidence_call_ids } : {}), preserveSource: false };
 }
 function safeFile(key) {
@@ -101,18 +105,22 @@ export function buildTools(ctx, cfg, io = {}) {
 	}, async (args, exec) => {
 		const entry = ref(args.entry), root = rootOf(entry);
 		let value;
-		if (entry.kind === "fact" || entry.kind === "sop") value = readEntry(root, entry.kind, entry.key);
+		if (["rule", "fact", "sop"].includes(entry.kind)) value = readEntry(root, entry.kind, entry.key);
+		else if (entry.kind === "rules") {
+			const content = readRules(root);
+			value = { title: entry.key, content, meta: {}, revision: hashText(content) };
+		}
 		else {
-			const fixed = { index: "index.txt", rules: "index.txt", policy: "memory_management_sop.md" };
+			const fixed = { index: "index.txt", policy: "memory_management_sop.md" };
 			const path = fixed[entry.kind] ? join(root, fixed[entry.kind]) : join(root, entry.kind === "archive" ? ARCHIVE_DIR : PENDING_DIR, safeFile(entry.key));
 			if (existsSync(path)) {
-				const content = entry.kind === "rules" ? readRules(root) : readFileSync(path, "utf8");
+				const content = readFileSync(path, "utf8");
 				value = { title: entry.key, content, meta: { archived: entry.kind === "archive" }, revision: hashText(content) };
 			}
 		}
 		if (!value) return { entry, title: entry.key, content: "", meta: {}, revision: "", complete: false, not_found: true, from_line: 0, to_line: 0, total_lines: 0, next_line: null, oversized_line: false };
 		if (args.if_revision && args.if_revision !== value.revision) throw new Error("条目已变化，请从第1行重新读取");
-		if ((entry.kind === "fact" || entry.kind === "sop") && !io.isMaintenance?.(exec.agent)) bumpAccess(root, `${entry.kind}:${entry.key}`, { halfLifeDays: cfg.heatHalfLifeDays, sessionId: exec.agent?.session.id });
+		if (["fact", "sop"].includes(entry.kind) && !io.isMaintenance?.(exec.agent)) bumpAccess(root, `${entry.kind}:${entry.key}`, { halfLifeDays: cfg.heatHalfLifeDays, sessionId: exec.agent?.session.id });
 		return { entry, title: value.title, meta: value.meta, revision: value.revision, not_found: false, ...pageContent(value.content, args) };
 	}, true));
 
@@ -137,34 +145,36 @@ export function buildTools(ctx, cfg, io = {}) {
 		return { namespaces, results: searchNamespaces(cfg.memoryDir, namespaces, args.query, { limit, includeArchived: args.include_archived ?? false }) };
 	}, true));
 
-	defs.push(tool("memory_write", "创建新的fact或SOP。已有条目使用memory_update；必须提供本次验证证据。", {
+	defs.push(tool("memory_write", "创建新的rule、fact或SOP。已有条目使用memory_update；evidence填写规则对应的用户要求或事实验证依据。", {
 		namespace: namespaceArg, kind: req(memoryKind), topic: req(str), content: req(str), evidence: req(str), related: arr(entryRef), ...sourceArgs,
 	}, mutationOutput, async (args, exec) => {
 		const namespace = nsOf(args, exec), root = nsRoot(cfg.memoryDir, namespace);
+		const provenance = await source(ctx, args, exec);
 		return withNsWriteLock(root, () => {
 			ensureNamespaceLayout(root);
-			const key = args.kind === "fact" ? args.topic.trim() : slugify(args.topic);
+			const key = args.kind === "sop" ? slugify(args.topic) : args.topic.trim();
 			const entry = { namespace, kind: args.kind, key };
 			if (readEntry(root, entry.kind, entry.key)) throw new Error("条目已存在，请使用memory_update及此entry");
-			const stored = writeMemory(root, { mode: "create", topic: args.topic, entryType: args.kind, content: args.content, evidence: args.evidence, namespace, ...source(args, exec), ...(args.related ? { related: args.related } : {}), maxChars: cap });
-			return result(entry, "created", stored, args.sourceSession === undefined);
+			const stored = writeMemory(root, { mode: "create", topic: args.topic, entryType: args.kind, content: args.content, evidence: args.evidence, namespace, ...provenance, ...(args.related ? { related: args.related } : {}), maxChars: cap });
+			return result(entry, "created", stored, Boolean(provenance.sourceCallId));
 		});
 	}));
 
-	defs.push(tool("memory_update", "仅更新已有entry并保存旧版本，保持原展示标题及key。仅整理措辞时省略evidence保留原来源；新增事实须给新evidence。", {
+	defs.push(tool("memory_update", "仅更新已有entry并保存旧版本，保持原展示标题及key。仅整理措辞时省略evidence保留原来源；规则要求变更或新增事实须给新evidence。", {
 		entry: refArg, content: req(str), evidence: str, related: arr(entryRef), if_revision: str, ...sourceArgs,
 	}, mutationOutput, async (args, exec) => {
 		const entry = ref(args.entry), root = rootOf(entry);
+		const newEvidence = args.evidence !== undefined || args.sourceSession !== undefined || args.evidence_call_ids !== undefined;
+		const provenance = await source(ctx, args, exec, !newEvidence);
 		return withNsWriteLock(root, () => {
 			const before = mustRead(root, entry);
 			if (args.if_revision && before.revision !== args.if_revision) throw new Error("条目已变化，请重新读取后更新");
-			const newEvidence = args.evidence !== undefined || args.sourceSession !== undefined || args.evidence_call_ids !== undefined;
 			const stored = writeMemory(root, { mode: "update", key: entry.key, entryType: entry.kind, content: args.content,
-				evidence: args.evidence ?? before.meta.evidence, namespace: entry.namespace, ...source(args, exec, !newEvidence), ...(args.related !== undefined ? { related: args.related } : {}), maxChars: cap, snapshot: true });
-			return result(entry, "updated", stored, newEvidence && args.sourceSession === undefined);
+				evidence: args.evidence ?? before.meta.evidence, namespace: entry.namespace, ...provenance, ...(args.related !== undefined ? { related: args.related } : {}), maxChars: cap, snapshot: true });
+			return result(entry, "updated", stored, newEvidence && Boolean(provenance.sourceCallId));
 		});
 	}));
-	defs.push(tool("memory_review", "为尚未解决的新旧事实冲突登记复核。通常只需entry和reason：插件自动绑定当前回合尚未保存的成功验证证据，并返回sources精确引用。已有调用id时可显式选择；先实际验证再登记。", {
+	defs.push(tool("memory_review", "为尚未解决的规则或事实冲突登记复核。通常只需entry和reason：规则可引用当前回合原用户要求，事实绑定尚未保存的成功验证证据，返回sources精确引用。已有调用id时可显式选择。", {
 		entry: refArg, reason: req(str), evidence_call_ids: { ...arr(str), description: "可选，1至4个已知成功验证调用id；省略时自动绑定当前回合的真实证据" },
 	}, { review: req(record), sources: req(arr(obj({ sourceSession: req(str), sourceSeqs: req(arr(num)) }))) }, async (args, exec) => {
 		if (args.evidence_call_ids !== undefined && (args.evidence_call_ids.length < 1 || args.evidence_call_ids.length > 4)) throw new Error("evidence_call_ids需要1至4个成功验证调用id");
@@ -173,7 +183,7 @@ export function buildTools(ctx, cfg, io = {}) {
 			? await io.resolveReviewEvidence(args, exec)
 			: args.evidence_call_ids !== undefined
 				? await readSuccessfulCallEvidence(ctx.get("sessionQuery"), exec.agent.session.id, args.evidence_call_ids, exec.signal)
-				: await readCurrentTurnEvidence(ctx.get("sessionQuery"), exec.agent.session.id, exec.signal);
+				: await readCurrentTurnEvidence(ctx.get("sessionQuery"), exec.agent.session.id, exec.signal, { kind: entry.kind });
 		return { review: enqueueReview(root, { entry, revision: mustRead(root, entry).revision, reason: redactSecretLines(args.reason), evidence }), sources: evidence.map(({ sourceSession, sourceSeqs }) => ({ sourceSession, sourceSeqs })) };
 	}));
 
@@ -260,18 +270,19 @@ export function buildTools(ctx, cfg, io = {}) {
 		rmSync(join(root, PENDING_DIR, name));
 		return key;
 	}
-	defs.push(tool("memory_accept", "把候选整理成新的fact/SOP。content必须是精炼后的可复用正文，evidence说明验证；原候选留档。", {
+	defs.push(tool("memory_accept", "把候选整理成新的rule/fact/SOP。content填写精炼正文，evidence说明用户规则要求或事实验证依据；原候选留档。", {
 		namespace: namespaceArg, name: req(str), kind: req(memoryKind), topic: req(str), content: req(str), evidence: req(str), related: arr(entryRef), ...sourceArgs,
 	}, { ...mutationOutput, candidate_archive: req(readableRef) }, async (args, exec) => {
 		const namespace = nsOf(args, exec), root = nsRoot(cfg.memoryDir, namespace);
+		const provenance = await source(ctx, args, exec);
 		return withNsWriteLock(root, () => {
 			const pending = readPending(root, safeFile(args.name));
 			if (!pending) throw new Error("候选不存在或格式无效");
-			const key = args.kind === "fact" ? args.topic.trim() : slugify(args.topic), entry = { namespace, kind: args.kind, key };
+			const key = args.kind === "sop" ? slugify(args.topic) : args.topic.trim(), entry = { namespace, kind: args.kind, key };
 			const stored = writeMemory(root, { mode: "create", topic: args.topic, entryType: args.kind, content: args.content, evidence: args.evidence,
-				namespace, ...source(args, exec), ...(args.related ? { related: args.related } : {}), maxChars: cap });
+				namespace, ...provenance, ...(args.related ? { related: args.related } : {}), maxChars: cap });
 			const archiveKey = closePending(root, args.name, "accepted", { entry, originalSource: parsePending(pending) });
-			return { ...result(entry, "accepted", stored, args.sourceSession === undefined), candidate_archive: { namespace, kind: "archive", key: archiveKey } };
+			return { ...result(entry, "accepted", stored, Boolean(provenance.sourceCallId)), candidate_archive: { namespace, kind: "archive", key: archiveKey } };
 		});
 	}));
 
@@ -298,7 +309,7 @@ export function buildTools(ctx, cfg, io = {}) {
 			const entry = { ...original, namespace };
 			const stored = writeMemory(toRoot, { mode: "create", key: entry.key, topic: originalValue.title, entryType: entry.kind, content: originalValue.content,
 				evidence: originalValue.meta.evidence, sourceSession: originalValue.meta.sourceSession, sourceSeqs: originalValue.meta.sourceSeqs,
-				namespace, related: [...(originalValue.meta.related || []), original], maxChars: cap });
+				preserveSource: original.kind === "rule", namespace, related: [...(originalValue.meta.related || []), original], maxChars: cap });
 			const sourceArchived = args.archive_source ?? true;
 			if (sourceArchived) { archiveEntry(fromRoot, original.kind, original.key, { replacement: entry }); syncIndex(fromRoot, cap); }
 			return { ...result(entry, "promoted", stored), source: original, source_archived: sourceArchived };

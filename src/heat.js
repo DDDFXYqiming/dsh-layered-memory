@@ -55,7 +55,7 @@ export function scoreEntries(entries, {
 	const incoming = relatedIncoming(entries);
 	const scores = new Map();
 	for (const entry of entries) {
-		if (entry.meta?.archived) continue;
+		if (entry.meta?.archived || entry.kind === "rule") continue;
 		const id = entryId(entry.kind, entry.key);
 		const base = entryHeat(access, meta, entry.kind, entry.key, heat);
 		const related = Math.min(relatedCap, (incoming.get(id) || 0) * relatedBonus);
@@ -70,7 +70,7 @@ export function scoreEntries(entries, {
 export function rankEntries(entries, scores) {
 	const rows = [];
 	entries.forEach((entry, index) => {
-		if (entry.meta?.archived) return;
+		if (entry.meta?.archived || entry.kind === "rule") return;
 		const id = entryId(entry.kind, entry.key);
 		const item = scores.get(id);
 		const created = Date.parse(item?.createdAt || "");
@@ -103,7 +103,7 @@ export function recallEntries(entries, query, { limit = RECALL_LIMIT_DEFAULT, mi
 	const index = new BM25Index();
 	const byId = new Map();
 	for (const entry of entries) {
-		if (entry.meta?.archived) continue;
+		if (entry.meta?.archived || entry.kind === "rule") continue;
 		const id = entryId(entry.kind, entry.key);
 		index.addDoc(id, entry.title + "\n" + entry.key + "\n" + entry.content);
 		byId.set(id, entry);

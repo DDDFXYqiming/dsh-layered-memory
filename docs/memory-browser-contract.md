@@ -11,7 +11,7 @@
   - 服务端通道 src/status.js、src/status-contract.js，存储操作 src/store-service.js
   - 索引切分与统计 src/l1index.js
 - 构建：node scripts/build.mjs，把 src/status.js、src/status-contract.js、client/status.js、client/browser.js、client/status.css、client/browser.css 组装进 lib/status/
-- 当前版本 0.10.0
+- 当前规则条目接口适用于 0.11.0 起的版本
 
 ## 服务端 → 前端数据通道
 
@@ -22,14 +22,14 @@
 ## 方法签名
 
 全部 async，参数与返回都是 JSON 可序列化。
-entry 标识统一为 { namespace: string, kind: "fact"|"sop", key: string }。
+entry 标识统一为 { namespace: string, kind: "rule"|"fact"|"sop", key: string }。
 
 1. listNamespaces() → Array<{ namespace: string, workspace: string|null }>
    - 当前空间排最前，default 其次，其余按名字排序
 
-2. namespaceStats({ namespace }) → { namespace, indexChars, budgetChars, headChars, rulesChars, factsChars, sopsChars, rulesLines, factCount, sopCount }
+2. namespaceStats({ namespace }) → { namespace, indexChars, budgetChars, headChars, rulesChars, factsChars, sopsChars, rulesLines, ruleCount, factCount, sopCount }
    - namespace 必填
-   - 统计对象是该命名空间的 index.txt，也就是注入提示词的那份 L1 索引。磁盘上的 index.txt 始终保留完整的活跃目录，这个统计只读不写
+   - 统计对象是该命名空间的 index.txt，也就是注入提示词的那份 L1 索引。磁盘索引保留完整活跃目录与规则正文投影，ruleCount来自活跃规则条目，统计只读不写
    - 字段含义：
      - namespace：命名空间名
      - indexChars：index.txt 归一化后的字符数（换行统一为 \n，去掉尾部空白）
@@ -39,6 +39,7 @@ entry 标识统一为 { namespace: string, kind: "fact"|"sop", key: string }。
      - factsChars：[L2] 事实目录整行字符数
      - sopsChars：[L3] 经验目录整行字符数
      - rulesLines：规则段行数
+     - ruleCount：活跃规则条目数
      - factCount：事实目录里列出的条目数
      - sopCount：经验目录里列出的条目数
    - 预算口径：命名空间是 default 时取 cfg.globalL1MaxChars，其余取 cfg.l1MaxChars，与注入预算一致。src/apply.js 的 schema 里 l1MaxChars 默认取 L1_MAX_CHARS_DEFAULT（src/l1index.js 里是 12288），globalL1MaxChars 默认 2048
@@ -46,7 +47,7 @@ entry 标识统一为 { namespace: string, kind: "fact"|"sop", key: string }。
    - 解析容错：缺字段或类型不符按 0 处理（src/status-contract.js 的 parseNamespaceStats），旧服务端数据不会让面板报错
 
 3. listEntries({ namespace, kind?, query?, includeArchived? }) → Array<{ entry, title, archived, updatedAt, chars }>
-   - kind 省略 = 全部；只接受 fact 或 sop
+   - kind 省略 = 全部；接受 rule、fact 或 sop
    - query 省略 = 不过滤；大小写不敏感子串，匹配标题与正文
    - includeArchived 为 false 时过滤掉已归档条目
    - 按 updatedAt 降序；没有日期的排在后面，同组按标题排序

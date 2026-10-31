@@ -21,7 +21,7 @@ export function createMemoryBrowserClient(require, styles) {
 			"usage.used": "索引已用", "usage.total": "{used} / {budget} 字符", "usage.over": "已超注入预算，较早条目不会进入提示词",
 			"usage.count": "{count} 条", "usage.share": "占已用 {share}%",
 			"usage.label.head": "说明", "usage.label.rules": "规则", "usage.label.facts": "事实目录", "usage.label.sops": "经验目录",
-			"kind.fact": "事实", "kind.sop": "经验",
+			"kind.rule": "规则", "kind.fact": "事实", "kind.sop": "经验", kindLabel: "类型", ruleEvidencePlaceholder: "输入规则依据，例如用户的明确指令",
 			"usage.tip.head": "索引头部说明", "usage.tip.rules": "L0 红线规则", "usage.tip.facts": "事实条目目录（facts.md）", "usage.tip.sops": "任务经验目录（sops/）",
 		},
 		en: {
@@ -37,7 +37,7 @@ export function createMemoryBrowserClient(require, styles) {
 			"usage.used": "Index used", "usage.total": "{used} / {budget} chars", "usage.over": "Over the injection budget; older entries stay out of the prompt",
 			"usage.count": "{count} entries", "usage.share": "{share}% of used",
 			"usage.label.head": "Header", "usage.label.rules": "Rules", "usage.label.facts": "Facts", "usage.label.sops": "Skills",
-			"kind.fact": "Fact", "kind.sop": "Skill",
+			"kind.rule": "Rule", "kind.fact": "Fact", "kind.sop": "Skill", kindLabel: "Type", ruleEvidencePlaceholder: "Enter the basis for this rule, such as an explicit user instruction",
 			"usage.tip.head": "Index header", "usage.tip.rules": "L0 red-line rules", "usage.tip.facts": "Fact entries (facts.md)", "usage.tip.sops": "Skill entries (sops/)",
 		},
 		ja: {
@@ -53,7 +53,7 @@ export function createMemoryBrowserClient(require, styles) {
 			"usage.used": "インデックス使用量", "usage.total": "{used} / {budget} 文字", "usage.over": "注入予算を超過しています。古い項目はプロンプトに含まれません",
 			"usage.count": "{count} 件", "usage.share": "使用量の {share}%",
 			"usage.label.head": "ヘッダー", "usage.label.rules": "ルール", "usage.label.facts": "ファクト", "usage.label.sops": "スキル",
-			"kind.fact": "ファクト", "kind.sop": "スキル",
+			"kind.rule": "ルール", "kind.fact": "ファクト", "kind.sop": "スキル", kindLabel: "種類", ruleEvidencePlaceholder: "ユーザーの明示的な指示など、ルールの根拠を入力",
 			"usage.tip.head": "インデックスのヘッダー", "usage.tip.rules": "L0 の必須ルール", "usage.tip.facts": "ファクト項目のディレクトリ（facts.md）", "usage.tip.sops": "タスク経験のディレクトリ（sops/）",
 		},
 		es: {
@@ -69,7 +69,7 @@ export function createMemoryBrowserClient(require, styles) {
 			"usage.used": "Índice usado", "usage.total": "{used} / {budget} caracteres", "usage.over": "Se superó el presupuesto de inyección; las entradas antiguas no se incluyen en el prompt",
 			"usage.count": "{count} entradas", "usage.share": "{share}% de lo usado",
 			"usage.label.head": "Encabezado", "usage.label.rules": "Reglas", "usage.label.facts": "Hechos", "usage.label.sops": "Habilidades",
-			"kind.fact": "Hecho", "kind.sop": "Habilidad",
+			"kind.rule": "Regla", "kind.fact": "Hecho", "kind.sop": "Habilidad", kindLabel: "Tipo", ruleEvidencePlaceholder: "Introduce la base de la regla, como una instrucción explícita del usuario",
 			"usage.tip.head": "Encabezado del índice", "usage.tip.rules": "Reglas esenciales L0", "usage.tip.facts": "Directorio de hechos (facts.md)", "usage.tip.sops": "Directorio de experiencias (sops/)",
 		},
 		fr: {
@@ -85,7 +85,7 @@ export function createMemoryBrowserClient(require, styles) {
 			"usage.used": "Indice utilisé", "usage.total": "{used} / {budget} caractères", "usage.over": "Budget d’injection dépassé ; les entrées anciennes ne sont pas incluses dans le prompt",
 			"usage.count": "{count} entrées", "usage.share": "{share}% de l’utilisé",
 			"usage.label.head": "En-tête", "usage.label.rules": "Règles", "usage.label.facts": "Faits", "usage.label.sops": "Compétences",
-			"kind.fact": "Fait", "kind.sop": "Compétence",
+			"kind.rule": "Règle", "kind.fact": "Fait", "kind.sop": "Compétence", kindLabel: "Type", ruleEvidencePlaceholder: "Saisir le fondement de la règle, par exemple une instruction explicite de l’utilisateur",
 			"usage.tip.head": "En-tête de l’index", "usage.tip.rules": "Règles essentielles L0", "usage.tip.facts": "Répertoire des faits (facts.md)", "usage.tip.sops": "Répertoire des expériences (sops/)",
 		},
 		de: {
@@ -101,7 +101,7 @@ export function createMemoryBrowserClient(require, styles) {
 			"usage.used": "Index belegt", "usage.total": "{used} / {budget} Zeichen", "usage.over": "Injektionsbudget überschritten; ältere Einträge gelangen nicht in den Prompt",
 			"usage.count": "{count} Einträge", "usage.share": "{share}% der Belegung",
 			"usage.label.head": "Kopfzeile", "usage.label.rules": "Regeln", "usage.label.facts": "Fakten", "usage.label.sops": "Fähigkeiten",
-			"kind.fact": "Fakt", "kind.sop": "Fähigkeit",
+			"kind.rule": "Regel", "kind.fact": "Fakt", "kind.sop": "Fähigkeit", kindLabel: "Typ", ruleEvidencePlaceholder: "Grundlage der Regel eingeben, etwa eine ausdrückliche Nutzeranweisung",
 			"usage.tip.head": "Index-Kopfzeile", "usage.tip.rules": "L0-Grundregeln", "usage.tip.facts": "Verzeichnis der Fakten (facts.md)", "usage.tip.sops": "Verzeichnis der Erfahrungen (sops/)",
 		},
 		ru: {
@@ -117,7 +117,7 @@ export function createMemoryBrowserClient(require, styles) {
 			"usage.used": "Индекс занят", "usage.total": "{used} / {budget} символов", "usage.over": "Превышен бюджет внедрения; старые записи не попадут в промпт",
 			"usage.count": "{count} записей", "usage.share": "{share}% от занятого",
 			"usage.label.head": "Заголовок", "usage.label.rules": "Правила", "usage.label.facts": "Факты", "usage.label.sops": "Навыки",
-			"kind.fact": "Факт", "kind.sop": "Навык",
+			"kind.rule": "Правило", "kind.fact": "Факт", "kind.sop": "Навык", kindLabel: "Тип", ruleEvidencePlaceholder: "Укажите основание правила, например явное указание пользователя",
 			"usage.tip.head": "Заголовок индекса", "usage.tip.rules": "Базовые правила L0", "usage.tip.facts": "Каталог фактов (facts.md)", "usage.tip.sops": "Каталог опыта (sops/)",
 		},
 		pt: {
@@ -133,7 +133,7 @@ export function createMemoryBrowserClient(require, styles) {
 			"usage.used": "Índice usado", "usage.total": "{used} / {budget} caracteres", "usage.over": "Orçamento de injeção excedido; entradas antigas ficam fora do prompt",
 			"usage.count": "{count} entradas", "usage.share": "{share}% do usado",
 			"usage.label.head": "Cabeçalho", "usage.label.rules": "Regras", "usage.label.facts": "Fatos", "usage.label.sops": "Habilidades",
-			"kind.fact": "Fato", "kind.sop": "Habilidade",
+			"kind.rule": "Regra", "kind.fact": "Fato", "kind.sop": "Habilidade", kindLabel: "Tipo", ruleEvidencePlaceholder: "Insira a base da regra, como uma instrução explícita do usuário",
 			"usage.tip.head": "Cabeçalho do índice", "usage.tip.rules": "Regras essenciais L0", "usage.tip.facts": "Diretório de fatos (facts.md)", "usage.tip.sops": "Diretório de experiências (sops/)",
 		},
 	};
@@ -148,7 +148,8 @@ export function createMemoryBrowserClient(require, styles) {
 		const lang = (typeof document !== "undefined" && document.documentElement.lang) || "zh-CN";
 		return new Date(value).toLocaleString(lang, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 	};
-	const kindText = (kind, t) => (kind === "fact" || kind === "sop" ? t("kind." + kind) : kind);
+	const entryKinds = ["rule", "fact", "sop"];
+	const kindText = (kind, t) => (entryKinds.includes(kind) ? t("kind." + kind) : kind);
 	function compactChars(value) {
 		const number = Number(value);
 		if (!Number.isFinite(number) || number <= 0) return "0";
@@ -287,10 +288,10 @@ export function createMemoryBrowserClient(require, styles) {
 				h("form", { onSubmit: event => { event.preventDefault(); onSubmit(); } },
 					error ? h("p", { className: "lm-browser-error", role: "alert" }, error) : null,
 					h(Field, { label: t("namespace") }, h(SelectMenu, { value: form.namespace, options: namespaces.map(row => ({ value: row.namespace, label: row.namespace })), disabled: busy, onChange: value => update("namespace", value), ariaLabel: t("namespace"), triggerClassName: "lm-browser-input" })),
-					h(Field, { label: "kind" }, h(SelectMenu, { value: form.kind, options: [{ value: "fact", label: t("kind.fact") }, { value: "sop", label: t("kind.sop") }], disabled: busy, onChange: value => update("kind", value), ariaLabel: "kind", triggerClassName: "lm-browser-input" })),
+					h(Field, { label: t("kindLabel") }, h(SelectMenu, { value: form.kind, options: entryKinds.map(value => ({ value, label: kindText(value, t) })), disabled: busy, onChange: value => update("kind", value), ariaLabel: t("kindLabel"), triggerClassName: "lm-browser-input" })),
 					h(Field, { label: t("topic") }, h(Input, { value: form.topic, placeholder: t("topicPlaceholder"), disabled: busy, onChange: event => update("topic", event.target.value) })),
 					h(Field, { label: t("content") }, h("textarea", { className: "lm-browser-textarea lm-browser-create-content", value: form.content, placeholder: t("contentPlaceholder"), disabled: busy, onChange: event => update("content", event.target.value) })),
-					h(Field, { label: t("evidence") }, h(Input, { value: form.evidence, placeholder: t("evidencePlaceholder"), disabled: busy, onChange: event => update("evidence", event.target.value) })),
+					h(Field, { label: t("evidence") }, h(Input, { value: form.evidence, placeholder: t(form.kind === "rule" ? "ruleEvidencePlaceholder" : "evidencePlaceholder"), disabled: busy, onChange: event => update("evidence", event.target.value) })),
 					h("div", { className: "lm-browser-modal-actions" }, h(Button, { variant: "outline", type: "button", disabled: busy, onClick: onClose }, t("cancel")), h(Button, { variant: "primary", type: "submit", disabled: busy || !form.namespace }, busy ? t("creating") : t("create"))))));
 	}
 	function IndexUsage({ stats, t }) {
@@ -303,7 +304,7 @@ export function createMemoryBrowserClient(require, styles) {
 		const over = percent > 100;
 		const parts = [
 			["head", t("usage.label.head"), Number(stats.headChars) || 0, null],
-			["rules", t("usage.label.rules"), Number(stats.rulesChars) || 0, null],
+			["rules", t("usage.label.rules"), Number(stats.rulesChars) || 0, Number(stats.ruleCount) || 0],
 			["facts", t("usage.label.facts"), Number(stats.factsChars) || 0, Number(stats.factCount) || 0],
 			["sops", t("usage.label.sops"), Number(stats.sopsChars) || 0, Number(stats.sopCount) || 0],
 		];
@@ -494,6 +495,8 @@ export function createMemoryBrowserClient(require, styles) {
 				const result = await controls.createEntry(createForm);
 				setCreateOpen(false);
 				setNamespace(result.entry.namespace);
+				setKind(result.entry.kind);
+				setQuery("");
 				setSelectedId(identity(result.entry));
 				setNotice(t("created"));
 				refreshAll();
@@ -579,7 +582,7 @@ export function createMemoryBrowserClient(require, styles) {
 			h("div", { className: "lm-browser-toolbar" },
 				h("div", { className: "lm-browser-namespace" }, h(SelectMenu, { value: namespace || "", options: namespaces.length ? namespaces.map(row => ({ value: row.namespace, label: row.namespace })) : [{ value: "", label: namespaceBusy ? t("loading") : t("noNamespace") }], disabled: namespaceBusy || !namespaces.length || Boolean(busy), onChange: value => { setNamespace(value); setNotice(null); setActionError(null); setConflict(false); }, ariaLabel: t("namespace") })),
 				h("div", { className: "lm-browser-search" }, h(Input, { type: "search", icon: h(IconSearchOutlineRegular, { size: 14 }), "aria-label": t("search"), placeholder: t("searchPlaceholder"), value: query, onChange: event => setQuery(event.target.value) }), query ? h(Button, { variant: "ghost", size: "sm", className: "lm-browser-search-clear", "aria-label": t("clearSearch"), onClick: () => setQuery("") }, h(IconCloseOutlineRegular, { size: 14 })) : null),
-				h("div", { className: "lm-browser-filter-tabs", role: "group", "aria-label": "kind" }, [["", t("all")], ["fact", t("kind.fact")], ["sop", t("kind.sop")]].map(([value, label]) => h("button", { key: value || "all", type: "button", className: "lm-browser-filter-tab" + (kind === value ? " is-active" : ""), "aria-pressed": kind === value, onClick: () => setKind(value) }, label))),
+				h("div", { className: "lm-browser-filter-tabs", role: "group", "aria-label": t("kindLabel") }, [["", t("all")], ...entryKinds.map(value => [value, kindText(value, t)])].map(([value, label]) => h("button", { key: value || "all", type: "button", className: "lm-browser-filter-tab" + (kind === value ? " is-active" : ""), "aria-pressed": kind === value, onClick: () => setKind(value) }, label))),
 				h("label", { className: "lm-browser-archived-toggle" }, h(Switch, { checked: includeArchived, label: t("showArchived"), onChange: next => setIncludeArchived(next) }), h("span", { "aria-hidden": "true" }, t("showArchived")))),
 			h(IndexUsage, { stats: usage, t }),
 			namespaceError ? h("div", { className: "lm-browser-error lm-browser-banner", role: "alert" }, h("span", null, namespaceError), h(Button, { variant: "outline", size: "sm", onClick: () => setNamespaceVersion(value => value + 1) }, t("reload"))) : null,
@@ -611,7 +614,7 @@ export function createMemoryBrowserClient(require, styles) {
 									contentPreview
 										? h("div", { className: "lm-browser-md-preview", onClick: () => setContentPreview(false) }, renderMarkdown(content))
 										: h("textarea", { className: "lm-browser-textarea lm-browser-content", value: content, disabled: Boolean(busy), onChange: event => setContent(event.target.value), onBlur: () => setContentPreview(true) })),
-						h(Field, { label: t("evidence") }, h(Input, { value: evidence, disabled: Boolean(busy), placeholder: t("evidencePlaceholder"), onChange: event => setEvidence(event.target.value) })),
+						h(Field, { label: t("evidence") }, h(Input, { value: evidence, disabled: Boolean(busy), placeholder: t(detail.entry.kind === "rule" ? "ruleEvidencePlaceholder" : "evidencePlaceholder"), onChange: event => setEvidence(event.target.value) })),
 						h("section", { className: "lm-browser-history" },
 							h("h3", null, t("history")),
 							historyBusy ? h("p", { className: "lm-browser-empty", role: "status" }, t("loading")) : null,

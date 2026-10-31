@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 概述
 
-分层记忆把事实和操作经验从一次会话带到下一次。事实放在 `facts.md` 的二级标题下，操作流程放在 `sops/*.md`；条目用 `{namespace, kind, key}` 定位，带证据，写入前先存旧版本，历史可查也可回滚。
+分层记忆把规则、事实和操作经验从一次会话带到下一次。规则保存在 `rules.md`，事实放在 `facts.md` 的二级标题下，操作流程放在 `sops/*.md`；三类条目共用 `{namespace, kind, key}` 和现有记忆工具，来源与历史版本随条目保存。
 
 ## 目录
 
@@ -34,7 +34,7 @@ dsh plugin --profile web add   github:DDDFXYqiming/dsh-layered-memory   "github:
 
 基础工具 `memory_search/list/read/write/update` 随会话提供。加载 `memory` skill 或调用 `memory_activate({mode:"common"})` 补充状态与冲突登记工具，管理操作用 `mode:"manage"`。读写权限由用户配置 `memoryAccess` 和 `subagentMemoryAccess` 决定，子 agent 默认只读。
 
-条目用 search、list 或 create 返回的 `entry` 对象定位，不要拿标题重新拼一个身份出来。
+条目用 search、list 或 create 返回的 `entry` 对象定位，不要拿标题重新拼一个身份出来。`kind` 可选 `rule`、`fact`、`sop`，分别记录后续要求、已知情况与可复用做法；规则依据可引用用户原始要求。已有条目通过 `memory_update` 修改。
 
 ```js
 memory_write({
@@ -63,11 +63,11 @@ memory_rollback({entry, snapshot_id: "填一个返回的快照 id"})
 | 处理候选 | memory_pending、memory_accept、memory_discard |
 | 状态与维护 | memory_stats、memory_index、memory_maintain、memory_review |
 
-搜索默认只看当前空间和全局空间的活跃条目。要翻归档内容就传 `include_archived:true`，再用返回的 entry 去读。读取结果会给出行范围、总行数、revision、是否完整以及下一行位置。全局规则和完整索引通过 `rules`、`index`、`policy` 三种 entry 读取。
+搜索默认只看当前空间和全局空间的活跃条目。要翻归档内容就传 `include_archived:true`，再用返回的 entry 去读。读取结果会给出行范围、总行数、revision、是否完整以及下一行位置。单条规则使用 `kind:"rule"`；整段规则、完整索引与管理说明分别通过 `rules`、`index`、`policy` 三种只读视图读取。旧索引的规则会在空间首次初始化时逐条迁移，之后索引规则段从活跃规则生成。
 
 ## 记忆管理页
 
-Web 界面左侧栏有一个“记忆”入口，点进去是独立页面：左边是条目列表，右边是详情。可以搜索、按类型过滤、查看已归档条目，也能直接改正文与证据、归档与恢复、看历史快照并回滚。界面文案跟随宿主语言设置，条目类型按语言显示为“事实/经验”或 Fact/Skill。数据通道与页面规则见[记忆管理页接口契约](docs/memory-browser-contract.md)。
+Web 界面左侧栏有一个“记忆”入口，点进去是独立页面：左边是条目列表，右边是详情。可以搜索、按类型过滤、查看已归档条目，也能直接改正文与证据、归档与恢复、看历史快照并回滚。界面文案跟随宿主语言设置，条目类型按语言显示为“规则/事实/经验”或 Rule/Fact/Skill。数据通道与页面规则见[记忆管理页接口契约](docs/memory-browser-contract.md)。
 
 ![记忆管理页](docs/images/memory-page.png)
 

@@ -100,7 +100,8 @@ function apply(ctx, config = {}) {
 		const namespace = resolveNamespace(cfg, undefined, cwd);
 		const root = nsRoot(cfg.memoryDir, namespace);
 		if (!ensured.has(root)) {
-			ensureNamespaceLayout(root, { namespace, ...(!cfg.defaultNamespace && cfg.autoNamespace && namespace !== "default" ? { workspace: cfg.workspaceRootFor(cwd || process.cwd()) } : {}) });
+			const migration = ensureNamespaceLayout(root, { namespace, ...(!cfg.defaultNamespace && cfg.autoNamespace && namespace !== "default" ? { workspace: cfg.workspaceRootFor(cwd || process.cwd()) } : {}) });
+			if (migration?.rulesMigrated) ctx.logger.info(`[dsh-layered-memory] migrated ${migration.ruleCount} rules to ${migration.rulesPath}`);
 			backfillMeta(root, { namespace });
 			ensured.add(root);
 		}
@@ -220,7 +221,7 @@ function apply(ctx, config = {}) {
 		onMaintenanceRunner(runner) { maintenance = runner; ctx.provide("layeredMemoryWorkers", runner.workers); },
 		maintenanceTools(namespace) {
 			return buildTools(ctx, { ...cfg, defaultNamespace: namespace, autoNamespace: false }, {
-				resolveReviewEvidence: (args, exec) => maintenance.scopeFor(exec.agent).evidence.resolveReview(args.evidence_call_ids, exec.signal),
+				resolveReviewEvidence: (args, exec) => maintenance.scopeFor(exec.agent).evidence.resolveReview(args.evidence_call_ids, exec.signal, args.entry?.kind),
 				isMaintenance: () => true,
 			});
 		},

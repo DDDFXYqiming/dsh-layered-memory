@@ -44,7 +44,7 @@ function snapshotDetails(root, record) {
 	const file = readFileSync(path, "utf8");
 	const heading = file.match(/^#{1,2}\s+(.+)(?:\r?\n|$)/);
 	if (!heading) throw new Error("历史快照缺少标题");
-	const raw = record.kind === "fact" ? file.slice(heading[0].length).trim() : file;
+	const raw = record.kind === "fact" || record.kind === "rule" ? file.slice(heading[0].length).trim() : file;
 	let meta = {};
 	try {
 		const sidecar = JSON.parse(readFileSync(path.replace(/\.md$/, ".meta.json"), "utf8"));
@@ -102,7 +102,7 @@ export function createLayeredMemoryStore(cfg) {
 		},
 		async listEntries({ namespace, kind, query, includeArchived } = {}) {
 			return run("读取记忆列表", async () => {
-				if (kind !== undefined && !["fact", "sop"].includes(kind)) throw new Error("未知的记忆类型");
+				if (kind !== undefined && !["rule", "fact", "sop"].includes(kind)) throw new Error("未知的记忆类型");
 				const name = safeNs(namespace);
 				const needle = query === undefined ? null : String(query).toLowerCase();
 				const values = readEntries(nsRoot(cfg.memoryDir, name)).filter(value => {

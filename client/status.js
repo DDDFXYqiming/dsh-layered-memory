@@ -12,6 +12,7 @@ export function createStatusClient(require, styles) {
 	const locale = "layered-memory-status";
 	const dictionaries = {
 		zh: {
+			"retrySchedule": "自动整理计划", "nextEligibleAt": "最早可重试时间", "retryCount": "连续退避 {count} 次", "retryReason": "原因", "retry-failed": "运行失败", "retry-timeout": "运行超时", "retry-deferred": "尚未完成", "retry-no_progress": "本轮无进展", "retry-interrupted": "运行中断", "retry-user_stopped": "本次已停止", "retry-cooldown": "共享冷却",
 			reviewing: "正在核对记忆", organizing: "正在整理记忆", changed: "记忆已整理 {count} 条",
 			settled: "记忆核对完成", awaitingEvidence: "记忆等待补充证据", idle: "记忆待命", initializing: "记忆状态加载中",
 			stoppedReview: "记忆核对已停止", stoppedBatch: "记忆整理已停止",
@@ -26,6 +27,7 @@ export function createStatusClient(require, styles) {
 			"trace-assistant": "回复", "trace-reasoning": "思考", "trace-tool": "工具调用", "trace-result": "工具结果", "trace-notice": "运行事件",
 		},
 		en: {
+			"retrySchedule": "Organization schedule", "nextEligibleAt": "Next eligible time", "retryCount": "Backoff count: {count}", "retryReason": "Reason", "retry-failed": "Run failed", "retry-timeout": "Run timed out", "retry-deferred": "Incomplete", "retry-no_progress": "No progress", "retry-interrupted": "Run interrupted", "retry-user_stopped": "Current run stopped", "retry-cooldown": "Shared cooldown",
 			reviewing: "Reviewing memory", organizing: "Organizing memory", changed: "Organized {count} memory entries",
 			settled: "Memory review complete", awaitingEvidence: "Memory awaiting evidence", idle: "Memory ready", initializing: "Loading memory status",
 			stoppedReview: "Memory review stopped", stoppedBatch: "Memory organization stopped",
@@ -40,6 +42,7 @@ export function createStatusClient(require, styles) {
 			"trace-assistant": "Reply", "trace-reasoning": "Thinking", "trace-tool": "Tool call", "trace-result": "Tool result", "trace-notice": "Run event",
 		},
 		ja: {
+			"retrySchedule": "整理の再実行予定", "nextEligibleAt": "次回実行可能時刻", "retryCount": "連続待機 {count} 回", "retryReason": "理由", "retry-failed": "実行失敗", "retry-timeout": "実行タイムアウト", "retry-deferred": "未完了", "retry-no_progress": "進展なし", "retry-interrupted": "実行中断", "retry-user_stopped": "今回の実行を停止", "retry-cooldown": "共通クールダウン",
 			"reviewing": "メモリを確認中", "organizing": "メモリを整理中", "changed": "メモリを {count} 件整理しました",
 			"settled": "メモリ確認完了", "awaitingEvidence": "メモリは根拠待ち", "idle": "メモリ待機中", "initializing": "メモリ状態を読み込み中",
 			"stoppedReview": "メモリ確認を停止しました", "stoppedBatch": "メモリ整理を停止しました",
@@ -54,6 +57,7 @@ export function createStatusClient(require, styles) {
 			"trace-assistant": "返信", "trace-reasoning": "思考", "trace-tool": "ツール呼び出し", "trace-result": "ツール結果", "trace-notice": "実行イベント",
 		},
 		es: {
+			"retrySchedule": "Plan de organización", "nextEligibleAt": "Próxima hora elegible", "retryCount": "Esperas consecutivas: {count}", "retryReason": "Motivo", "retry-failed": "Ejecución fallida", "retry-timeout": "Tiempo agotado", "retry-deferred": "Incompleto", "retry-no_progress": "Sin progreso", "retry-interrupted": "Ejecución interrumpida", "retry-user_stopped": "Ejecución actual detenida", "retry-cooldown": "Espera compartida",
 			"reviewing": "Revisando memoria", "organizing": "Organizando memoria", "changed": "Se organizaron {count} entradas",
 			"settled": "Revisión de memoria completa", "awaitingEvidence": "Memoria esperando evidencia", "idle": "Memoria lista", "initializing": "Cargando estado de memoria",
 			"stoppedReview": "Revisión de memoria detenida", "stoppedBatch": "Organización detenida",
@@ -68,6 +72,7 @@ export function createStatusClient(require, styles) {
 			"trace-assistant": "Respuesta", "trace-reasoning": "Pensamiento", "trace-tool": "Llamada a herramienta", "trace-result": "Resultado de herramienta", "trace-notice": "Evento de ejecución",
 		},
 		fr: {
+			"retrySchedule": "Plan d’organisation", "nextEligibleAt": "Prochaine heure admissible", "retryCount": "Attentes consécutives : {count}", "retryReason": "Motif", "retry-failed": "Échec de l’exécution", "retry-timeout": "Délai dépassé", "retry-deferred": "Incomplet", "retry-no_progress": "Aucun progrès", "retry-interrupted": "Exécution interrompue", "retry-user_stopped": "Exécution actuelle arrêtée", "retry-cooldown": "Délai partagé",
 			"reviewing": "Vérification de la mémoire", "organizing": "Organisation de la mémoire", "changed": "{count} entrées organisées",
 			"settled": "Vérification terminée", "awaitingEvidence": "Mémoire en attente de preuve", "idle": "Mémoire prête", "initializing": "Chargement de l’état",
 			"stoppedReview": "Vérification arrêtée", "stoppedBatch": "Organisation arrêtée",
@@ -82,6 +87,7 @@ export function createStatusClient(require, styles) {
 			"trace-assistant": "Réponse", "trace-reasoning": "Réflexion", "trace-tool": "Appel d’outil", "trace-result": "Résultat d’outil", "trace-notice": "Événement d’exécution",
 		},
 		de: {
+			"retrySchedule": "Organisationsplan", "nextEligibleAt": "Nächster möglicher Start", "retryCount": "Wartefolgen: {count}", "retryReason": "Grund", "retry-failed": "Lauf fehlgeschlagen", "retry-timeout": "Zeitüberschreitung", "retry-deferred": "Unvollständig", "retry-no_progress": "Kein Fortschritt", "retry-interrupted": "Lauf unterbrochen", "retry-user_stopped": "Aktueller Lauf gestoppt", "retry-cooldown": "Gemeinsame Wartezeit",
 			"reviewing": "Speicher wird geprüft", "organizing": "Speicher wird organisiert", "changed": "{count} Einträge organisiert",
 			"settled": "Speicherprüfung abgeschlossen", "awaitingEvidence": "Speicher wartet auf Nachweis", "idle": "Speicher bereit", "initializing": "Speicherstatus wird geladen",
 			"stoppedReview": "Speicherprüfung gestoppt", "stoppedBatch": "Speicherorganisation gestoppt",
@@ -96,6 +102,7 @@ export function createStatusClient(require, styles) {
 			"trace-assistant": "Antwort", "trace-reasoning": "Denken", "trace-tool": "Werkzeugaufruf", "trace-result": "Werkzeugergebnis", "trace-notice": "Laufereignis",
 		},
 		ru: {
+			"retrySchedule": "План организации", "nextEligibleAt": "Следующее допустимое время", "retryCount": "Отсрочек подряд: {count}", "retryReason": "Причина", "retry-failed": "Сбой запуска", "retry-timeout": "Время истекло", "retry-deferred": "Не завершено", "retry-no_progress": "Нет прогресса", "retry-interrupted": "Запуск прерван", "retry-user_stopped": "Текущий запуск остановлен", "retry-cooldown": "Общая пауза",
 			"reviewing": "Проверка памяти", "organizing": "Организация памяти", "changed": "Организовано {count} записей",
 			"settled": "Проверка памяти завершена", "awaitingEvidence": "Память ждёт доказательств", "idle": "Память готова", "initializing": "Загрузка состояния памяти",
 			"stoppedReview": "Проверка памяти остановлена", "stoppedBatch": "Организация остановлена",
@@ -110,6 +117,7 @@ export function createStatusClient(require, styles) {
 			"trace-assistant": "Ответ", "trace-reasoning": "Размышление", "trace-tool": "Вызов инструмента", "trace-result": "Результат инструмента", "trace-notice": "Событие запуска",
 		},
 		pt: {
+			"retrySchedule": "Plano de organização", "nextEligibleAt": "Próximo horário elegível", "retryCount": "Esperas consecutivas: {count}", "retryReason": "Motivo", "retry-failed": "Falha na execução", "retry-timeout": "Tempo esgotado", "retry-deferred": "Incompleto", "retry-no_progress": "Sem progresso", "retry-interrupted": "Execução interrompida", "retry-user_stopped": "Execução atual interrompida", "retry-cooldown": "Espera compartilhada",
 			"reviewing": "Revisando memória", "organizing": "Organizando memória", "changed": "{count} entradas organizadas",
 			"settled": "Revisão da memória concluída", "awaitingEvidence": "Memória aguardando evidência", "idle": "Memória pronta", "initializing": "Carregando estado da memória",
 			"stoppedReview": "Revisão da memória interrompida", "stoppedBatch": "Organização interrompida",
@@ -155,6 +163,7 @@ export function createStatusClient(require, styles) {
 		}
 		const store = {
 			getSnapshot: () => value,
+			async refresh(signal) { accept({ type: "update", snapshot: await resultValue(remote.layeredMemoryStatus.getSnapshot(sessionId, signal)) }); },
 			subscribe(listener) {
 				listeners.add(listener);
 				if (listeners.size === 1) start();
@@ -189,6 +198,12 @@ export function createStatusClient(require, styles) {
 		const historyRequest = React.useRef(null);
 		const stopRequest = React.useRef(null);
 		const historyEnd = React.useRef(null);
+		React.useEffect(() => {
+			if (!open) return;
+			const controller = new AbortController();
+			controls.refresh(controller.signal).catch(error => { if (!controller.signal.aborted) setWorkersError(error.message); });
+			return () => controller.abort();
+		}, [open, controls]);
 		React.useEffect(() => {
 			if (!open) return;
 			const controller = new AbortController();
@@ -233,6 +248,16 @@ export function createStatusClient(require, styles) {
 		}
 		const worker = workers.find(value => value.id === workerId);
 		const finished = snapshot?.records.filter(run => run.finishedAt !== null) || [];
+		const retries = snapshot?.reflection.filter(state => state.nextEligibleAt || state.retryCount || state.retryReason) || [];
+		const retryRows = retries.map(state => h("details", { key: "retry-" + state.namespace, className: "lm-finished-run", "data-memory-retry": true, "data-namespace": state.namespace },
+			h("summary", null,
+				h("span", null, t("retrySchedule")),
+				state.retryReason ? h("span", { className: "lm-run-state", "data-state": state.retryReason }, t("retry-" + state.retryReason)) : null,
+				state.retryCount > 0 ? h("span", { className: "lm-run-state" }, t("retryCount", { count: state.retryCount })) : null,
+				state.nextEligibleAt ? h("time", { dateTime: state.nextEligibleAt, title: state.nextEligibleAt }, time(state.nextEligibleAt)) : null),
+			h("div", { className: "lm-run-counts" },
+				h("span", null, state.namespace),
+				state.nextEligibleAt ? h("span", null, t("nextEligibleAt"), " ", time(state.nextEligibleAt)) : null)));
 		const view = workerId || "runs";
 		const tabsId = panelId + "-views";
 		return h("div", { ref: panelRef, id: panelId, role: "dialog", "aria-label": t("activity"), className: "lm-activity-panel", "data-memory-details": true, style: position || { visibility: "hidden", left: 0, top: 0 } },
@@ -250,7 +275,7 @@ export function createStatusClient(require, styles) {
 			workerId === null ? h("div", { className: "lm-activity-content" },
 				snapshot?.running.length ? h("section", { className: "lm-current-runs" }, h("h3", null, t("current")), ...snapshot.running.map(run => h("article", { key: run.id, className: "lm-current-run", "data-memory-run": run.id, "data-phase": run.phase },
 					h("div", { className: "lm-run-heading" }, h("strong", null, t(run.purpose === "turn_review" ? "review" : "batch")), h("span", { className: "lm-run-state" }, t(run.phase ? "phase-" + run.phase : "state-running")), stopButton(workers.find(value => value.runId === run.id))), runBody(run)))) : null,
-				finished.length ? h("section", null, h("h3", null, t("runs")), ...finished.map(run => h("details", { key: run.id, className: "lm-finished-run", open: run.id === snapshot.latestFailure?.id, "data-memory-run": run.id, "data-run-status": run.status },
+				retryRows.length || finished.length ? h("section", null, retryRows, ...finished.map(run => h("details", { key: run.id, className: "lm-finished-run", open: run.id === snapshot.latestFailure?.id, "data-memory-run": run.id, "data-run-status": run.status },
 					h("summary", null, h("span", null, t(run.purpose === "turn_review" ? "review" : "batch")), h("span", { className: "lm-run-state", "data-state": run.status }, t("state-" + run.status)), run.changedEntries ? h("span", { className: "lm-run-state" }, t("changedCount", { count: run.changedEntries })) : null, h("time", { dateTime: run.finishedAt, title: run.finishedAt }, time(run.finishedAt)), run.legacy ? h("span", { className: "lm-legacy", title: run.sessionId }, t("legacy")) : null), runBody(run)))) : !snapshot?.running.length ? h("p", { className: "lm-activity-empty" }, t("empty")) : null)
 				: h(React.Fragment, null,
 					h("div", { className: "lm-history-heading" }, h("span", null, t(worker.phase ? "phase-" + worker.phase : "state-" + worker.status)), stopButton(worker), h(Button, { variant: "ghost", size: "sm", onClick: () => setHistoryRevision(value => value + 1), disabled: history.busy }, t("refresh"))),
@@ -324,6 +349,7 @@ export function createStatusClient(require, styles) {
 						return {
 							activityStore: store,
 							controls: {
+								refresh: signal => store.refresh(signal),
 								list: signal => resultValue(scope.remote.layeredMemoryStatus.listWorkers(sessionId, signal)),
 								read: (workerId, offset, limit, signal) => resultValue(scope.remote.layeredMemoryStatus.readWorker(sessionId, workerId, offset, limit, signal)),
 								stop: (workerId, signal) => resultValue(scope.remote.layeredMemoryStatus.stopWorker(sessionId, workerId, signal)),

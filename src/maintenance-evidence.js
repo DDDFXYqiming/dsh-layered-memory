@@ -75,7 +75,19 @@ export async function readSuccessfulCallEvidence(query, sourceSession, callIds, 
 	} finally { observation[Symbol.dispose](); }
 }
 
-export async function readCurrentTurnEvidence(query, sourceSession, signal) {
+export async function readRuleInstructionEvidence(query, sourceSession, signal) {
+	if (!query) throw new Error("自动引用规则要求需要sessionQuery；也可显式提供sourceSession和sourceSeqs");
+	const observation = await query.observeSession(sourceSession, { projectionMode: "none", signal });
+	try {
+		const start = observation.events.findLast(event => event.type === "turn/start" && event.seq >= observation.inheritedEventCount);
+		const event = observation.events.findLast(event => event.type === "user/message" && event.data.source?.kind === "user" && event.seq >= observation.inheritedEventCount && (!start || event.seq > start.seq));
+		if (!event) throw new Error("当前回合没有原用户要求，请显式引用规则依据的sourceSession和sourceSeqs");
+		return quotedEvidence(sourceSession, event, describeEvent(event));
+	} finally { observation[Symbol.dispose](); }
+}
+
+export async function readCurrentTurnEvidence(query, sourceSession, signal, { kind } = {}) {
+	if (kind === "rule") return [await readRuleInstructionEvidence(query, sourceSession, signal)];
 	const observation = await query.observeSession(sourceSession, { projectionMode: "none", signal });
 	try {
 		const events = observation.events;
@@ -147,7 +159,7 @@ export async function createMaintenanceEvidence(ctx, job) {
 		addSource(value.meta);
 	}
 	for (const evidence of job.turnReview?.evidence || []) add(job.parentId, evidence.seq, { tool: evidence.tool, call_id: evidence.call_id, turn: evidence.turn, endSeq: evidence.endSeq, assigned: true });
-	for (const task of job.turnReview?.tasks || []) add(job.parentId, task.seq, { task: true });
+	for (const task of job.turnReview?.tasks || []) add(job.parentId, task.seq, { task: true, assigned: true });
 	for (const work of job.work.jobs) for (const evidence of work.evidence || []) addSource(evidence, true);
 	for (const name of job.pendingNames) addSource(parsePending(readPending(job.root, name)), true);
 	const entries = [...(job.turnReview?.memories || []), ...job.work.jobs.flatMap(work => work.items?.map(item => item.entry) || [])];
@@ -173,9 +185,10 @@ export async function createMaintenanceEvidence(ctx, job) {
 		remainingWeight -= weight;
 		packet.references.push({ ...ref, type: value.event.type, is_error: value.failed, excerpt, complete: excerpt.length === value.text.length });
 	}
-	async function success(ref, signal) {
+	async function success(ref, signal, kind) {
 		const value = await load(ref, signal);
-		if (!value.call_id || value.failed) throw new Error("写入来源必须是本次维护已分配的成功工具事件");
+		const instruction = kind === "rule" && value.event.type === "user/message" && value.event.data.source?.kind === "user";
+		if (value.failed || !value.call_id && !instruction) throw new Error("来源需要本次维护已分配的成功工具事件；rule也可引用原用户明确要求");
 		return value;
 	}
 	async function byCallIds(callIds, signal) {
@@ -193,6 +206,7 @@ export async function createMaintenanceEvidence(ctx, job) {
 		return selected;
 	}
 	async function bindSource(args) {
+		const kind = args.kind ?? args.entry?.kind;
 		const explicit = args.sourceSession !== undefined || args.sourceSeqs !== undefined;
 		if (!explicit && args.evidence_call_ids === undefined && args.evidence === undefined) return args;
 		if (args.evidence_call_ids !== undefined && !args.evidence_call_ids.length) throw new Error("evidence_call_ids需要至少一个成功工具调用");
@@ -201,19 +215,19 @@ export async function createMaintenanceEvidence(ctx, job) {
 			selected = await byCallIds(args.evidence_call_ids, job.controller.signal);
 			if (explicit && (args.sourceSession !== selected[0].sourceSession || JSON.stringify(unique(args.sourceSeqs || []).sort()) !== JSON.stringify(selected.map(ref => ref.seq).sort()))) throw new Error(`MEMORY_SOURCE_MISMATCH: evidence_call_ids对应 ${JSON.stringify(selected.map(({ sourceSession, seq }) => ({ sourceSession, seq })))}。请只保留 evidence_call_ids，或使用这些 sourceSession/sourceSeqs，不要混填两套不一致的引用。`);
 		} else {
-			if (!args.sourceSession || !args.sourceSeqs?.length) throw new Error("MEMORY_SOURCE_REQUIRED: 新事实写入请从本次证据包选用 evidence_call_ids，或成对提供 sourceSession/sourceSeqs。仅整理已有正文时省略 evidence 与来源参数即可保留原来源。");
+			if (!args.sourceSession || !args.sourceSeqs?.length) throw new Error("MEMORY_SOURCE_REQUIRED: 请从本次证据包选用 evidence_call_ids，或成对提供 sourceSession/sourceSeqs；rule可引用原用户要求。仅整理已有正文时省略 evidence 与来源参数即可保留原来源。");
 			selected = unique(args.sourceSeqs).map(seq => {
 				const ref = refs.get(keyOf(args.sourceSession, seq));
 				if (!ref) throw new Error("来源事件不属于本次维护");
 				return ref;
 			});
-			for (const ref of selected) await success(ref, job.controller.signal);
+			for (const ref of selected) await success(ref, job.controller.signal, kind);
 		}
 		if (new Set(selected.map(ref => ref.sourceSession)).size !== 1) throw new Error("一次写入需要引用同一来源会话");
 		const { evidence_call_ids, ...result } = args;
 		return { ...result, sourceSession: selected[0].sourceSession, sourceSeqs: selected.map(ref => ref.seq) };
 	}
-	async function resolveReview(callIds, signal) {
+	async function resolveReview(callIds, signal, kind) {
 		let selected;
 		if (callIds !== undefined) selected = await byCallIds(callIds, signal);
 		else {
@@ -221,13 +235,13 @@ export async function createMaintenanceEvidence(ctx, job) {
 			for (const ref of refs.values()) {
 				if (!ref.assigned) continue;
 				const value = await load(ref, signal);
-				if (value.call_id && !value.failed && value.text.trim()) selected.push(ref);
+				if (!value.failed && value.text.trim() && (value.call_id || kind === "rule" && value.event.type === "user/message" && value.event.data.source?.kind === "user")) selected.push(ref);
 			}
 			selected = selected.slice(-4);
-			if (!selected.length) throw new Error("本次维护没有已分配的成功验证证据");
+			if (!selected.length) throw new Error("本次维护没有已分配的可用依据；rule可引用原用户要求，事实需要成功验证证据");
 		}
 		return Promise.all(selected.map(async ref => {
-			const value = await success(ref, signal);
+			const value = await success(ref, signal, kind);
 			return quotedEvidence(ref.sourceSession, value.event, value);
 		}));
 	}

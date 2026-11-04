@@ -315,7 +315,7 @@ export function createMemoryBrowserClient(require, styles) {
 					h(Field, { label: t("evidence") }, h(Input, { value: form.evidence, placeholder: t(form.kind === "rule" ? "ruleEvidencePlaceholder" : "evidencePlaceholder"), disabled: busy, onChange: event => update("evidence", event.target.value) })),
 					h("div", { className: "lm-browser-modal-actions" }, h(Button, { variant: "outline", type: "button", disabled: busy, onClick: onClose }, t("cancel")), h(Button, { variant: "primary", type: "submit", disabled: busy || !form.namespace || ruleTooLong }, busy ? t("creating") : t("create"))))));
 	}
-	function IndexUsage({ stats, t }) {
+	function IndexUsage({ stats, t, kind, onKindChange }) {
 		const [open, setOpen] = React.useState(false);
 		const [hovered, setHovered] = React.useState(null);
 		const used = Number(stats?.indexChars) || 0;
@@ -324,17 +324,22 @@ export function createMemoryBrowserClient(require, styles) {
 		const percent = Math.round((used / budget) * 100);
 		const over = percent > 100;
 		const parts = [
-			["head", t("usage.label.head"), Number(stats.headChars) || 0, null],
-			["rules", t("usage.label.rules"), Number(stats.rulesChars) || 0, Number(stats.ruleCount) || 0],
-			["facts", t("usage.label.facts"), Number(stats.factsChars) || 0, Number(stats.factCount) || 0],
-			["sops", t("usage.label.sops"), Number(stats.sopsChars) || 0, Number(stats.sopCount) || 0],
+			["head", t("usage.label.head"), Number(stats.headChars) || 0, null, null],
+			["rules", t("usage.label.rules"), Number(stats.rulesChars) || 0, Number(stats.ruleCount) || 0, "rule"],
+			["facts", t("usage.label.facts"), Number(stats.factsChars) || 0, Number(stats.factCount) || 0, "fact"],
+			["sops", t("usage.label.sops"), Number(stats.sopsChars) || 0, Number(stats.sopCount) || 0, "sop"],
 		];
-		const dimmed = kind => hovered !== null && hovered !== kind;
-		const tipFor = (kind, value, count) => [
-			t("usage.tip." + kind),
+		const dimmed = partKey => hovered !== null && hovered !== partKey;
+		const tipFor = (partKey, value, count) => [
+			t("usage.tip." + partKey),
 			count === null ? "" : t("usage.count", { count }),
 			t("usage.share", { share: Math.round((value / used) * 100) }),
 		].filter(Boolean).join(" · ");
+		const legendBody = (partKey, term, value) => [
+			h("span", { key: partKey + "-swatch", className: "lm-usage-swatch lm-usage-color-" + partKey, "aria-hidden": "true" }),
+			h("span", { key: partKey + "-label", className: "lm-usage-legend-label" }, term),
+			h("span", { key: partKey + "-chars", className: "lm-usage-legend-chars" }, compactChars(value)),
+		];
 		return h("div", { className: "lm-browser-usage" + (open ? " is-open" : "") },
 			h("button", {
 				type: "button", className: "lm-usage-summary",
@@ -344,9 +349,9 @@ export function createMemoryBrowserClient(require, styles) {
 				h("span", { className: "lm-usage-label" }, t("usage.used")),
 				h("span", { className: "lm-usage-percent" + (over ? " is-over" : "") }, percent + "%"),
 				h("span", { className: "lm-usage-bar", "aria-hidden": "true" },
-					parts.map(([kind, , value]) => h("span", {
-						key: kind,
-						className: "lm-usage-segment lm-usage-color-" + kind + (dimmed(kind) ? " is-dim" : ""),
+					parts.map(([partKey, , value]) => h("span", {
+						key: partKey,
+						className: "lm-usage-segment lm-usage-color-" + partKey + (dimmed(partKey) ? " is-dim" : ""),
 						style: { width: (percent * value / used) + "%" },
 					}))),
 				h("span", { className: "lm-usage-figures" }, "~" + t("usage.total", { used: compactChars(used), budget: compactChars(budget) })),
@@ -354,17 +359,21 @@ export function createMemoryBrowserClient(require, styles) {
 			h("div", { className: "lm-usage-detail", id: "lm-usage-detail", "aria-hidden": open ? undefined : "true" },
 				h("div", { className: "lm-usage-detail-inner" },
 					h("div", { className: "lm-usage-legend" },
-						parts.map(([kind, term, value, count]) => h("span", {
-							key: kind,
-							className: "lm-usage-legend-wrap" + (dimmed(kind) ? " is-dim" : ""),
-							onMouseEnter: () => setHovered(kind),
+						parts.map(([partKey, term, value, count, entryKind]) => h("span", {
+							key: partKey,
+							className: "lm-usage-legend-wrap" + (dimmed(partKey) ? " is-dim" : ""),
+							onMouseEnter: () => setHovered(partKey),
 							onMouseLeave: () => setHovered(null),
 						},
-							h(Tooltip, { label: tipFor(kind, value, count), side: "bottom", delayMs: 120 },
-								h("span", { className: "lm-usage-legend-item" },
-									h("span", { className: "lm-usage-swatch lm-usage-color-" + kind, "aria-hidden": "true" }),
-									h("span", { className: "lm-usage-legend-label" }, term),
-									h("span", { className: "lm-usage-legend-chars" }, compactChars(value))))))),
+							h(Tooltip, { label: tipFor(partKey, value, count), side: "bottom", delayMs: 120 },
+								entryKind
+									? h("button", {
+										type: "button",
+										className: "lm-usage-legend-item is-clickable" + (kind === entryKind ? " is-active" : ""),
+										"aria-pressed": kind === entryKind,
+										onClick: () => onKindChange && onKindChange(entryKind),
+										}, legendBody(partKey, term, value))
+									: h("span", { className: "lm-usage-legend-item" }, legendBody(partKey, term, value)))))),
 					over ? h("p", { className: "lm-usage-over", role: "status" }, t("usage.over")) : null)));
 	}
 	function MemoryBrowserPage({ controls, t }) {
@@ -607,7 +616,7 @@ export function createMemoryBrowserClient(require, styles) {
 				h("div", { className: "lm-browser-search" }, h(Input, { type: "search", icon: h(IconSearchOutlineRegular, { size: 14 }), "aria-label": t("search"), placeholder: t("searchPlaceholder"), value: query, onChange: event => setQuery(event.target.value) }), query ? h(Button, { variant: "ghost", size: "sm", className: "lm-browser-search-clear", "aria-label": t("clearSearch"), onClick: () => setQuery("") }, h(IconCloseOutlineRegular, { size: 14 })) : null),
 				h("div", { className: "lm-browser-filter-tabs", role: "group", "aria-label": t("kindLabel") }, [["", t("all")], ...entryKinds.map(value => [value, kindText(value, t)])].map(([value, label]) => h("button", { key: value || "all", type: "button", className: "lm-browser-filter-tab" + (kind === value ? " is-active" : ""), "aria-pressed": kind === value, onClick: () => setKind(value) }, label))),
 				h("label", { className: "lm-browser-archived-toggle" }, h(Switch, { checked: includeArchived, label: t("showArchived"), onChange: next => setIncludeArchived(next) }), h("span", { "aria-hidden": "true" }, t("showArchived")))),
-			h(IndexUsage, { stats: usage, t }),
+			h(IndexUsage, { stats: usage, t, kind, onKindChange: setKind }),
 			namespaceError ? h("div", { className: "lm-browser-error lm-browser-banner", role: "alert" }, h("span", null, namespaceError), h(Button, { variant: "outline", size: "sm", onClick: () => setNamespaceVersion(value => value + 1) }, t("reload"))) : null,
 			h("div", { className: "lm-browser-body" },
 				h("section", { className: "lm-browser-list-pane", "aria-label": t("entries") },

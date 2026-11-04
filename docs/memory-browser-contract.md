@@ -109,6 +109,15 @@ entry 标识统一为 { namespace: string, kind: "rule"|"fact"|"sop", key: strin
 - 说明段与规则段没有条目数；事实目录段与经验目录段给条数，取 factCount 与 sopCount
 - 悬停时其余分段与图例项淡化：细条分段 opacity .28，图例项 opacity .4
 
+### 图例筛选
+
+- 展开后的图例“规则 / 事实目录 / 经验目录”三项可点击，点击后把条目列表的类型过滤切到对应类型，行为与工具栏的类型过滤按钮一致
+- 图例段与条目类型的对应：规则 → rule，事实目录 → fact，经验目录 → sop
+- 工具栏顶部的“全部”回到全部类型；当前不过滤（全部）时不点亮任何图例项
+- 当前过滤类型对应的图例项高亮：带 is-active 类，同时 aria-pressed 为 true
+- “说明”段是索引头部，不是条目类型，保持不可点击，也不参与高亮
+- 本次不新增本地化文案键，词典键数不变
+
 ### 配色
 
 - 四段配色在 client/browser.css 里按 lm-usage-color-head、lm-usage-color-rules、lm-usage-color-facts、lm-usage-color-sops 定义

@@ -64,6 +64,11 @@
 .lm-usage-swatch { display: inline-block; width: 7px; height: 7px; border-radius: 2px; background: var(--meter-tint); }
 .lm-usage-legend-label { color: var(--dsw-alias-label-secondary); }
 .lm-usage-legend-chars { color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }
+.lm-usage-legend-item.is-clickable { appearance: none; padding: 2px 8px; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }
+.lm-usage-legend-item.is-clickable:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.lm-usage-legend-item.is-clickable:focus-visible { outline: 2px solid var(--dsw-focus-ring-color); outline-offset: -2px; }
+.lm-usage-legend-item.is-clickable.is-active { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); }
+.lm-usage-legend-item.is-clickable.is-active .lm-usage-legend-label { color: var(--dsw-alias-label-primary); }
 .lm-usage-over { margin: 6px 0 0; color: var(--dsw-alias-state-error-primary); font-size: 12px; line-height: 18px; }
 .lm-usage-color-head { --meter-tint: var(--dsw-static-neutral-bluish-400); }
 .lm-usage-color-rules { --meter-tint: var(--dsw-static-violet-400); }

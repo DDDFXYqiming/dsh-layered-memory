@@ -2,6 +2,13 @@
 
 All notable changes to `@dsh-external/dsh-layered-memory` are documented here.
 
+## [0.11.2] - 2026-11-04
+
+### 维护会话模型恢复
+
+- 修复复用既有维护会话时沿用它上次记录的模型、导致维护请求被发到已不再配置的模型（例如 `provider "magpie" has no configured model "deepseek-v4.1-flash"`）的问题。
+- 每次维护派发在恢复的会话上显式记录本次解析出的路由，使存量整理与收尾核对始终跟随当前对话正在使用的模型；`maintenanceLlmProvider` / `maintenanceModel` 覆盖仍然优先。
+
 ## [0.11.0] - 2026-10-31
 
 ### 规则条目

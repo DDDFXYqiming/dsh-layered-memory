@@ -89,7 +89,11 @@ export function createMaintenanceWorkers(ctx, cfg, io) {
 				control.agent = agent;
 				await applyChildComposition(agentCtx, spec.parent, {});
 				appendDelegatedPolicyOverrides(agent.session, delegatedPolicies);
-				installModelSelection(agentCtx, { current: { provider: route.provider, model: route.model, ...(route.reasoningEffort ? { reasoningEffort: route.reasoningEffort } : {}) } });
+				const selection = { provider: route.provider, model: route.model, ...(route.reasoningEffort ? { reasoningEffort: route.reasoningEffort } : {}) };
+				installModelSelection(agentCtx, { current: selection });
+				// A resumed worker session keeps its own recorded model selection, which would win over agentOptions and pin the
+				// worker to a model the profile no longer configures. Record this run's resolved route so the worker follows it.
+				if (selection.provider && selection.model) agent.model?.select(selection);
 				agentCtx.on("agent/request", async (_payload, next) => ({ ...await next(), maxTokens: cfg.maintenanceMaxTokens }));
 				agentCtx.tools.restrict({ allow: [] });
 				completion = installMaintenanceCompletion(agentCtx, agent, spec.parameters, spec.beforeComplete);

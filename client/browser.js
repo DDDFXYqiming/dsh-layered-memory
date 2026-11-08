@@ -7,160 +7,84 @@ export function createMemoryBrowserClient(require, styles) {
 	} = require("@deepseek-ai/dsh-client-ui-primitives");
 	const h = React.createElement;
 	const locale = "layered-memory";
+
 	const dictionaries = {
 		zh: {
 			ruleContentCount: "当前 {count} / {limit} 字符", ruleContentNearLimit: "接近规则正文上限，请保留完整适用条件。", ruleContentOverLimit: "规则正文超过 {limit} 字符，请精简后保存。",
-			title: "记忆", newEntry: "新建条目", namespace: "命名空间", search: "搜索记忆", searchPlaceholder: "搜索标题或正文", clearSearch: "清空搜索",
-			all: "全部", showArchived: "显示已归档", entries: "记忆条目", loading: "正在读取…", empty: "没有匹配的记忆条目", emptyDetail: "从左侧选择一条记忆",
-			archived: "已归档", content: "内容", evidence: "证据", save: "保存", saving: "保存中…", archive: "归档", restore: "恢复",
-			history: "历史快照", noHistory: "暂无历史快照", rollback: "回滚到此版本", rollbackConfirm: "确认回滚", cancel: "取消",
-			rollbackWarning: "回滚会覆盖当前内容，是否继续？", requiredFields: "命名空间、标题、内容、证据都必须填写", loadTimeout: "记忆数据加载超时", saved: "已保存", archivedDone: "归档状态已更新", rolledBack: "已回滚到所选快照", preview: "预览", collapse: "收起", initialVersion: "初始版本", evidenceUpdated: "证据更新", contentDelta: "内容 {delta} 字符", noContentChange: "无正文变化", noSummary: "（空内容）", noPreview: "该快照没有可预览的正文", editMode: "编辑", previewMode: "预览",
-			reload: "重新加载", conflict: "条目已被其他会话修改，请重新加载后再保存。", createTitle: "新建记忆条目", topic: "标题",
-			topicPlaceholder: "输入条目标题", contentPlaceholder: "输入记忆正文", evidencePlaceholder: "输入本次写入的证据", create: "创建", creating: "创建中…",
+			title: "记忆系统工作台", newEntry: "新建条目", namespace: "命名空间", search: "搜索记忆", searchPlaceholder: "搜索标题、正文或关键词", clearSearch: "清空",
+			all: "全部", showArchived: "已归档", entries: "条目表格", loading: "正在读取…", empty: "没有匹配的记忆条目", emptyDetail: "从左侧列表选择条目查看详情",
+			archived: "已归档", content: "正文内容", evidence: "证据与溯源", save: "保存", saving: "保存中…", archive: "归档", restore: "恢复",
+			history: "历史快照时间轴", noHistory: "暂无历史快照", rollback: "回滚版本", rollbackConfirm: "确认回滚", cancel: "取消",
+			rollbackWarning: "回滚会覆盖当前内容，是否继续？", requiredFields: "命名空间、标题、内容、证据都必须填写", loadTimeout: "记忆数据加载超时", saved: "已保存", archivedDone: "归档状态已更新", rolledBack: "已回滚到所选快照", preview: "对比/预览", collapse: "收起", initialVersion: "初始版本", evidenceUpdated: "证据更新", contentDelta: "内容 {delta} 字符", noContentChange: "无正文变化", noSummary: "（空内容）", noPreview: "该快照没有可预览的正文", editMode: "编辑模式", previewMode: "预览模式",
+			reload: "重新加载", conflict: "条目已被修改，请重新加载后再保存。", createTitle: "新建记忆条目", topic: "标识 / 标题",
+			topicPlaceholder: "输入条目标题或唯一标识", contentPlaceholder: "输入记忆正文", evidencePlaceholder: "输入本次写入的证据来源", create: "创建条目", creating: "创建中…",
 			created: "条目已创建", close: "关闭", createdAt: "创建时间", updatedAt: "更新时间", characters: "{count} 字符",
 			listFailed: "条目列表读取失败", detailFailed: "条目详情读取失败", historyFailed: "历史快照读取失败", noNamespace: "暂无可用命名空间",
-			"usage.used": "索引已用", "usage.total": "{used} / {budget} 字符", "usage.over": "已超注入预算，较早条目不会进入提示词",
+			"usage.used": "索引已用", "usage.total": "{used} / {budget} 字符", "usage.over": "已超预算",
 			"usage.count": "{count} 条", "usage.share": "占已用 {share}%",
 			"usage.label.head": "说明", "usage.label.rules": "规则", "usage.label.facts": "事实目录", "usage.label.sops": "经验目录",
 			"kind.rule": "规则", "kind.fact": "事实", "kind.sop": "经验", kindLabel: "类型", ruleEvidencePlaceholder: "输入规则依据，例如用户的明确指令",
-			"usage.tip.head": "索引头部说明", "usage.tip.rules": "L0 红线规则", "usage.tip.facts": "事实条目目录（facts.md）", "usage.tip.sops": "任务经验目录（sops/）",
+			"usage.tip.head": "索引头部说明", "usage.tip.rules": "L0 红线规则", "usage.tip.facts": "事实条目目录 (facts.md)", "usage.tip.sops": "任务经验目录 (sops/)",
+			tabEntries: "条目表格", tabInjection: "注入透视", tabGraph: "关系图谱", tabCockpit: "维护驾驶舱",
+			backToList: "← 返回列表", relatedCapsules: "关联记忆", sourceSession: "来源会话",
+			heatLabel: "热度", accessLabel: "访问", statusLabel: "流态",
 		},
 		en: {
-			ruleContentCount: "Current {count} / {limit} characters", ruleContentNearLimit: "Approaching the rule limit; keep all applicability conditions.", ruleContentOverLimit: "The rule exceeds {limit} characters. Shorten it before saving.",
-			title: "Memory", newEntry: "New entry", namespace: "Namespace", search: "Search memory", searchPlaceholder: "Search titles or content", clearSearch: "Clear search",
-			all: "All", showArchived: "Show archived", entries: "Memory entries", loading: "Loading…", empty: "No matching memory entries", emptyDetail: "Select a memory entry on the left",
+			ruleContentCount: "Current {count} / {limit} chars", ruleContentNearLimit: "Approaching rule limit.", ruleContentOverLimit: "Rule exceeds {limit} chars.",
+			title: "Memory Workspace", newEntry: "New Entry", namespace: "Namespace", search: "Search", searchPlaceholder: "Search title, body or keyword", clearSearch: "Clear",
+			all: "All", showArchived: "Archived", entries: "Data Table", loading: "Loading…", empty: "No matching entries", emptyDetail: "Select an entry to view details",
 			archived: "Archived", content: "Content", evidence: "Evidence", save: "Save", saving: "Saving…", archive: "Archive", restore: "Restore",
-			history: "History", noHistory: "No history snapshots", rollback: "Roll back to this version", rollbackConfirm: "Confirm rollback", cancel: "Cancel",
-			rollbackWarning: "Rolling back replaces the current content. Continue?", requiredFields: "Namespace, title, content, and evidence are required", loadTimeout: "Timed out loading memory data", saved: "Saved", archivedDone: "Archive state updated", rolledBack: "Rolled back to the selected snapshot", preview: "Preview", collapse: "Collapse", initialVersion: "Initial version", evidenceUpdated: "Evidence updated", contentDelta: "Content {delta} chars", noContentChange: "No content change", noSummary: "(empty)", noPreview: "This snapshot has no preview", editMode: "Edit", previewMode: "Preview",
-			reload: "Reload", conflict: "This entry changed elsewhere. Reload it before saving again.", createTitle: "New memory entry", topic: "Title",
-			topicPlaceholder: "Enter an entry title", contentPlaceholder: "Enter memory content", evidencePlaceholder: "Enter evidence for this write", create: "Create", creating: "Creating…",
-			created: "Entry created", close: "Close", createdAt: "Created", updatedAt: "Updated", characters: "{count} characters",
-			listFailed: "Could not load entries", detailFailed: "Could not load entry details", historyFailed: "Could not load history", noNamespace: "No namespaces available",
-			"usage.used": "Index used", "usage.total": "{used} / {budget} chars", "usage.over": "Over the injection budget; older entries stay out of the prompt",
-			"usage.count": "{count} entries", "usage.share": "{share}% of used",
+			history: "Timeline & Snapshots", noHistory: "No history", rollback: "Rollback", rollbackConfirm: "Confirm", cancel: "Cancel",
+			rollbackWarning: "Rollback will overwrite current content. Continue?", requiredFields: "Required fields missing", loadTimeout: "Timed out", saved: "Saved", archivedDone: "Archive updated", rolledBack: "Rolled back", preview: "Diff / Preview", collapse: "Collapse", initialVersion: "Initial", evidenceUpdated: "Evidence updated", contentDelta: "{delta} chars", noContentChange: "No change", noSummary: "(empty)", noPreview: "No preview", editMode: "Edit", previewMode: "Preview",
+			reload: "Reload", conflict: "Conflict detected.", createTitle: "New Memory Entry", topic: "Title / Key",
+			topicPlaceholder: "Enter title or key", contentPlaceholder: "Enter content", evidencePlaceholder: "Enter evidence", create: "Create", creating: "Creating…",
+			created: "Created", close: "Close", createdAt: "Created", updatedAt: "Updated", characters: "{count} chars",
+			listFailed: "Failed to load", detailFailed: "Failed to load detail", historyFailed: "Failed to load history", noNamespace: "No namespace",
+			"usage.used": "Index Used", "usage.total": "{used} / {budget} chars", "usage.over": "Over Budget",
+			"usage.count": "{count} entries", "usage.share": "{share}%",
 			"usage.label.head": "Header", "usage.label.rules": "Rules", "usage.label.facts": "Facts", "usage.label.sops": "Skills",
-			"kind.rule": "Rule", "kind.fact": "Fact", "kind.sop": "Skill", kindLabel: "Type", ruleEvidencePlaceholder: "Enter the basis for this rule, such as an explicit user instruction",
-			"usage.tip.head": "Index header", "usage.tip.rules": "L0 red-line rules", "usage.tip.facts": "Fact entries (facts.md)", "usage.tip.sops": "Skill entries (sops/)",
-		},
-		ja: {
-			ruleContentCount: "現在 {count} / {limit} 文字", ruleContentNearLimit: "ルール本文の上限に近づいています。適用条件をすべて保持してください。", ruleContentOverLimit: "ルール本文が {limit} 文字を超えています。短くして保存してください。",
-			"title": "メモリ", "newEntry": "新規エントリ", "namespace": "名前空間", "search": "メモリを検索", "searchPlaceholder": "タイトルまたは本文を検索", "clearSearch": "検索をクリア",
-			"all": "すべて", "showArchived": "アーカイブを表示", "entries": "メモリエントリ", "loading": "読み込み中…", "empty": "一致するエントリがありません", "emptyDetail": "左からエントリを選択",
-			"archived": "アーカイブ済み", "content": "内容", "evidence": "根拠", "save": "保存", "saving": "保存中…", "archive": "アーカイブ", "restore": "復元",
-			"history": "履歴", "noHistory": "履歴スナップショットなし", "rollback": "このバージョンに戻す", "rollbackConfirm": "ロールバックを確認", "cancel": "キャンセル",
-			"rollbackWarning": "ロールバックすると現在の内容が上書きされます。続行しますか？", "requiredFields": "名前空間・タイトル・内容・根拠は必須です", "loadTimeout": "メモリデータの読み込みがタイムアウトしました", "saved": "保存しました", "archivedDone": "アーカイブ状態を更新しました", "rolledBack": "選択したスナップショットに戻しました", "preview": "プレビュー", "collapse": "折りたたむ", "initialVersion": "初期バージョン", "evidenceUpdated": "根拠を更新", "contentDelta": "内容 {delta} 文字", "noContentChange": "本文の変更なし", "noSummary": "（空の内容）", "noPreview": "このスナップショットにはプレビューできる本文がありません", "editMode": "編集", "previewMode": "プレビュー",
-			"reload": "再読み込み", "conflict": "他のセッションで変更されました。再読み込みしてから保存してください。", "createTitle": "新しいメモリエントリ", "topic": "タイトル",
-			"topicPlaceholder": "タイトルを入力", "contentPlaceholder": "メモリ本文を入力", "evidencePlaceholder": "今回の書き込みの根拠を入力", "create": "作成", "creating": "作成中…",
-			"created": "エントリを作成しました", "close": "閉じる", "createdAt": "作成日時", "updatedAt": "更新日時", "characters": "{count} 文字",
-			"listFailed": "エントリ一覧の読み込みに失敗しました", "detailFailed": "エントリ詳細の読み込みに失敗しました", "historyFailed": "履歴の読み込みに失敗しました", "noNamespace": "利用可能な名前空間がありません",
-			"usage.used": "インデックス使用量", "usage.total": "{used} / {budget} 文字", "usage.over": "注入予算を超過しています。古い項目はプロンプトに含まれません",
-			"usage.count": "{count} 件", "usage.share": "使用量の {share}%",
-			"usage.label.head": "ヘッダー", "usage.label.rules": "ルール", "usage.label.facts": "ファクト", "usage.label.sops": "スキル",
-			"kind.rule": "ルール", "kind.fact": "ファクト", "kind.sop": "スキル", kindLabel: "種類", ruleEvidencePlaceholder: "ユーザーの明示的な指示など、ルールの根拠を入力",
-			"usage.tip.head": "インデックスのヘッダー", "usage.tip.rules": "L0 の必須ルール", "usage.tip.facts": "ファクト項目のディレクトリ（facts.md）", "usage.tip.sops": "タスク経験のディレクトリ（sops/）",
-		},
-		es: {
-			ruleContentCount: "Actual: {count} / {limit} caracteres", ruleContentNearLimit: "Cerca del límite de la regla; conserva todas las condiciones de aplicación.", ruleContentOverLimit: "La regla supera los {limit} caracteres. Acórtala antes de guardar.",
-			"title": "Memoria", "newEntry": "Nueva entrada", "namespace": "Espacio de nombres", "search": "Buscar en la memoria", "searchPlaceholder": "Buscar títulos o contenido", "clearSearch": "Limpiar búsqueda",
-			"all": "Todo", "showArchived": "Mostrar archivados", "entries": "Entradas de memoria", "loading": "Cargando…", "empty": "No hay entradas coincidentes", "emptyDetail": "Selecciona una entrada a la izquierda",
-			"archived": "Archivado", "content": "Contenido", "evidence": "Evidencia", "save": "Guardar", "saving": "Guardando…", "archive": "Archivar", "restore": "Restaurar",
-			"history": "Historial", "noHistory": "Sin instantáneas de historial", "rollback": "Revertir a esta versión", "rollbackConfirm": "Confirmar reversión", "cancel": "Cancelar",
-			"rollbackWarning": "Revertir reemplaza el contenido actual. ¿Continuar?", "requiredFields": "Espacio de nombres, título, contenido y evidencia son obligatorios", "loadTimeout": "Se agotó el tiempo de carga de datos", "saved": "Guardado", "archivedDone": "Estado de archivo actualizado", "rolledBack": "Revertido al instantáneo seleccionado", "preview": "Vista previa", "collapse": "Contraer", "initialVersion": "Versión inicial", "evidenceUpdated": "Evidencia actualizada", "contentDelta": "Contenido {delta} caracteres", "noContentChange": "Sin cambios en el cuerpo", "noSummary": "(vacío)", "noPreview": "Este instantáneo no tiene cuerpo previsualizable", "editMode": "Editar", "previewMode": "Vista previa",
-			"reload": "Recargar", "conflict": "Esta entrada cambió en otra sesión. Recárgala antes de guardar.", "createTitle": "Nueva entrada de memoria", "topic": "Título",
-			"topicPlaceholder": "Introduce un título", "contentPlaceholder": "Introduce el contenido", "evidencePlaceholder": "Introduce la evidencia de esta escritura", "create": "Crear", "creating": "Creando…",
-			"created": "Entrada creada", "close": "Cerrar", "createdAt": "Creado", "updatedAt": "Actualizado", "characters": "{count} caracteres",
-			"listFailed": "No se pudo cargar la lista de entradas", "detailFailed": "No se pudieron cargar los detalles", "historyFailed": "No se pudo cargar el historial", "noNamespace": "No hay espacios de nombres disponibles",
-			"usage.used": "Índice usado", "usage.total": "{used} / {budget} caracteres", "usage.over": "Se superó el presupuesto de inyección; las entradas antiguas no se incluyen en el prompt",
-			"usage.count": "{count} entradas", "usage.share": "{share}% de lo usado",
-			"usage.label.head": "Encabezado", "usage.label.rules": "Reglas", "usage.label.facts": "Hechos", "usage.label.sops": "Habilidades",
-			"kind.rule": "Regla", "kind.fact": "Hecho", "kind.sop": "Habilidad", kindLabel: "Tipo", ruleEvidencePlaceholder: "Introduce la base de la regla, como una instrucción explícita del usuario",
-			"usage.tip.head": "Encabezado del índice", "usage.tip.rules": "Reglas esenciales L0", "usage.tip.facts": "Directorio de hechos (facts.md)", "usage.tip.sops": "Directorio de experiencias (sops/)",
-		},
-		fr: {
-			ruleContentCount: "Actuellement {count} / {limit} caractères", ruleContentNearLimit: "La limite approche ; conservez toutes les conditions d’application de la règle.", ruleContentOverLimit: "La règle dépasse {limit} caractères. Raccourcissez-la avant d’enregistrer.",
-			"title": "Mémoire", "newEntry": "Nouvelle entrée", "namespace": "Espace de noms", "search": "Rechercher dans la mémoire", "searchPlaceholder": "Rechercher titres ou contenu", "clearSearch": "Effacer la recherche",
-			"all": "Tout", "showArchived": "Afficher les archivés", "entries": "Entrées mémoire", "loading": "Chargement…", "empty": "Aucune entrée correspondante", "emptyDetail": "Sélectionnez une entrée à gauche",
-			"archived": "Archivé", "content": "Contenu", "evidence": "Preuve", "save": "Enregistrer", "saving": "Enregistrement…", "archive": "Archiver", "restore": "Restaurer",
-			"history": "Historique", "noHistory": "Aucun instantané d’historique", "rollback": "Revenir à cette version", "rollbackConfirm": "Confirmer le retour", "cancel": "Annuler",
-			"rollbackWarning": "Le retour remplace le contenu actuel. Continuer ?", "requiredFields": "L’espace de noms, le titre, le contenu et la preuve sont obligatoires", "loadTimeout": "Le chargement des données a expiré", "saved": "Enregistré", "archivedDone": "État d’archivage mis à jour", "rolledBack": "Revenu à l’instantané sélectionné", "preview": "Aperçu", "collapse": "Réduire", "initialVersion": "Version initiale", "evidenceUpdated": "Preuve mise à jour", "contentDelta": "Contenu {delta} caractères", "noContentChange": "Aucun changement de contenu", "noSummary": "(vide)", "noPreview": "Cet instantané n’a pas de contenu à prévisualiser", "editMode": "Modifier", "previewMode": "Aperçu",
-			"reload": "Recharger", "conflict": "Cette entrée a changé ailleurs. Rechargez-la avant d’enregistrer.", "createTitle": "Nouvelle entrée mémoire", "topic": "Titre",
-			"topicPlaceholder": "Saisir un titre", "contentPlaceholder": "Saisir le contenu de la mémoire", "evidencePlaceholder": "Saisir la preuve de cette écriture", "create": "Créer", "creating": "Création…",
-			"created": "Entrée créée", "close": "Fermer", "createdAt": "Créé", "updatedAt": "Mis à jour", "characters": "{count} caractères",
-			"listFailed": "Échec du chargement de la liste", "detailFailed": "Échec du chargement des détails", "historyFailed": "Échec du chargement de l’historique", "noNamespace": "Aucun espace de noms disponible",
-			"usage.used": "Indice utilisé", "usage.total": "{used} / {budget} caractères", "usage.over": "Budget d’injection dépassé ; les entrées anciennes ne sont pas incluses dans le prompt",
-			"usage.count": "{count} entrées", "usage.share": "{share}% de l’utilisé",
-			"usage.label.head": "En-tête", "usage.label.rules": "Règles", "usage.label.facts": "Faits", "usage.label.sops": "Compétences",
-			"kind.rule": "Règle", "kind.fact": "Fait", "kind.sop": "Compétence", kindLabel: "Type", ruleEvidencePlaceholder: "Saisir le fondement de la règle, par exemple une instruction explicite de l’utilisateur",
-			"usage.tip.head": "En-tête de l’index", "usage.tip.rules": "Règles essentielles L0", "usage.tip.facts": "Répertoire des faits (facts.md)", "usage.tip.sops": "Répertoire des expériences (sops/)",
-		},
-		de: {
-			ruleContentCount: "Aktuell {count} / {limit} Zeichen", ruleContentNearLimit: "Die Regel nähert sich dem Limit. Alle Geltungsbedingungen beibehalten.", ruleContentOverLimit: "Die Regel überschreitet {limit} Zeichen. Vor dem Speichern kürzen.",
-			"title": "Speicher", "newEntry": "Neuer Eintrag", "namespace": "Namespace", "search": "Speicher durchsuchen", "searchPlaceholder": "Titel oder Inhalt durchsuchen", "clearSearch": "Suche löschen",
-			"all": "Alle", "showArchived": "Archivierte anzeigen", "entries": "Speichereinträge", "loading": "Wird geladen…", "empty": "Keine passenden Einträge", "emptyDetail": "Eintrag links auswählen",
-			"archived": "Archiviert", "content": "Inhalt", "evidence": "Nachweis", "save": "Speichern", "saving": "Speichern…", "archive": "Archivieren", "restore": "Wiederherstellen",
-			"history": "Verlauf", "noHistory": "Keine Verlaufs-Snapshots", "rollback": "Zu dieser Version zurücksetzen", "rollbackConfirm": "Rollback bestätigen", "cancel": "Abbrechen",
-			"rollbackWarning": "Ein Rollback ersetzt den aktuellen Inhalt. Fortfahren?", "requiredFields": "Namespace, Titel, Inhalt und Nachweis sind erforderlich", "loadTimeout": "Zeitüberschreitung beim Laden der Speicherdaten", "saved": "Gespeichert", "archivedDone": "Archivstatus aktualisiert", "rolledBack": "Zum ausgewählten Snapshot zurückgesetzt", "preview": "Vorschau", "collapse": "Einklappen", "initialVersion": "Erstversion", "evidenceUpdated": "Nachweis aktualisiert", "contentDelta": "Inhalt {delta} Zeichen", "noContentChange": "Keine Inhaltsänderung", "noSummary": "(leer)", "noPreview": "Dieser Snapshot hat keinen anzeigbaren Inhalt", "editMode": "Bearbeiten", "previewMode": "Vorschau",
-			"reload": "Neu laden", "conflict": "Dieser Eintrag wurde anderswo geändert. Vor dem Speichern neu laden.", "createTitle": "Neuer Speichereintrag", "topic": "Titel",
-			"topicPlaceholder": "Titel eingeben", "contentPlaceholder": "Speicherinhalt eingeben", "evidencePlaceholder": "Nachweis für diesen Schreibvorgang eingeben", "create": "Erstellen", "creating": "Erstellen…",
-			"created": "Eintrag erstellt", "close": "Schließen", "createdAt": "Erstellt", "updatedAt": "Aktualisiert", "characters": "{count} Zeichen",
-			"listFailed": "Eintragsliste konnte nicht geladen werden", "detailFailed": "Eintragsdetails konnten nicht geladen werden", "historyFailed": "Verlauf konnte nicht geladen werden", "noNamespace": "Keine Namespaces verfügbar",
-			"usage.used": "Index belegt", "usage.total": "{used} / {budget} Zeichen", "usage.over": "Injektionsbudget überschritten; ältere Einträge gelangen nicht in den Prompt",
-			"usage.count": "{count} Einträge", "usage.share": "{share}% der Belegung",
-			"usage.label.head": "Kopfzeile", "usage.label.rules": "Regeln", "usage.label.facts": "Fakten", "usage.label.sops": "Fähigkeiten",
-			"kind.rule": "Regel", "kind.fact": "Fakt", "kind.sop": "Fähigkeit", kindLabel: "Typ", ruleEvidencePlaceholder: "Grundlage der Regel eingeben, etwa eine ausdrückliche Nutzeranweisung",
-			"usage.tip.head": "Index-Kopfzeile", "usage.tip.rules": "L0-Grundregeln", "usage.tip.facts": "Verzeichnis der Fakten (facts.md)", "usage.tip.sops": "Verzeichnis der Erfahrungen (sops/)",
-		},
-		ru: {
-			ruleContentCount: "Сейчас {count} / {limit} символов", ruleContentNearLimit: "Правило близко к лимиту. Сохраните все условия применения.", ruleContentOverLimit: "Правило превышает {limit} символов. Сократите его перед сохранением.",
-			"title": "Память", "newEntry": "Новая запись", "namespace": "Пространство имён", "search": "Поиск в памяти", "searchPlaceholder": "Поиск по заголовкам или тексту", "clearSearch": "Очистить поиск",
-			"all": "Все", "showArchived": "Показать архивные", "entries": "Записи памяти", "loading": "Загрузка…", "empty": "Нет подходящих записей", "emptyDetail": "Выберите запись слева",
-			"archived": "В архиве", "content": "Содержимое", "evidence": "Доказательство", "save": "Сохранить", "saving": "Сохранение…", "archive": "В архив", "restore": "Восстановить",
-			"history": "История", "noHistory": "Нет снимков истории", "rollback": "Откатить к этой версии", "rollbackConfirm": "Подтвердить откат", "cancel": "Отмена",
-			"rollbackWarning": "Откат заменит текущее содержимое. Продолжить?", "requiredFields": "Пространство имён, заголовок, содержимое и доказательство обязательны", "loadTimeout": "Время ожидания данных истекло", "saved": "Сохранено", "archivedDone": "Статус архива обновлён", "rolledBack": "Выполнен откат к выбранному снимку", "preview": "Предпросмотр", "collapse": "Свернуть", "initialVersion": "Начальная версия", "evidenceUpdated": "Доказательство обновлено", "contentDelta": "Содержимое {delta} символов", "noContentChange": "Без изменений содержимого", "noSummary": "(пусто)", "noPreview": "У этого снимка нет содержимого для предпросмотра", "editMode": "Изменить", "previewMode": "Предпросмотр",
-			"reload": "Перезагрузить", "conflict": "Запись изменена в другом сеансе. Перезагрузите перед сохранением.", "createTitle": "Новая запись памяти", "topic": "Заголовок",
-			"topicPlaceholder": "Введите заголовок", "contentPlaceholder": "Введите содержимое памяти", "evidencePlaceholder": "Введите доказательство этой записи", "create": "Создать", "creating": "Создание…",
-			"created": "Запись создана", "close": "Закрыть", "createdAt": "Создано", "updatedAt": "Обновлено", "characters": "{count} символов",
-			"listFailed": "Не удалось загрузить список записей", "detailFailed": "Не удалось загрузить детали записи", "historyFailed": "Не удалось загрузить историю", "noNamespace": "Нет доступных пространств имён",
-			"usage.used": "Индекс занят", "usage.total": "{used} / {budget} символов", "usage.over": "Превышен бюджет внедрения; старые записи не попадут в промпт",
-			"usage.count": "{count} записей", "usage.share": "{share}% от занятого",
-			"usage.label.head": "Заголовок", "usage.label.rules": "Правила", "usage.label.facts": "Факты", "usage.label.sops": "Навыки",
-			"kind.rule": "Правило", "kind.fact": "Факт", "kind.sop": "Навык", kindLabel: "Тип", ruleEvidencePlaceholder: "Укажите основание правила, например явное указание пользователя",
-			"usage.tip.head": "Заголовок индекса", "usage.tip.rules": "Базовые правила L0", "usage.tip.facts": "Каталог фактов (facts.md)", "usage.tip.sops": "Каталог опыта (sops/)",
-		},
-		pt: {
-			ruleContentCount: "Atual: {count} / {limit} caracteres", ruleContentNearLimit: "Perto do limite da regra; preserve todas as condições de aplicação.", ruleContentOverLimit: "A regra excede {limit} caracteres. Encurte-a antes de salvar.",
-			"title": "Memória", "newEntry": "Nova entrada", "namespace": "Namespace", "search": "Pesquisar memória", "searchPlaceholder": "Pesquisar títulos ou conteúdo", "clearSearch": "Limpar pesquisa",
-			"all": "Tudo", "showArchived": "Mostrar arquivados", "entries": "Entradas de memória", "loading": "Carregando…", "empty": "Nenhuma entrada correspondente", "emptyDetail": "Selecione uma entrada à esquerda",
-			"archived": "Arquivado", "content": "Conteúdo", "evidence": "Evidência", "save": "Salvar", "saving": "Salvando…", "archive": "Arquivar", "restore": "Restaurar",
-			"history": "Histórico", "noHistory": "Sem instantâneos de histórico", "rollback": "Reverter para esta versão", "rollbackConfirm": "Confirmar reversão", "cancel": "Cancelar",
-			"rollbackWarning": "Reverter substitui o conteúdo atual. Continuar?", "requiredFields": "Namespace, título, conteúdo e evidência são obrigatórios", "loadTimeout": "O carregamento dos dados expirou", "saved": "Salvo", "archivedDone": "Estado de arquivamento atualizado", "rolledBack": "Revertido para o instantâneo selecionado", "preview": "Pré-visualizar", "collapse": "Recolher", "initialVersion": "Versão inicial", "evidenceUpdated": "Evidência atualizada", "contentDelta": "Conteúdo {delta} caracteres", "noContentChange": "Sem alteração de conteúdo", "noSummary": "(vazio)", "noPreview": "Este instantâneo não tem conteúdo pré-visualizável", "editMode": "Editar", "previewMode": "Pré-visualizar",
-			"reload": "Recarregar", "conflict": "Esta entrada mudou em outra sessão. Recarregue antes de salvar.", "createTitle": "Nova entrada de memória", "topic": "Título",
-			"topicPlaceholder": "Insira um título", "contentPlaceholder": "Insira o conteúdo da memória", "evidencePlaceholder": "Insira a evidência desta gravação", "create": "Criar", "creating": "Criando…",
-			"created": "Entrada criada", "close": "Fechar", "createdAt": "Criado", "updatedAt": "Atualizado", "characters": "{count} caracteres",
-			"listFailed": "Falha ao carregar a lista de entradas", "detailFailed": "Falha ao carregar os detalhes", "historyFailed": "Falha ao carregar o histórico", "noNamespace": "Nenhum namespace disponível",
-			"usage.used": "Índice usado", "usage.total": "{used} / {budget} caracteres", "usage.over": "Orçamento de injeção excedido; entradas antigas ficam fora do prompt",
-			"usage.count": "{count} entradas", "usage.share": "{share}% do usado",
-			"usage.label.head": "Cabeçalho", "usage.label.rules": "Regras", "usage.label.facts": "Fatos", "usage.label.sops": "Habilidades",
-			"kind.rule": "Regra", "kind.fact": "Fato", "kind.sop": "Habilidade", kindLabel: "Tipo", ruleEvidencePlaceholder: "Insira a base da regra, como uma instrução explícita do usuário",
-			"usage.tip.head": "Cabeçalho do índice", "usage.tip.rules": "Regras essenciais L0", "usage.tip.facts": "Diretório de fatos (facts.md)", "usage.tip.sops": "Diretório de experiências (sops/)",
-		},
+			"kind.rule": "Rule", "kind.fact": "Fact", "kind.sop": "Skill", kindLabel: "Type", ruleEvidencePlaceholder: "Rule evidence",
+			"usage.tip.head": "Index header", "usage.tip.rules": "L0 Rules", "usage.tip.facts": "Facts (facts.md)", "usage.tip.sops": "Skills (sops/)",
+			tabEntries: "Data Table", tabInjection: "Injection Flow", tabGraph: "Memory Graph", tabCockpit: "Maintenance Cockpit",
+			backToList: "← Back", relatedCapsules: "Related Entries", sourceSession: "Source Session",
+			heatLabel: "Heat", accessLabel: "Access", statusLabel: "Status",
+		}
 	};
+
 	async function resultValue(request) {
 		const result = await request;
 		if (!result.ok) throw new Error(result.error.message);
 		return result.value;
 	}
+
 	const identity = entry => JSON.stringify([entry.namespace, entry.kind, entry.key]);
 	const time = value => {
 		if (!value) return "—";
-		const lang = (typeof document !== "undefined" && document.documentElement.lang) || "zh-CN";
-		return new Date(value).toLocaleString(lang, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+		const date = new Date(value);
+		const diffMs = Date.now() - date.getTime();
+		const diffMin = Math.round(diffMs / 60000);
+		if (diffMin < 1) return "刚刚";
+		if (diffMin < 60) return `${diffMin}分钟前`;
+		const diffHour = Math.round(diffMin / 60);
+		if (diffHour < 24) return `${diffHour}小时前`;
+		return `${Math.round(diffHour / 24)}天前`;
 	};
+	const formatBytes = bytes => {
+		if (!bytes || bytes <= 0) return "0 B";
+		const units = ["B", "KB", "MB", "GB"];
+		const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+		return (bytes / Math.pow(1024, index)).toFixed(1) + " " + units[index];
+	};
+
 	const ruleContentLimit = 100;
-	const ruleContentLength = content => Array.from(content.trim()).length;
+	const ruleContentLength = content => Array.from(String(content || "").trim()).length;
 	const ruleContentOverLimit = (kind, content) => kind === "rule" && ruleContentLength(content) > ruleContentLimit;
 	const entryKinds = ["rule", "fact", "sop"];
 	const kindText = (kind, t) => (entryKinds.includes(kind) ? t("kind." + kind) : kind);
+
+	const RING_PATH = "M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831";
+	const KIND_COLOR = { rule: "#a855f7", fact: "#3b82f6", sop: "#b78535" };
+
 	function compactChars(value) {
 		const number = Number(value);
 		if (!Number.isFinite(number) || number <= 0) return "0";
@@ -168,98 +92,86 @@ export function createMemoryBrowserClient(require, styles) {
 		const scaled = number / 1000;
 		return (scaled >= 100 ? String(Math.round(scaled)) : scaled.toFixed(1)) + "K";
 	}
-	function renderInline(text, keyPrefix) {
-		const parts = [];
-		let rest = text;
-		let idx = 0;
-		const patterns = [
-			[/\*\*([^*]+)\*\*/, (m, t) => h("strong", { key: keyPrefix + idx++ }, t)],
-			[/\*([^*]+)\*/, (m, t) => h("em", { key: keyPrefix + idx++ }, t)],
-			[/`([^`]+)`/, (m, t) => h("code", { key: keyPrefix + idx++ }, t)],
-			[/\[([^\]]+)\]\(([^)]+)\)/, (m, t, u) => h("a", { key: keyPrefix + idx++, href: u, target: "_blank", rel: "noopener" }, t)],
-		];
-		while (rest.length > 0) {
-			let earliest = null, earliestRe = null, earliestFn = null;
-			for (const [re, fn] of patterns) {
-				const m = rest.match(re);
-				if (m && (earliest === null || m.index < earliest)) {
-					earliest = m.index; earliestRe = m; earliestFn = fn;
-				}
-			}
-			if (earliest === null) { parts.push(rest); break; }
-			if (earliest > 0) parts.push(rest.slice(0, earliest));
-			parts.push(earliestFn(...earliestRe));
-			rest = rest.slice(earliest + earliestRe[0].length);
-		}
-		return parts;
+
+	function highlightText(text, query) {
+		if (!query || !text) return text;
+		const parts = String(text).split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"));
+		return parts.map((part, index) => part.toLowerCase() === query.toLowerCase()
+			? h("mark", { key: index, className: "lm-highlight-match" }, part)
+			: part);
 	}
+
+	// 完整 Markdown 渲染（包含标题、列表、代码块、行内格式）
 	function renderMarkdown(text) {
 		const lines = String(text || "").split(/\r?\n/);
-		const blocks = [];
-		let listItems = null, listOrdered = false;
-		let paraLines = [];
-		const flushPara = () => {
-			if (paraLines.length) {
-				blocks.push(h("p", { key: "p" + blocks.length }, renderInline(paraLines.join("\n"), "pi")));
-				paraLines = [];
+		const elements = [];
+		let inCode = false;
+		let codeBuffer = [];
+
+		lines.forEach((line, index) => {
+			if (line.startsWith("```")) {
+				if (inCode) {
+					elements.push(h("pre", { key: "code-" + index, style: { background: "var(--dsw-alias-bg-layer-1)", padding: 10, borderRadius: 8, overflow: "auto" } },
+						h("code", null, codeBuffer.join("\n"))));
+					codeBuffer = [];
+					inCode = false;
+				} else {
+					inCode = true;
+				}
+				return;
 			}
-		};
-		const flushList = () => {
-			if (listItems && listItems.length) {
-				const tag = listOrdered ? "ol" : "ul";
-				blocks.push(h(tag, { key: "l" + blocks.length }, listItems.map((item, i) => h("li", { key: "li" + i }, renderInline(item, "li" + i)))));
+			if (inCode) {
+				codeBuffer.push(line);
+				return;
 			}
-			listItems = null;
-		};
-		for (const line of lines) {
-			const hMatch = line.match(/^(#{1,6})\s+(.*)/);
-			const ulMatch = line.match(/^[-*+]\s+(.*)/);
-			const olMatch = line.match(/^\d+[.)]\s+(.*)/);
-			const quoteMatch = line.match(/^>\s?(.*)/);
-			if (hMatch) {
-				flushPara(); flushList();
-				const level = hMatch[1].length;
-				blocks.push(h("h" + Math.min(level + 1, 6), { key: "h" + blocks.length }, renderInline(hMatch[2], "hi")));
-			} else if (ulMatch || olMatch) {
-				flushPara();
-				const isOl = !!olMatch;
-				if (listItems && listOrdered !== isOl) flushList();
-				if (!listItems) { listItems = []; listOrdered = isOl; }
-				listItems.push((ulMatch || olMatch)[1]);
-			} else if (quoteMatch) {
-				flushPara(); flushList();
-				blocks.push(h("blockquote", { key: "q" + blocks.length }, renderInline(quoteMatch[1], "qi")));
-			} else if (/^---+$/.test(line.trim())) {
-				flushPara(); flushList();
-				blocks.push(h("hr", { key: "hr" + blocks.length }));
+			if (line.startsWith("### ")) {
+				elements.push(h("h3", { key: index, style: { margin: "10px 0 4px", fontSize: 14, fontWeight: 600 } }, line.slice(4)));
+			} else if (line.startsWith("## ")) {
+				elements.push(h("h2", { key: index, style: { margin: "14px 0 6px", fontSize: 16, fontWeight: 600 } }, line.slice(3)));
+			} else if (line.startsWith("# ")) {
+				elements.push(h("h1", { key: index, style: { margin: "16px 0 8px", fontSize: 18, fontWeight: 600 } }, line.slice(2)));
+			} else if (line.startsWith("- ") || line.startsWith("* ")) {
+				elements.push(h("li", { key: index, style: { marginLeft: 16, margin: "2px 0" } }, line.slice(2)));
 			} else if (line.trim() === "") {
-				flushPara(); flushList();
+				elements.push(h("div", { key: index, style: { height: 6 } }));
 			} else {
-				flushList();
-				paraLines.push(line);
+				elements.push(h("p", { key: index, style: { margin: "4px 0" } }, line));
 			}
-		}
-		flushPara(); flushList();
-		return blocks;
+		});
+		return elements;
 	}
+
 	function MemoryBrowserIcon({ size = 20 }) {
 		return h("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
 			h("path", { d: "M5 4.5A2.5 2.5 0 0 1 7.5 2H20v17H7.5A2.5 2.5 0 0 0 5 21.5z" }),
 			h("path", { d: "M5 4.5v17M8.5 6H16M8.5 10H16M8.5 14H13" }));
 	}
-	function RuleContentHint({ kind, content, id, t }) {
-		if (kind !== "rule") return null;
-		const count = ruleContentLength(content);
-		const over = count > ruleContentLimit;
-		const near = count >= ruleContentLimit * 0.9;
-		return h("span", { id, className: "lm-browser-rule-length" + (over ? " is-over" : near ? " is-near" : ""), role: over ? "alert" : "status", "aria-live": "polite", "aria-atomic": true },
-			h("span", { className: "lm-browser-rule-count" }, t("ruleContentCount", { count, limit: ruleContentLimit })),
-			near ? h("span", null, t(over ? "ruleContentOverLimit" : "ruleContentNearLimit", { limit: ruleContentLimit })) : null);
+
+	// BounceNav 弹性导航条
+	function BounceNav({ currentTab, onSelect, t }) {
+		const tabs = [
+			{ id: "entries", label: t("tabEntries") },
+			{ id: "injection", label: t("tabInjection") },
+			{ id: "graph", label: t("tabGraph") },
+			{ id: "cockpit", label: t("tabCockpit") },
+		];
+		const activeIndex = Math.max(0, tabs.findIndex(tab => tab.id === currentTab));
+		const tabWidth = 98;
+		return h("div", { className: "lm-bounce-tabs" },
+			h("div", { className: "lm-bounce-pill", style: { width: tabWidth + "px", transform: `translateX(${activeIndex * (tabWidth + 2)}px)` } }),
+			tabs.map(tab => h("button", {
+				key: tab.id,
+				type: "button",
+				style: { width: tabWidth + "px" },
+				className: "lm-bounce-tab" + (currentTab === tab.id ? " is-active" : ""),
+				onClick: () => onSelect(tab.id),
+			}, tab.label)));
 	}
+
 	function Field({ label, children, className = "" }) {
 		return h("label", { className: "lm-browser-field " + className }, h("span", { className: "lm-browser-field-label" }, label), children);
 	}
-	// 官方 Menu + MenuItemButton 风格的选中下拉，替代原生 select 控件
+
 	function SelectMenu({ value, options, disabled, onChange, ariaLabel, triggerClassName }) {
 		const [open, setOpen] = React.useState(false);
 		const current = options.find(option => option.value === value);
@@ -280,9 +192,6 @@ export function createMemoryBrowserClient(require, styles) {
 				"aria-haspopup": "menu",
 				"aria-expanded": open,
 				onClick: () => setOpen(value => !value),
-				onKeyDown: event => {
-					if (!open && event.key === "ArrowDown") { event.preventDefault(); setOpen(true); }
-				},
 			},
 				h("span", { className: "lm-browser-select-value" }, current ? current.label : (options[0]?.label ?? "")),
 				h(IconChevronDownOutlineRegular, { size: 12, "aria-hidden": "true" })),
@@ -294,368 +203,742 @@ export function createMemoryBrowserClient(require, styles) {
 	}
 
 	function CreateDialog({ open, form, setForm, namespaces, busy, error, onClose, onSubmit, t }) {
-		React.useEffect(() => {
-			if (!open) return;
-			const keydown = event => { if (event.key === "Escape" && !busy) onClose(); };
-			document.addEventListener("keydown", keydown);
-			return () => document.removeEventListener("keydown", keydown);
-		}, [open, busy, onClose]);
 		if (!open) return null;
 		const update = (key, value) => setForm(current => ({ ...current, [key]: value }));
 		const ruleTooLong = ruleContentOverLimit(form.kind, form.content);
+		const explainerText = form.kind === "rule"
+			? "【L0 规则】：写入 rules.md，全局常驻注入（占房间 ≥25%），硬上限 ≤100 字符，用于全局行为红线约束。"
+			: form.kind === "fact"
+				? "【L2 事实】：写入 facts.md（## 标题段落），按热度排序注入模型提示词，用于环境与项目事实知识。"
+				: "【L3 经验】：写入 sops/*.md 独立文件，作为专业经验按需召回或常驻探索目录。";
+
 		return h("div", { className: "lm-browser-modal-backdrop", onMouseDown: event => { if (event.target === event.currentTarget && !busy) onClose(); } },
-			h("section", { className: "lm-browser-modal", role: "dialog", "aria-modal": true, "aria-labelledby": "lm-browser-create-title" },
-				h("div", { className: "lm-browser-modal-heading" }, h("h2", { id: "lm-browser-create-title" }, t("createTitle")), h(Button, { variant: "ghost", size: "sm", "aria-label": t("close"), disabled: busy, onClick: onClose }, h(IconCloseOutlineRegular, { size: 16 }))),
+			h("section", { className: "lm-browser-modal", role: "dialog", "aria-modal": true },
+				h("div", { className: "lm-browser-modal-heading" },
+					h("h2", null, t("createTitle")),
+					h(Button, { variant: "ghost", size: "sm", "aria-label": t("close"), disabled: busy, onClick: onClose }, h(IconCloseOutlineRegular, { size: 16 }))),
 				h("form", { onSubmit: event => { event.preventDefault(); onSubmit(); } },
 					error ? h("p", { className: "lm-browser-error", role: "alert" }, error) : null,
+					h("div", { className: "lm-kind-explainer" }, explainerText),
 					h(Field, { label: t("namespace") }, h(SelectMenu, { value: form.namespace, options: namespaces.map(row => ({ value: row.namespace, label: row.namespace })), disabled: busy, onChange: value => update("namespace", value), ariaLabel: t("namespace"), triggerClassName: "lm-browser-input" })),
 					h(Field, { label: t("kindLabel") }, h(SelectMenu, { value: form.kind, options: entryKinds.map(value => ({ value, label: kindText(value, t) })), disabled: busy, onChange: value => update("kind", value), ariaLabel: t("kindLabel"), triggerClassName: "lm-browser-input" })),
 					h(Field, { label: t("topic") }, h(Input, { value: form.topic, placeholder: t("topicPlaceholder"), disabled: busy, onChange: event => update("topic", event.target.value) })),
-					h(Field, { label: t("content") }, h("textarea", { className: "lm-browser-textarea lm-browser-create-content", value: form.content, placeholder: t("contentPlaceholder"), disabled: busy, "aria-describedby": form.kind === "rule" ? "lm-create-rule-length" : undefined, "aria-invalid": ruleTooLong || undefined, onChange: event => update("content", event.target.value) }), h(RuleContentHint, { kind: form.kind, content: form.content, id: "lm-create-rule-length", t })),
-					h(Field, { label: t("evidence") }, h(Input, { value: form.evidence, placeholder: t(form.kind === "rule" ? "ruleEvidencePlaceholder" : "evidencePlaceholder"), disabled: busy, onChange: event => update("evidence", event.target.value) })),
-					h("div", { className: "lm-browser-modal-actions" }, h(Button, { variant: "outline", type: "button", disabled: busy, onClick: onClose }, t("cancel")), h(Button, { variant: "primary", type: "submit", disabled: busy || !form.namespace || ruleTooLong }, busy ? t("creating") : t("create"))))));
+					h(Field, { label: t("content") }, h("textarea", { className: "lm-browser-textarea", value: form.content, placeholder: t("contentPlaceholder"), disabled: busy, onChange: event => update("content", event.target.value) })),
+					h(Field, { label: t("evidence") }, h("textarea", { className: "lm-browser-textarea lm-browser-evidence-textarea", value: form.evidence, placeholder: t(form.kind === "rule" ? "ruleEvidencePlaceholder" : "evidencePlaceholder"), disabled: busy, onChange: event => update("evidence", event.target.value) })),
+					h("div", { style: { display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 } },
+						h(Button, { variant: "outline", type: "button", disabled: busy, onClick: onClose }, t("cancel")),
+						h(Button, { variant: "primary", type: "submit", disabled: busy || !form.namespace || ruleTooLong }, busy ? t("creating") : t("create"))))));
 	}
+
 	function IndexUsage({ stats, t, kind, onKindChange }) {
 		const [open, setOpen] = React.useState(false);
-		const [hovered, setHovered] = React.useState(null);
 		const used = Number(stats?.indexChars) || 0;
 		const budget = Number(stats?.budgetChars) || 0;
 		if (!stats || used <= 0 || budget <= 0) return null;
 		const percent = Math.round((used / budget) * 100);
 		const over = percent > 100;
+		const targetChars = Math.round(budget * 0.9);
+		const triggerChars = Math.round(targetChars * 1.02);
+		const toTrigger = triggerChars - used;
+
 		const parts = [
-			["head", t("usage.label.head"), Number(stats.headChars) || 0, null, null],
-			["rules", t("usage.label.rules"), Number(stats.rulesChars) || 0, Number(stats.ruleCount) || 0, "rule"],
-			["facts", t("usage.label.facts"), Number(stats.factsChars) || 0, Number(stats.factCount) || 0, "fact"],
-			["sops", t("usage.label.sops"), Number(stats.sopsChars) || 0, Number(stats.sopCount) || 0, "sop"],
+			{ key: "head", label: t("usage.label.head"), chars: Number(stats.headChars) || 0, count: null, kind: null },
+			{ key: "rules", label: t("usage.label.rules"), chars: Number(stats.rulesChars) || 0, count: Number(stats.ruleCount) || 0, kind: "rule" },
+			{ key: "facts", label: t("usage.label.facts"), chars: Number(stats.factsChars) || 0, count: Number(stats.factCount) || 0, kind: "fact" },
+			{ key: "sops", label: t("usage.label.sops"), chars: Number(stats.sopsChars) || 0, count: Number(stats.sopCount) || 0, kind: "sop" },
 		];
-		const dimmed = partKey => hovered !== null && hovered !== partKey;
-		const tipFor = (partKey, value, count) => [
-			t("usage.tip." + partKey),
-			count === null ? "" : t("usage.count", { count }),
-			t("usage.share", { share: Math.round((value / used) * 100) }),
-		].filter(Boolean).join(" · ");
-		const legendBody = (partKey, term, value) => [
-			h("span", { key: partKey + "-swatch", className: "lm-usage-swatch lm-usage-color-" + partKey, "aria-hidden": "true" }),
-			h("span", { key: partKey + "-label", className: "lm-usage-legend-label" }, term),
-			h("span", { key: partKey + "-chars", className: "lm-usage-legend-chars" }, compactChars(value)),
-		];
-		return h("div", { className: "lm-browser-usage" + (open ? " is-open" : "") },
-			h("button", {
-				type: "button", className: "lm-usage-summary",
-				"aria-expanded": open, "aria-controls": "lm-usage-detail",
-				onClick: () => setOpen(!open),
-			},
-				h("span", { className: "lm-usage-label" }, t("usage.used")),
+
+		const bar = h("span", { className: "lm-usage-bar" },
+			parts.map(part => h("span", {
+				key: part.key,
+				className: "lm-usage-segment lm-usage-color-" + part.key,
+				style: { width: (percent * part.chars / used) + "%" },
+			})));
+
+		const legend = h("div", { className: "lm-usage-legend" },
+			parts.map(part => h("span", { key: part.key, className: "lm-usage-legend-wrap" },
+				h(Tooltip, { label: `${part.label} · ${part.count ? part.count + " 条 · " : ""}${compactChars(part.chars)}` },
+					part.kind
+						? h("button", {
+							type: "button",
+							className: "lm-usage-legend-item is-clickable" + (kind === part.kind ? " is-active" : ""),
+							onClick: () => onKindChange && onKindChange(part.kind),
+						},
+							h("span", { className: "lm-usage-swatch lm-usage-color-" + part.key }),
+							h("span", { className: "lm-usage-legend-label" }, part.label),
+							h("span", { className: "lm-usage-legend-chars" }, `${part.count ? part.count + " 条 · " : ""}${compactChars(part.chars)}`))
+						: h("span", { className: "lm-usage-legend-item" },
+							h("span", { className: "lm-usage-swatch lm-usage-color-" + part.key }),
+							h("span", { className: "lm-usage-legend-label" }, part.label),
+							h("span", { className: "lm-usage-legend-chars" }, compactChars(part.chars)))))));
+
+		return h("div", { className: "lm-browser-usage-wrap" + (open ? " is-open" : "") },
+			h("button", { type: "button", className: "lm-usage-summary", onClick: () => setOpen(!open) },
+				h("div", { className: "lm-usage-ring-wrap" },
+					h("svg", { className: "lm-usage-ring", viewBox: "0 0 36 36" },
+						h("path", { className: "lm-usage-ring-bg", d: RING_PATH }),
+						h("path", { className: "lm-usage-ring-fill" + (over ? " is-over" : percent > 90 ? " is-near" : ""), strokeDasharray: `${Math.min(100, percent)}, 100`, d: RING_PATH }))),
 				h("span", { className: "lm-usage-percent" + (over ? " is-over" : "") }, percent + "%"),
-				h("span", { className: "lm-usage-bar", "aria-hidden": "true" },
-					parts.map(([partKey, , value]) => h("span", {
-						key: partKey,
-						className: "lm-usage-segment lm-usage-color-" + partKey + (dimmed(partKey) ? " is-dim" : ""),
-						style: { width: (percent * value / used) + "%" },
-					}))),
+				bar,
 				h("span", { className: "lm-usage-figures" }, "~" + t("usage.total", { used: compactChars(used), budget: compactChars(budget) })),
 				h(IconChevronDownOutlineRegular, { size: 12, className: "lm-usage-chevron" })),
-			h("div", { className: "lm-usage-detail", id: "lm-usage-detail", "aria-hidden": open ? undefined : "true" },
+			h("div", { className: "lm-usage-detail" },
 				h("div", { className: "lm-usage-detail-inner" },
-					h("div", { className: "lm-usage-legend" },
-						parts.map(([partKey, term, value, count, entryKind]) => h("span", {
-							key: partKey,
-							className: "lm-usage-legend-wrap" + (dimmed(partKey) ? " is-dim" : ""),
-							onMouseEnter: () => setHovered(partKey),
-							onMouseLeave: () => setHovered(null),
-						},
-							h(Tooltip, { label: tipFor(partKey, value, count), side: "bottom", delayMs: 120 },
-								entryKind
-									? h("button", {
-										type: "button",
-										className: "lm-usage-legend-item is-clickable" + (kind === entryKind ? " is-active" : ""),
-										"aria-pressed": kind === entryKind,
-										onClick: () => onKindChange && onKindChange(entryKind),
-										}, legendBody(partKey, term, value))
-									: h("span", { className: "lm-usage-legend-item" }, legendBody(partKey, term, value)))))),
-					over ? h("p", { className: "lm-usage-over", role: "status" }, t("usage.over")) : null)));
+					h("div", { className: "lm-usage-status-line" },
+						toTrigger > 0
+							? h("span", { className: "lm-usage-trigger-hint" }, `距自动整理触发还差约 ${toTrigger} 字符 (触发水位: ${triggerChars})`)
+							: h("span", { className: "lm-usage-trigger-hint is-triggered" }, `已超过触发整理水位 (${triggerChars} 字符)，下次将执行自动维护`)),
+					legend)));
 	}
+
+	function ScrollProgressPill({ targetRef }) {
+		const [progress, setProgress] = React.useState(0);
+		const [menuOpen, setMenuOpen] = React.useState(false);
+		React.useEffect(() => {
+			const element = targetRef.current;
+			if (!element) return;
+			const onScroll = () => {
+				const max = element.scrollHeight - element.clientHeight;
+				setProgress(max > 0 ? Math.round((element.scrollTop / max) * 100) : 0);
+			};
+			element.addEventListener("scroll", onScroll);
+			return () => element.removeEventListener("scroll", onScroll);
+		}, [targetRef]);
+
+		const scrollTo = id => {
+			const target = document.getElementById(id);
+			if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+			setMenuOpen(false);
+		};
+
+		const menu = h("div", { className: "lm-scroll-menu" },
+			h("button", { type: "button", className: "lm-scroll-menu-item", onClick: () => scrollTo("sec-meta") }, "元数据与热度"),
+			h("button", { type: "button", className: "lm-scroll-menu-item", onClick: () => scrollTo("sec-content") }, "正文内容"),
+			h("button", { type: "button", className: "lm-scroll-menu-item", onClick: () => scrollTo("sec-evidence") }, "证据与溯源"),
+			h("button", { type: "button", className: "lm-scroll-menu-item", onClick: () => scrollTo("sec-history") }, "历史快照时间轴"));
+
+		return h("div", { className: "lm-scroll-pill-wrap" },
+			menuOpen ? menu : null,
+			h("button", { type: "button", className: "lm-scroll-pill", onClick: () => setMenuOpen(!menuOpen) },
+				h("svg", { className: "lm-scroll-ring-svg", viewBox: "0 0 36 36" },
+					h("path", { fill: "none", stroke: "var(--dsw-alias-interactive-bg-hover)", strokeWidth: 4, d: RING_PATH }),
+					h("path", { fill: "none", stroke: "var(--dsw-static-blue-450, #3b82f6)", strokeWidth: 4, strokeDasharray: `${progress}, 100`, d: RING_PATH })),
+				h("span", null, `${progress}%`)));
+	}
+
+	function DiffViewer({ oldText, newText }) {
+		const oldLines = String(oldText || "").split("\n");
+		const newLines = String(newText || "").split("\n");
+		const max = Math.max(oldLines.length, newLines.length);
+		const rows = [];
+		for (let index = 0; index < max; index++) {
+			const before = oldLines[index];
+			const after = newLines[index];
+			if (before === after) {
+				rows.push(h("div", { key: index, className: "lm-diff-line" }, h("span", { style: { opacity: .4 } }, " "), before));
+			} else {
+				if (before !== undefined) rows.push(h("div", { key: index + "-del", className: "lm-diff-line lm-diff-del" }, "- ", before));
+				if (after !== undefined) rows.push(h("div", { key: index + "-add", className: "lm-diff-line lm-diff-add" }, "+ ", after));
+			}
+		}
+		return h("div", { className: "lm-diff-view" }, rows);
+	}
+
+	function InjectionView({ controls, namespace, t }) {
+		const [data, setData] = React.useState(null);
+		const [loading, setLoading] = React.useState(true);
+		React.useEffect(() => {
+			if (!namespace) return;
+			setLoading(true);
+			controls.getInjectionState({ namespace })
+				.then(result => {
+					setData(result);
+					setLoading(false);
+				})
+				.catch(() => setLoading(false));
+		}, [controls, namespace]);
+
+		if (loading) return h("div", { className: "lm-injection-view" }, t("loading"));
+		if (!data) return h("div", { className: "lm-injection-view" }, "无注入透视数据");
+
+		const items = data.items || [];
+		const ruleCount = items.filter(item => item.status === "rule").length;
+		const statusText = { rule: "常驻规则", cold: "冷探索 🎲", included: "热注入", omitted: "已裁剪 ✂️" };
+
+		const funnel = h("div", { className: "lm-funnel-card" },
+			h("div", { className: "lm-funnel-step" }, h("h4", null, "磁盘总目录"), h("span", null, `${items.length} 条`)),
+			h("span", { className: "lm-funnel-arrow" }, "→"),
+			h("div", { className: "lm-funnel-step" }, h("h4", null, "规则常驻 (≥25%)"), h("span", null, `${ruleCount} 条`)),
+			h("span", { className: "lm-funnel-arrow" }, "→"),
+			h("div", { className: "lm-funnel-step" }, h("h4", null, "冷探索配额 (12%)"), h("span", null, `${data.coldCount || 0} 条`)),
+			h("span", { className: "lm-funnel-arrow" }, "→"),
+			h("div", { className: "lm-funnel-step" }, h("h4", null, "最终提示词注入"), h("span", { style: { color: "#16a34a" } }, `${data.includedCount || 0} 条`)));
+
+		const table = h("div", { className: "lm-injection-table-pane" },
+			h("h3", { style: { margin: "0 0 10px", fontSize: 14 } }, "注入明细与取舍名单"),
+			h("div", { style: { display: "flex", flexDirection: "column", gap: 4 } },
+				items.map((item, index) => h("div", {
+					key: index,
+					style: { display: "flex", justifyContent: "space-between", padding: "6px 8px", background: "var(--dsw-alias-bg-layer-1)", borderRadius: 6, fontSize: 12 },
+				},
+					h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "60%" } }, item.title),
+					h("span", { className: "lm-status-badge lm-status-" + item.status }, statusText[item.status] || item.status)))));
+
+		const prompt = h("div", { className: "lm-injection-text-pane" },
+			h("h3", { style: { margin: "0 0 10px", fontSize: 14 } }, "实际合并注入提示词原文 (带结构高亮)"),
+			h("pre", { className: "lm-prompt-preview" }, data.combinedText || "（空）"));
+
+		return h("div", { className: "lm-injection-view" },
+			funnel,
+			h("div", { className: "lm-injection-split" }, table, prompt));
+	}
+
+	// 关系图谱：同心圆星系布局
+	function GraphView({ controls, namespace, onJumpEntry, t }) {
+		const [report, setReport] = React.useState(null);
+		const [selectedNode, setSelectedNode] = React.useState(null);
+		const [search, setSearch] = React.useState("");
+		const [onlyConnected, setOnlyConnected] = React.useState(true);
+		const [zoom, setZoom] = React.useState(1);
+
+		React.useEffect(() => {
+			if (!namespace) return;
+			controls.getMaintenanceReport({ namespace }).then(setReport).catch(console.error);
+		}, [controls, namespace]);
+
+		if (!report || !report.graph) return h("div", { style: { padding: 40, textAlign: "center" } }, t("loading"));
+
+		const edges = report.graph.edges || [];
+		const edgeSet = new Set(edges.flatMap(edge => [edge.source, edge.target]));
+
+		let nodes = report.graph.nodes || [];
+		if (onlyConnected) nodes = nodes.filter(node => edgeSet.has(node.id) || node.heat > 0);
+		if (search) nodes = nodes.filter(node => String(node.title || node.key || "").toLowerCase().includes(search.toLowerCase()));
+
+		const sortedNodes = [...nodes].sort((a, b) => (b.heat || 0) - (a.heat || 0));
+		const activeEdges = selectedNode
+			? edges.filter(edge => edge.source === selectedNode.id || edge.target === selectedNode.id)
+			: [];
+		const neighborIds = new Set(activeEdges.flatMap(edge => [edge.source, edge.target]));
+
+		// 同心圆星系布局：热度最高的节点位于核心，其余按环层均匀分布
+		const centerX = 400;
+		const centerY = 300;
+		const perRing = 12;
+		const positions = new Map();
+		sortedNodes.forEach((node, index) => {
+			if (index === 0) {
+				positions.set(node.id, { x: centerX, y: centerY });
+				return;
+			}
+			const ring = Math.floor((index - 1) / perRing) + 1;
+			const ringIndex = (index - 1) % perRing;
+			const angle = (ringIndex / perRing) * Math.PI * 2 + ring * 0.35;
+			const radius = ring * 70;
+			positions.set(node.id, {
+				x: centerX + Math.cos(angle) * radius,
+				y: centerY + Math.sin(angle) * radius,
+			});
+		});
+
+		const canvas = h("svg", { width: "100%", height: "100%", viewBox: "0 0 800 600", style: { transform: `scale(${zoom})`, transformOrigin: "center center" } },
+			edges.map((edge, index) => {
+				const from = positions.get(edge.source);
+				const to = positions.get(edge.target);
+				if (!from || !to) return null;
+				const highlighted = Boolean(selectedNode) && (edge.source === selectedNode.id || edge.target === selectedNode.id);
+				return h("line", {
+					key: index,
+					x1: from.x,
+					y1: from.y,
+					x2: to.x,
+					y2: to.y,
+					stroke: highlighted ? "var(--dsw-state-business-primary, #2563eb)" : "var(--dsw-alias-border-l3)",
+					strokeWidth: highlighted ? 2 : 1,
+					strokeOpacity: highlighted ? 1 : 0.35,
+				});
+			}),
+			sortedNodes.map(node => {
+				const position = positions.get(node.id);
+				if (!position) return null;
+				const isSelected = Boolean(selectedNode) && selectedNode.id === node.id;
+				const isNeighbor = neighborIds.has(node.id);
+				const radius = isSelected ? 10 : isNeighbor ? 7 : Math.min(8, 4 + (node.heat || 0));
+				return h("g", { key: node.id, onClick: () => setSelectedNode(node), style: { cursor: "pointer" } },
+					h("circle", {
+						cx: position.x,
+						cy: position.y,
+						r: radius,
+						fill: KIND_COLOR[node.kind] || "#94a3b8",
+						stroke: isSelected ? "#ffffff" : "transparent",
+						strokeWidth: 2,
+					}),
+					(isSelected || isNeighbor || node.heat > 0)
+						? h("text", { x: position.x + 9, y: position.y + 4, fontSize: 11, fill: "var(--dsw-alias-label-primary)", fontWeight: isSelected ? 600 : 400 }, String(node.title || node.key || "").slice(0, 12))
+						: null);
+			}));
+
+		const toolbar = h("div", { className: "lm-graph-toolbar" },
+			h(Input, { placeholder: "搜索节点…", value: search, onChange: event => setSearch(event.target.value) }),
+			h("label", { style: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer" } },
+				h("input", { type: "checkbox", checked: onlyConnected, onChange: event => setOnlyConnected(event.target.checked) }),
+				"仅看有边节点"),
+			h("div", { style: { display: "flex", gap: 4 } },
+				h(Button, { variant: "outline", size: "sm", onClick: () => setZoom(value => Math.min(2, value + 0.2)) }, "+"),
+				h(Button, { variant: "outline", size: "sm", onClick: () => setZoom(value => Math.max(0.5, value - 0.2)) }, "-"),
+				h(Button, { variant: "ghost", size: "sm", onClick: () => setZoom(1) }, "重置")),
+			h("span", { style: { fontSize: 12, opacity: .7 } }, `${sortedNodes.length} 节点 · ${edges.length} 边`));
+
+		const infoCard = selectedNode
+			? h("div", { className: "lm-graph-info-card" },
+				h("h3", { style: { margin: "0 0 8px", fontSize: 15 } }, selectedNode.title),
+				h("p", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" } }, `类型：${kindText(selectedNode.kind, t)} · 字符：${selectedNode.chars || 0}`),
+				h("p", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" } }, `邻居关联数：${neighborIds.size} 项`),
+				h(Button, { variant: "primary", size: "sm", onClick: () => onJumpEntry && onJumpEntry({ namespace, kind: selectedNode.kind, key: selectedNode.key }) }, "进入条目编辑"))
+			: null;
+
+		return h("div", { className: "lm-graph-view" },
+			h("div", { className: "lm-graph-canvas-wrap" }, toolbar, canvas),
+			infoCard);
+	}
+
+	// 维护驾驶舱：真实数据绑定
+	function CockpitView({ controls, namespace, entries, onJumpEntry }) {
+		const [metrics, setMetrics] = React.useState(null);
+		const [report, setReport] = React.useState(null);
+		React.useEffect(() => {
+			if (!namespace) return;
+			controls.getDiskMetrics({ namespace }).then(setMetrics).catch(console.error);
+			controls.getMaintenanceReport({ namespace }).then(setReport).catch(console.error);
+		}, [controls, namespace]);
+
+		if (!metrics) return h("div", { className: "lm-cockpit-view" }, "正在读取维护指标…");
+
+		const totalBytes = Number(metrics.size_bytes) || 0;
+		const share = value => (totalBytes > 0 ? Math.round((value / totalBytes) * 100) : 0);
+		const activeCount = (Number(metrics.rules) || 0) + (Number(metrics.facts) || 0) + (Number(metrics.sops) || 0);
+		const archivedCount = Number(metrics.archived) || 0;
+
+		const segments = [
+			{ key: "content", label: "正文内容", value: Number(metrics.content_bytes) || 0, color: "#3b82f6" },
+			{ key: "history", label: "历史快照", value: Number(metrics.history_bytes) || 0, color: "#a855f7" },
+			{ key: "meta", label: "元数据索引", value: Number(metrics.metadata_bytes) || 0, color: "#f59e0b" },
+			{ key: "pending", label: "待整理", value: Number(metrics.pending_bytes) || 0, color: "#16a34a" },
+		].filter(segment => segment.value > 0);
+
+		const duplicates = [
+			...(report?.dedupe?.nearDuplicates || []),
+			...(report?.mergeCandidates || []),
+		];
+		const sideKey = side => (side && typeof side === "object" ? (side.key || side.title || "-") : (side || "-"));
+		const coldItems = (entries || []).filter(entry => entry.injectionStatus === "cold" || entry.heat === 0).slice(0, 15);
+
+		const storageCard = h("div", { className: "lm-bento-card lm-bento-span-8" },
+			h("h3", null, `磁盘存储构成 · 总量 ${formatBytes(totalBytes)}`),
+			h("div", { style: { display: "flex", height: 14, borderRadius: 7, overflow: "hidden", margin: "14px 0 18px", gap: 2 } },
+				segments.map(segment => h("div", { key: segment.key, title: segment.label, style: { width: share(segment.value) + "%", background: segment.color } }))),
+			h("div", { style: { display: "flex", flexWrap: "wrap", gap: "4px 16px", fontSize: 12, color: "var(--dsw-alias-label-secondary)" } },
+				segments.map(segment => h("span", null, `● ${segment.label}: ${formatBytes(segment.value)} (${share(segment.value)}%)`))));
+
+		const activeCard = h("div", { className: "lm-bento-card lm-bento-span-4" },
+			h("h3", null, "活跃条目 vs 历史归档"),
+			h("div", { style: { fontSize: 24, fontWeight: 600, margin: "8px 0" } }, `${activeCount} 活跃 / ${archivedCount} 归档`),
+			h("p", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" } }, `历史快照占 ${share(Number(metrics.history_bytes) || 0)}% 存储空间，由可回滚版本链管理。`));
+
+		const duplicateCard = h("div", { className: "lm-bento-card lm-bento-span-6" },
+			h("h3", null, "相似与合并候选 (Near Duplicates)"),
+			duplicates.length
+				? duplicates.slice(0, 4).map((item, index) => h("div", {
+					key: index,
+					style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: ".5px solid var(--dsw-alias-border-l3)", fontSize: 12 },
+				},
+					h("span", { style: { maxWidth: "75%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, `${sideKey(item.a)} ⟷ ${sideKey(item.b)}`),
+					h("span", { style: { color: "#f59e0b", fontWeight: 500 } }, `${Math.round((Number(item.similarity ?? item.score) || 0) * 100)}% 相似`)))
+				: h("p", { style: { fontSize: 13, color: "var(--dsw-alias-label-caption)", margin: "10px 0" } }, "当前空间无重复或待合并冲突，记忆库状态健康 ✓"));
+
+		const coldCard = h("div", { className: "lm-bento-card lm-bento-span-6" },
+			h("h3", null, "冷条目巡检 (低频访问/冷探索)"),
+			h("p", { style: { fontSize: 12, margin: "0 0 10px", color: "var(--dsw-alias-label-secondary)" } }, "以下条目进入了探索轮换通道，点击可直接进入检查或归档："),
+			h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } },
+				coldItems.map((item, index) => h("button", {
+					key: index,
+					type: "button",
+					className: "lm-capsule-tag",
+					onClick: () => onJumpEntry && onJumpEntry(item.entry),
+				}, `❄️ ${item.title}`))));
+
+		return h("div", { className: "lm-cockpit-view" },
+			h("h2", { style: { margin: "0 0 16px", fontSize: 18, fontWeight: 600 } }, "记忆系统维护驾驶舱 (Bento Dashboard)"),
+			h("div", { className: "lm-bento-grid" }, storageCard, activeCard, duplicateCard, coldCard));
+	}
+
 	function MemoryBrowserPage({ controls, t }) {
+		const [currentTab, setCurrentTab] = React.useState("entries");
 		const [namespaces, setNamespaces] = React.useState([]);
 		const [namespace, setNamespace] = React.useState(null);
-		const [namespaceError, setNamespaceError] = React.useState(null);
 		const [namespaceBusy, setNamespaceBusy] = React.useState(true);
-		const [namespaceVersion, setNamespaceVersion] = React.useState(0);
 		const [query, setQuery] = React.useState("");
 		const [kind, setKind] = React.useState("");
 		const [includeArchived, setIncludeArchived] = React.useState(false);
 		const [entries, setEntries] = React.useState([]);
 		const [usage, setUsage] = React.useState(null);
 		const [listBusy, setListBusy] = React.useState(false);
-		const [listError, setListError] = React.useState(null);
-		const [selectedId, setSelectedId] = React.useState(null);
+		const [selectedEntry, setSelectedEntry] = React.useState(null);
 		const [detail, setDetail] = React.useState(null);
 		const [detailBusy, setDetailBusy] = React.useState(false);
-		const [detailError, setDetailError] = React.useState(null);
 		const [content, setContent] = React.useState("");
 		const [evidence, setEvidence] = React.useState("");
+		const [contentPreview, setContentPreview] = React.useState(true);
 		const [history, setHistory] = React.useState([]);
 		const [historyBusy, setHistoryBusy] = React.useState(false);
-		const [historyError, setHistoryError] = React.useState(null);
-		const [listVersion, setListVersion] = React.useState(0);
-		const [detailVersion, setDetailVersion] = React.useState(0);
-		const [historyVersion, setHistoryVersion] = React.useState(0);
-		const [busy, setBusy] = React.useState(null);
-		const [actionError, setActionError] = React.useState(null);
-		const [notice, setNotice] = React.useState(null);
-		const [conflict, setConflict] = React.useState(false);
-		const [rollbackId, setRollbackId] = React.useState(null);
-		const [contentPreview, setContentPreview] = React.useState(true);
-		const [previewId, setPreviewId] = React.useState(null);
+		const [sortField, setSortField] = React.useState("updatedAt");
+		const [sortAsc, setSortAsc] = React.useState(false);
+		const [expandedRows, setExpandedRows] = React.useState(new Set());
+		const [mobileTab, setMobileTab] = React.useState("list");
 		const [createOpen, setCreateOpen] = React.useState(false);
 		const [createForm, setCreateForm] = React.useState({ namespace: "", kind: "fact", topic: "", content: "", evidence: "" });
 		const [createError, setCreateError] = React.useState(null);
-		const detailRequest = React.useRef(0);
-		const historyRequest = React.useRef(0);
+		const [previewSnapshotId, setPreviewSnapshotId] = React.useState(null);
+		const [busy, setBusy] = React.useState(null);
+		const [notice, setNotice] = React.useState(null);
+
+		const detailScrollRef = React.useRef(null);
+		const selectedKey = selectedEntry ? identity(selectedEntry) : "";
+
 		React.useEffect(() => {
-			let active = true;
-			setNamespaceBusy(true);
-			// 首屏时远程命名空间可能尚未就绪，调用会一直悬挂；带超时重试，避免页面空着
-			const attempt = async () => {
-				for (let index = 0; index < 3; index += 1) {
-					if (!active) return;
-					try {
-						const rows = await Promise.race([
-							controls.listNamespaces(),
-							new Promise((_, reject) => setTimeout(() => reject(new Error(t("loadTimeout"))), 2500)),
-						]);
-						if (!active) return;
-						setNamespaces(rows);
-						setNamespaceError(null);
-						setNamespaceBusy(false);
-						setNamespace(current => current && rows.some(row => row.namespace === current) ? current : rows[0]?.namespace || null);
-						return;
-					} catch (error) {
-						if (!active) return;
-						if (index === 2) { setNamespaceBusy(false); setNamespaceError(error.message); return; }
-						await new Promise(resolve => setTimeout(resolve, 400));
-					}
-				}
-			};
-			attempt();
-			return () => { active = false; };
-		}, [controls, namespaceVersion]);
+			controls.listNamespaces()
+				.then(rows => {
+					setNamespaces(rows);
+					setNamespaceBusy(false);
+					setNamespace(current => current || rows[0]?.namespace || "default");
+				})
+				.catch(() => setNamespaceBusy(false));
+		}, [controls]);
+
 		React.useEffect(() => {
-			if (!namespace) { setEntries([]); setSelectedId(null); setListBusy(false); return; }
-			let active = true;
+			if (!namespace) return;
 			setListBusy(true);
-			setListError(null);
-			const timer = setTimeout(() => {
-				const request = { namespace, includeArchived };
-				if (kind) request.kind = kind;
-				if (query) request.query = query;
-				controls.listEntries(request).then(rows => {
-					if (!active) return;
+			controls.listEntries({ namespace, kind: kind || undefined, query: query || undefined, includeArchived })
+				.then(rows => {
 					setEntries(rows);
 					setListBusy(false);
-					setSelectedId(current => rows.some(row => identity(row.entry) === current) ? current : rows[0] ? identity(rows[0].entry) : null);
-				}).catch(error => { if (active) { setListBusy(false); setListError(error.message); } });
-			}, 160);
-			return () => { active = false; clearTimeout(timer); };
-		}, [controls, namespace, kind, query, includeArchived, listVersion]);
+					setSelectedEntry(current => {
+						if (current && current.namespace === namespace) return current;
+						return rows[0] ? rows[0].entry : null;
+					});
+				})
+				.catch(() => setListBusy(false));
+			controls.namespaceStats({ namespace }).then(setUsage).catch(() => setUsage(null));
+		}, [controls, namespace, kind, query, includeArchived]);
+
 		React.useEffect(() => {
-			if (!namespace) { setUsage(null); return; }
-			let active = true;
-			controls.namespaceStats({ namespace }).then(value => {
-				if (!active) return;
-				setUsage(value);
-			}).catch(() => { if (active) setUsage(null); });
-			return () => { active = false; };
-		}, [controls, namespace, listVersion]);
-		React.useEffect(() => {
-			const request = ++detailRequest.current;
-			const selected = entries.find(row => identity(row.entry) === selectedId);
-			setRollbackId(null);
-			setPreviewId(null);
-			setContentPreview(true);
-			if (!selected) { setDetail(null); setDetailBusy(false); setDetailError(null); return; }
-			setDetail(null);
+			if (!selectedEntry) {
+				setDetail(null);
+				setHistory([]);
+				return;
+			}
 			setDetailBusy(true);
-			setDetailError(null);
-			controls.readEntry({ entry: selected.entry }).then(value => {
-				if (request !== detailRequest.current) return;
-				setDetail(value);
-				setContent(value.content);
-				setEvidence(value.evidence);
-				setDetailBusy(false);
-			}).catch(error => { if (request === detailRequest.current) { setDetailBusy(false); setDetailError(error.message); } });
-		}, [controls, selectedId, detailVersion, entries]);
-		React.useEffect(() => {
-			const request = ++historyRequest.current;
-			const selected = entries.find(row => identity(row.entry) === selectedId);
-			if (!selected) { setHistory([]); setHistoryBusy(false); setHistoryError(null); return; }
+			controls.readEntry({ entry: selectedEntry })
+				.then(value => {
+					setDetail(value);
+					setContent(value.content);
+					setEvidence(value.evidence);
+					setDetailBusy(false);
+				})
+				.catch(() => {
+					setDetailBusy(false);
+					setDetail(null);
+				});
 			setHistoryBusy(true);
-			setHistoryError(null);
-			controls.entryHistory({ entry: selected.entry }).then(rows => {
-				if (request !== historyRequest.current) return;
-				setHistory(rows);
-				setHistoryBusy(false);
-			}).catch(error => { if (request === historyRequest.current) { setHistoryBusy(false); setHistoryError(error.message); } });
-		}, [controls, selectedId, historyVersion, entries]);
-		function refreshAll() {
-			setListVersion(value => value + 1);
-			setDetailVersion(value => value + 1);
-			setHistoryVersion(value => value + 1);
-		}
-		function reloadDetail() {
-			setActionError(null);
-			setConflict(false);
-			setDetailVersion(value => value + 1);
-			setHistoryVersion(value => value + 1);
-		}
-		function openCreate() {
-			setCreateForm({ namespace: namespace || namespaces[0]?.namespace || "", kind: kind || "fact", topic: "", content: "", evidence: "" });
+			controls.entryHistory({ entry: selectedEntry })
+				.then(rows => {
+					setHistory(rows);
+					setHistoryBusy(false);
+				})
+				.catch(() => setHistoryBusy(false));
+		}, [controls, selectedKey]);
+
+		const toggleRowExpand = (id, event) => {
+			event.stopPropagation();
+			const next = new Set(expandedRows);
+			if (next.has(id)) next.delete(id); else next.add(id);
+			setExpandedRows(next);
+		};
+
+		const handleSort = field => {
+			if (sortField === field) setSortAsc(!sortAsc);
+			else { setSortField(field); setSortAsc(false); }
+		};
+
+		const sortedEntries = [...entries].sort((a, b) => {
+			let valueA = a[sortField];
+			let valueB = b[sortField];
+			if (sortField === "heat") { valueA = a.heat || 0; valueB = b.heat || 0; }
+			if (sortField === "updatedAt") { valueA = new Date(valueA || 0).getTime(); valueB = new Date(valueB || 0).getTime(); }
+			if (valueA < valueB) return sortAsc ? -1 : 1;
+			if (valueA > valueB) return sortAsc ? 1 : -1;
+			return 0;
+		});
+
+		const refreshEntries = () => controls.listEntries({ namespace, kind: kind || undefined, query: query || undefined, includeArchived })
+			.then(rows => { setEntries(rows); return rows; })
+			.catch(() => undefined);
+
+		const saveEntry = async () => {
+			if (!detail) return;
+			setBusy("save");
+			try {
+				await controls.updateEntry({ entry: detail.entry, content, evidence });
+				setNotice(t("saved"));
+				const updated = await controls.readEntry({ entry: detail.entry });
+				setDetail(updated);
+				setContent(updated.content);
+			} catch (error) {
+				console.error(error);
+				setNotice(t("conflict"));
+			} finally {
+				setBusy(null);
+			}
+		};
+
+		const toggleArchived = async () => {
+			if (!detail) return;
+			setBusy("archive");
+			try {
+				await controls.setArchived({ entry: detail.entry, archived: !detail.archived });
+				setNotice(t("archivedDone"));
+				const updated = await controls.readEntry({ entry: detail.entry });
+				setDetail(updated);
+				await refreshEntries();
+			} catch (error) {
+				console.error(error);
+			} finally {
+				setBusy(null);
+			}
+		};
+
+		const rollback = async snapshotId => {
+			if (!detail) return;
+			setBusy("rollback");
+			try {
+				await controls.rollbackEntry({ entry: detail.entry, snapshotId });
+				setNotice(t("rolledBack"));
+				const updated = await controls.readEntry({ entry: detail.entry });
+				setDetail(updated);
+				setContent(updated.content);
+			} catch (error) {
+				console.error(error);
+			} finally {
+				setBusy(null);
+			}
+		};
+
+		const jumpToEntry = target => {
+			if (!target) return;
+			setNamespace(target.namespace || namespace);
+			setCurrentTab("entries");
+			setMobileTab("detail");
+			setSelectedEntry({ namespace: target.namespace || namespace, kind: target.kind, key: target.key });
+		};
+
+		const handleCreate = async () => {
 			setCreateError(null);
-			setCreateOpen(true);
-		}
-		async function createEntry() {
-			if (ruleContentOverLimit(createForm.kind, createForm.content)) return;
 			if (!createForm.namespace || !createForm.topic.trim() || !createForm.content.trim() || !createForm.evidence.trim()) {
 				setCreateError(t("requiredFields"));
 				return;
 			}
 			setBusy("create");
-			setCreateError(null);
 			try {
-				const result = await controls.createEntry(createForm);
+				const created = await controls.createEntry(createForm);
 				setCreateOpen(false);
-				setNamespace(result.entry.namespace);
-				setKind(result.entry.kind);
-				setQuery("");
-				setSelectedId(identity(result.entry));
+				setCreateForm(current => ({ ...current, topic: "", content: "", evidence: "" }));
+				setSelectedEntry(created.entry);
 				setNotice(t("created"));
-				refreshAll();
-			} catch (error) { setCreateError(error.message); }
-			finally { setBusy(null); }
-		}
-		async function saveEntry() {
-			if (!detail || ruleContentOverLimit(detail.entry.kind, content)) return;
-			setBusy("save");
-			setActionError(null);
-			setNotice(null);
-			setConflict(false);
-			try {
-				const request = { entry: detail.entry, content, ifRevision: detail.revision };
-				if (evidence !== detail.evidence) request.evidence = evidence;
-				await controls.updateEntry(request);
-				setNotice(t("saved"));
-				refreshAll();
 			} catch (error) {
-				if (error.message.includes("revision_conflict")) setConflict(true);
-				setActionError(error.message);
-			} finally { setBusy(null); }
-		}
-		async function toggleArchived() {
-			if (!detail) return;
-			setBusy("archive");
-			setActionError(null);
-			setNotice(null);
-			try {
-				await controls.setArchived({ entry: detail.entry, archived: !detail.archived });
-				setNotice(t("archivedDone"));
-				refreshAll();
-			} catch (error) { setActionError(error.message); }
-			finally { setBusy(null); }
-		}
-		async function rollback(snapshotId) {
-			if (!detail) return;
-			setBusy("rollback");
-			setActionError(null);
-			setNotice(null);
-			try {
-				await controls.rollbackEntry({ entry: detail.entry, snapshotId });
-				setRollbackId(null);
-				setNotice(t("rolledBack"));
-				refreshAll();
-			} catch (error) { setActionError(error.message); }
-			finally { setBusy(null); }
-		}
-		function changeText(change) {
-			if (!change) return "";
-			if (change.initial) return t("initialVersion");
-			const parts = [];
-			if (change.contentDelta !== null && change.contentDelta !== 0) parts.push(t("contentDelta", { delta: (change.contentDelta > 0 ? "+" : "") + change.contentDelta }));
-			if (change.evidenceChanged) parts.push(t("evidenceUpdated"));
-			return parts.length ? parts.join(" · ") : t("noContentChange");
-		}
-		function renderSnapshot(snapshot) {
-			const expanded = previewId === snapshot.snapshotId;
-			const confirming = rollbackId === snapshot.snapshotId;
-			return h("li", { key: snapshot.snapshotId, className: "lm-browser-history-row" },
-				h("div", { className: "lm-browser-history-head" },
-					h("div", { className: "lm-browser-history-meta" },
-						h("time", { dateTime: snapshot.createdAt }, time(snapshot.createdAt)),
-						h("code", { title: snapshot.revision }, snapshot.revision.slice(0, 12)),
-						h("span", null, t("characters", { count: snapshot.chars }))),
-					h("div", { className: "lm-browser-history-tools" },
-						h(Button, { variant: "ghost", size: "sm", onClick: () => setPreviewId(expanded ? null : snapshot.snapshotId) }, expanded ? t("collapse") : t("preview")),
-						h(Button, { variant: "ghost", size: "sm", disabled: Boolean(busy), onClick: () => setRollbackId(confirming ? null : snapshot.snapshotId) }, t("rollback")))),
-				h("div", { className: "lm-browser-history-summary" },
-					h("span", { className: "lm-browser-history-summary-text" }, snapshot.summary || t("noSummary")),
-					h("span", { className: "lm-browser-history-change" }, changeText(snapshot.change))),
-				confirming ? h("div", { className: "lm-browser-rollback-confirm" },
-					h("p", null, t("rollbackWarning")),
-					h("div", null,
-						h(Button, { variant: "ghost", size: "sm", disabled: Boolean(busy), onClick: () => setRollbackId(null) }, t("cancel")),
-						h(Button, { variant: "primary", size: "sm", disabled: Boolean(busy), onClick: () => rollback(snapshot.snapshotId) }, t("rollbackConfirm")))) : null,
-				expanded ? h("pre", { className: "lm-browser-history-preview" }, snapshot.preview || t("noPreview")) : null);
-		}
-		const dirty = detail && (content !== detail.content || evidence !== detail.evidence);
-		const ruleTooLong = detail && ruleContentOverLimit(detail.entry.kind, content);
-		return h("section", { className: "lm-browser-page", "aria-label": t("title"), "data-memory-browser": true },
-			h("style", null, styles),
-			h("header", { className: "lm-browser-heading" }, h("h1", null, t("title")), h(Button, { variant: "primary", size: "sm", className: "lm-browser-new", icon: h(IconPlusOutlineRegular, { size: 13 }), disabled: !namespaces.length, onClick: openCreate }, t("newEntry"))),
-			h("div", { className: "lm-browser-toolbar" },
-				h("div", { className: "lm-browser-namespace" }, h(SelectMenu, { value: namespace || "", options: namespaces.length ? namespaces.map(row => ({ value: row.namespace, label: row.namespace })) : [{ value: "", label: namespaceBusy ? t("loading") : t("noNamespace") }], disabled: namespaceBusy || !namespaces.length || Boolean(busy), onChange: value => { setNamespace(value); setNotice(null); setActionError(null); setConflict(false); }, ariaLabel: t("namespace") })),
-				h("div", { className: "lm-browser-search" }, h(Input, { type: "search", icon: h(IconSearchOutlineRegular, { size: 14 }), "aria-label": t("search"), placeholder: t("searchPlaceholder"), value: query, onChange: event => setQuery(event.target.value) }), query ? h(Button, { variant: "ghost", size: "sm", className: "lm-browser-search-clear", "aria-label": t("clearSearch"), onClick: () => setQuery("") }, h(IconCloseOutlineRegular, { size: 14 })) : null),
-				h("div", { className: "lm-browser-filter-tabs", role: "group", "aria-label": t("kindLabel") }, [["", t("all")], ...entryKinds.map(value => [value, kindText(value, t)])].map(([value, label]) => h("button", { key: value || "all", type: "button", className: "lm-browser-filter-tab" + (kind === value ? " is-active" : ""), "aria-pressed": kind === value, onClick: () => setKind(value) }, label))),
-				h("label", { className: "lm-browser-archived-toggle" }, h(Switch, { checked: includeArchived, label: t("showArchived"), onChange: next => setIncludeArchived(next) }), h("span", { "aria-hidden": "true" }, t("showArchived")))),
-			h(IndexUsage, { stats: usage, t, kind, onKindChange: setKind }),
-			namespaceError ? h("div", { className: "lm-browser-error lm-browser-banner", role: "alert" }, h("span", null, namespaceError), h(Button, { variant: "outline", size: "sm", onClick: () => setNamespaceVersion(value => value + 1) }, t("reload"))) : null,
-			h("div", { className: "lm-browser-body" },
-				h("section", { className: "lm-browser-list-pane", "aria-label": t("entries") },
-					listBusy ? h("p", { className: "lm-browser-empty", role: "status" }, t("loading")) : null,
-					listError ? h("p", { className: "lm-browser-error", role: "alert" }, listError) : null,
-					namespaceBusy ? h("p", { className: "lm-browser-empty", role: "status" }, t("loading")) : (!listBusy && !listError && !entries.length ? h("p", { className: "lm-browser-empty" }, t("empty")) : null),
-					h("ul", { className: "lm-browser-list" }, entries.map(row => h("li", { key: identity(row.entry) }, h("button", { type: "button", className: "lm-browser-row" + (selectedId === identity(row.entry) ? " is-selected" : "") + (row.archived ? " is-archived" : ""), onClick: () => { setSelectedId(identity(row.entry)); setNotice(null); setActionError(null); setConflict(false); } },
-						h("span", { className: "lm-browser-row-title" }, row.title),
-						h("span", { className: "lm-browser-row-meta" }, h("span", { className: "lm-browser-kind" }, kindText(row.entry.kind, t)), row.archived ? h("span", null, t("archived")) : null, row.updatedAt ? h("time", { dateTime: row.updatedAt }, time(row.updatedAt)) : null)))))),
+				console.error(error);
+				setCreateError(String(error?.message || error));
+			} finally {
+				setBusy(null);
+			}
+		};
+
+		const statusBadge = row => {
+			const status = row.injectionStatus || (row.archived ? "archived" : "included");
+			if (status === "rule") return { className: "lm-status-rule", label: "规则" };
+			if (status === "cold") return { className: "lm-status-cold", label: "冷探索 🎲" };
+			if (status === "omitted") return { className: "lm-status-omitted", label: "已裁剪" };
+			if (status === "archived") return { className: "lm-status-archived", label: t("archived") };
+			return { className: "lm-status-included", label: "常驻" };
+		};
+
+		const renderRow = row => {
+			const rowId = identity(row.entry);
+			const isExpanded = expandedRows.has(rowId);
+			const isSelected = selectedKey === rowId;
+			const badge = statusBadge(row);
+			return h("li", { key: rowId, className: "lm-browser-row-wrap" + (isSelected ? " is-selected" : "") + (row.archived ? " is-archived" : "") },
+				h("div", { className: "lm-table-row-main", onClick: () => { setSelectedEntry(row.entry); setMobileTab("detail"); } },
+					h("button", { type: "button", className: "lm-row-expand-btn" + (isExpanded ? " is-open" : ""), onClick: event => toggleRowExpand(rowId, event) }, "›"),
+					h("div", { className: "lm-col-title lm-row-title-cell" },
+						h("span", { className: "lm-browser-kind-dot lm-browser-kind-dot-" + row.entry.kind }),
+						h("span", { className: "lm-row-title-text" }, highlightText(row.title, query))),
+					h("span", { className: "lm-col-kind" }, h("span", { className: "lm-browser-kind lm-browser-kind-" + row.entry.kind }, kindText(row.entry.kind, t))),
+					h("div", { className: "lm-col-heat lm-heat-cell", title: `热度分: ${row.heat || 0} · 访问: ${row.accessCount || 0}次` },
+						h("div", { className: "lm-heat-bar" }, h("div", { className: "lm-heat-fill", style: { width: Math.min(100, (row.heat || 0) * 10) + "%" } })),
+						h("span", null, row.heat || 0)),
+					h("span", { className: "lm-col-status" }, h("span", { className: "lm-status-badge " + badge.className }, badge.label)),
+					h("span", { className: "lm-col-chars lm-chars-cell" }, row.chars),
+					h("span", { className: "lm-col-time lm-time-cell" }, time(row.updatedAt))),
+				isExpanded ? h("div", { className: "lm-row-expanded-pane" },
+					h("div", { className: "lm-row-summary-box" }, highlightText(row.summary || "暂无摘要", query)),
+					row.related && row.related.length ? h("div", { className: "lm-row-capsules" },
+						h("span", { style: { fontSize: 11, opacity: .6 } }, "关联条目:"),
+						row.related.map((rel, index) => h("button", {
+							key: index,
+							type: "button",
+							className: "lm-capsule-tag",
+							onClick: () => jumpToEntry({ namespace: rel.namespace || namespace, kind: rel.kind, key: rel.key }),
+						}, `🔗 ${rel.key}`))) : null,
+					h("div", { className: "lm-row-evidence-preview" }, "证据: " + (row.evidence || "无最新依据"))) : null);
+		};
+
+		const detailPane = detail
+			? h(React.Fragment, null,
+				h(Button, { variant: "outline", size: "sm", className: "lm-detail-back-btn", onClick: () => setMobileTab("list") }, t("backToList")),
+				h("div", { id: "sec-meta", className: "lm-browser-detail-heading" },
+					h("div", { className: "lm-browser-detail-title" },
+						h("h2", null, detail.title),
+						detail.archived ? h("span", { className: "lm-browser-kind" }, t("archived")) : null),
+					h("div", { className: "lm-browser-detail-actions" },
+						notice ? h("span", { style: { color: "#16a34a", fontSize: 12 } }, notice) : null,
+						h(Button, { variant: "outline", size: "sm", disabled: Boolean(busy), onClick: toggleArchived }, detail.archived ? t("restore") : t("archive")),
+						h(Button, { variant: "primary", size: "sm", disabled: Boolean(busy), onClick: saveEntry }, busy === "save" ? t("saving") : t("save")))),
+				h("div", { className: "lm-detail-stats-bar" },
+					h("span", null, `${t("heatLabel")}:`, h("strong", null, detail.heat || 0)),
+					h("span", null, `${t("accessLabel")}:`, h("strong", null, `${detail.accessCount || 0}次`)),
+					detail.sourceSession ? h("span", null, `${t("sourceSession")}:`, h("strong", null, detail.sourceSession)) : null),
+				h("dl", { className: "lm-browser-readonly" },
+					h("div", null, h("dt", null, "命名空间"), h("dd", null, detail.entry.namespace)),
+					h("div", null, h("dt", null, "记忆类型"), h("dd", null, kindText(detail.entry.kind, t))),
+					h("div", null, h("dt", null, "条目标识"), h("dd", null, detail.entry.key))),
+				detail.related && detail.related.length ? h("div", { style: { marginBottom: 16 } },
+					h("span", { style: { fontSize: 12, fontWeight: 500, display: "block", marginBottom: 6 } }, t("relatedCapsules")),
+					h("div", { className: "lm-row-capsules" },
+						detail.related.map((rel, index) => h("button", {
+							key: index,
+							type: "button",
+							className: "lm-capsule-tag",
+							onClick: () => jumpToEntry({ namespace: rel.namespace || namespace, kind: rel.kind, key: rel.key }),
+						}, `🔗 ${rel.key}`)))) : null,
+				h("div", { id: "sec-content" },
+					h(Field, {
+						label: h("span", { style: { display: "inline-flex", alignItems: "center", gap: 8 } },
+							t("content"),
+							h("span", { className: "lm-browser-seg-toggle" },
+								h("button", { type: "button", className: "lm-browser-seg-btn" + (contentPreview ? " is-active" : ""), onClick: () => setContentPreview(true) }, t("previewMode")),
+								h("button", { type: "button", className: "lm-browser-seg-btn" + (!contentPreview ? " is-active" : ""), onClick: () => setContentPreview(false) }, t("editMode"))))
+					},
+						contentPreview
+							? h("div", { className: "lm-browser-md-preview", onClick: () => setContentPreview(false) }, renderMarkdown(content))
+							: h("textarea", { className: "lm-browser-textarea lm-browser-content", value: content, onChange: event => setContent(event.target.value) }),
+						detail.entry.kind === "rule" ? h("div", { className: "lm-browser-rule-meter" },
+							h("div", { className: "lm-browser-rule-meter-track" },
+								h("div", { className: "lm-browser-rule-meter-fill", style: { width: Math.min(100, ruleContentLength(content)) + "%" } })),
+							h("span", { className: "lm-browser-rule-length" }, `${ruleContentLength(content)} / 100 字符`)) : null,
+					)),
+				h("div", { id: "sec-evidence" },
+					h(Field, { label: t("evidence") },
+						h("textarea", { className: "lm-browser-textarea lm-browser-evidence-textarea", value: evidence, onChange: event => setEvidence(event.target.value) }))),
+				h("section", { id: "sec-history", className: "lm-browser-history" },
+					h("h3", null, t("history")),
+					historyBusy ? h("p", { style: { padding: 12, opacity: .6 } }, t("loading")) : null,
+					history.length
+						? h("ol", { className: "lm-history-timeline" },
+							history.map(snap => h("li", { key: snap.snapshotId, className: "lm-history-node" },
+								h("span", { className: "lm-history-dot" }),
+								h("div", { className: "lm-history-card" },
+									h("div", { className: "lm-history-head" },
+										h("div", { className: "lm-history-meta" },
+											h("span", { style: { fontWeight: 600 } }, String(snap.revision || "").slice(0, 8)),
+											h("span", { style: { color: "var(--dsw-alias-label-tertiary)" } }, time(snap.createdAt))),
+										h("span", { className: "lm-history-delta " + ((snap.change?.contentDelta || 0) >= 0 ? "lm-delta-pos" : "lm-delta-neg") }, `${(snap.change?.contentDelta || 0) >= 0 ? "+" : ""}${snap.change?.contentDelta || 0} 字`),
+										h("div", { style: { display: "flex", gap: 6 } },
+											h(Button, { variant: "ghost", size: "sm", onClick: () => setPreviewSnapshotId(previewSnapshotId === snap.snapshotId ? null : snap.snapshotId) }, t("preview")),
+											h(Button, { variant: "ghost", size: "sm", onClick: () => rollback(snap.snapshotId) }, t("rollback")))),
+									snap.summary ? h("div", { className: "lm-history-summary" }, snap.summary) : null,
+									previewSnapshotId === snap.snapshotId ? h(DiffViewer, { oldText: snap.preview || snap.content, newText: content }) : null))))
+						: h("p", { style: { padding: 12, opacity: .6 } }, t("noHistory"))))
+			: h("p", { style: { padding: 40, textAlign: "center", opacity: .5 } }, detailBusy ? t("loading") : t("emptyDetail"));
+
+		const entriesPane = h("div", { style: { display: "flex", flexDirection: "column", flex: 1, minWidth: 0, minHeight: 0 } },
+			h("div", { className: "lm-browser-entries-toolbar" },
+				h("div", { className: "lm-browser-search" },
+					h(Input, { type: "search", icon: h(IconSearchOutlineRegular, { size: 14 }), placeholder: t("searchPlaceholder"), value: query, onChange: event => setQuery(event.target.value) })),
+				h("div", { className: "lm-browser-filter-tabs" },
+					[["", t("all")], ...entryKinds.map(value => [value, kindText(value, t)])].map(([value, label]) => h("button", {
+						key: value || "all",
+						type: "button",
+						className: "lm-browser-filter-tab" + (kind === value ? " is-active" : ""),
+						onClick: () => setKind(value),
+					}, label, entries.length ? h("span", { className: "lm-browser-tab-count" }, `(${entries.filter(entry => !value || entry.entry.kind === value).length})`) : null))),
+				h("label", { className: "lm-browser-archived-toggle" },
+					h(Switch, { checked: includeArchived, onChange: setIncludeArchived }),
+					h("span", null, t("showArchived")))),
+			h("div", { className: "lm-browser-body" + (mobileTab === "detail" ? " show-detail" : " show-list") },
+				h("section", { className: "lm-browser-list-pane" },
+					h("div", { className: "lm-table-header" },
+						h("span", { className: "lm-col-expand" }),
+						h("span", { className: "lm-col-title" }, h("button", { type: "button", className: "lm-th-btn", onClick: () => handleSort("title") }, "标题 / 摘要")),
+						h("span", { className: "lm-col-kind" }, "类型"),
+						h("span", { className: "lm-col-heat" }, h("button", { type: "button", className: "lm-th-btn", onClick: () => handleSort("heat") }, "热度")),
+						h("span", { className: "lm-col-status" }, "流态"),
+						h("span", { className: "lm-col-chars" }, h("button", { type: "button", className: "lm-th-btn", onClick: () => handleSort("chars") }, "字符")),
+						h("span", { className: "lm-col-time" }, h("button", { type: "button", className: "lm-th-btn", onClick: () => handleSort("updatedAt") }, "更新"))),
+					listBusy ? h("p", { style: { padding: 20, textAlign: "center", opacity: .6 } }, t("loading")) : null,
+					h("ul", { className: "lm-browser-table" }, sortedEntries.map(renderRow))),
 				h("article", { className: "lm-browser-detail" },
-					detailBusy && !detail ? h("p", { className: "lm-browser-empty", role: "status" }, t("loading")) : null,
-					detailError ? h("div", { className: "lm-browser-detail-message" }, h("p", { className: "lm-browser-error", role: "alert" }, detailError), h(Button, { variant: "outline", size: "sm", onClick: reloadDetail }, t("reload"))) : null,
-					!detailBusy && !detailError && !detail ? h("p", { className: "lm-browser-empty" }, t("emptyDetail")) : null,
-					detail ? h("div", { className: "lm-browser-detail-scroll" },
-						h("div", { className: "lm-browser-detail-heading" },
-							h("div", { className: "lm-browser-detail-title" }, h("h2", null, detail.title), detail.archived ? h("span", { className: "lm-browser-archived-badge" }, t("archived")) : null),
-							h("div", { className: "lm-browser-detail-actions" },
-								notice ? h("span", { className: "lm-browser-inline-notice", role: "status" }, notice) : null,
-								h(Button, { variant: "outline", size: "sm", disabled: Boolean(busy), onClick: toggleArchived }, detail.archived ? t("restore") : t("archive")),
-								h(Button, { variant: "primary", size: "sm", disabled: Boolean(busy) || !dirty || ruleTooLong, onClick: saveEntry }, busy === "save" ? t("saving") : t("save")))),
-						conflict ? h("div", { className: "lm-browser-conflict", role: "alert" }, h("span", null, t("conflict")), h(Button, { variant: "outline", size: "sm", onClick: reloadDetail }, t("reload"))) : null,
-						actionError ? h("p", { className: "lm-browser-error", role: "alert" }, actionError) : null,
-						h("dl", { className: "lm-browser-readonly" }, [["namespace", detail.entry.namespace], ["kind", kindText(detail.entry.kind, t)], ["key", detail.entry.key]].map(([label, value]) => h("div", { key: label }, h("dt", null, label), h("dd", null, value)))),
-						h(Field, { label: h("span", { style: { display: "inline-flex", alignItems: "center", gap: 8 } }, t("content"), h("span", { className: "lm-browser-seg-toggle" },
-													h("button", { type: "button", className: "lm-browser-seg-btn" + (contentPreview ? " is-active" : ""), onClick: () => setContentPreview(true) }, t("previewMode")),
-													h("button", { type: "button", className: "lm-browser-seg-btn" + (!contentPreview ? " is-active" : ""), onClick: () => setContentPreview(false) }, t("editMode")))) },
-									contentPreview
-										? h("div", { className: "lm-browser-md-preview", onClick: () => setContentPreview(false) }, renderMarkdown(content))
-										: h("textarea", { className: "lm-browser-textarea lm-browser-content", value: content, disabled: Boolean(busy), "aria-describedby": detail.entry.kind === "rule" ? "lm-edit-rule-length" : undefined, "aria-invalid": ruleTooLong || undefined, onChange: event => setContent(event.target.value), onBlur: () => setContentPreview(true) }),
-									h(RuleContentHint, { kind: detail.entry.kind, content, id: "lm-edit-rule-length", t })),
-						h(Field, { label: t("evidence") }, h(Input, { value: evidence, disabled: Boolean(busy), placeholder: t(detail.entry.kind === "rule" ? "ruleEvidencePlaceholder" : "evidencePlaceholder"), onChange: event => setEvidence(event.target.value) })),
-						h("section", { className: "lm-browser-history" },
-							h("h3", null, t("history")),
-							historyBusy ? h("p", { className: "lm-browser-empty", role: "status" }, t("loading")) : null,
-							historyError ? h("p", { className: "lm-browser-error", role: "alert" }, historyError) : null,
-							!historyBusy && !historyError && !history.length ? h("p", { className: "lm-browser-muted" }, t("noHistory")) : null,
-							h("ol", { className: "lm-browser-history-list" }, history.map(renderSnapshot)))) : null)),
-			h(CreateDialog, { open: createOpen, form: createForm, setForm: setCreateForm, namespaces, busy: busy === "create", error: createError, onClose: () => setCreateOpen(false), onSubmit: createEntry, t }));
+					h(ScrollProgressPill, { targetRef: detailScrollRef }),
+					h("div", { ref: detailScrollRef, className: "lm-browser-detail-scroll" }, detailPane))));
+
+		return h("section", { className: "lm-browser-page", "data-memory-browser": true },
+			h("style", null, styles),
+			/* 页面公用顶部：四个 Tab 共用标题、命名空间、导航与预算仪表 */
+			h("header", { className: "lm-browser-header-sticky" },
+				h("div", { className: "lm-browser-top-row" },
+					h("div", { className: "lm-browser-top-left" },
+						h("h1", null, t("title")),
+						h("div", { className: "lm-browser-namespace-select" },
+							h(SelectMenu, {
+								value: namespace || "",
+								options: namespaces.map(row => ({ value: row.namespace, label: row.namespace })),
+								disabled: namespaceBusy,
+								onChange: setNamespace,
+								ariaLabel: t("namespace"),
+							}))),
+					h("div", { className: "lm-browser-top-actions" },
+						h(Button, { variant: "primary", size: "sm", icon: h(IconPlusOutlineRegular, { size: 13 }), disabled: !namespaces.length, onClick: () => { setCreateError(null); setCreateOpen(true); } }, t("newEntry")))),
+				h("div", { className: "lm-bounce-nav-bar" },
+					h(BounceNav, { currentTab, onSelect: setCurrentTab, t })),
+				h(IndexUsage, { stats: usage, t, kind, onKindChange: setKind })),
+			/* 工作台主体 */
+			h("div", { className: "lm-browser-content-area" },
+				currentTab === "injection" ? h(InjectionView, { controls, namespace, t }) : null,
+				currentTab === "graph" ? h(GraphView, { controls, namespace, onJumpEntry: jumpToEntry, t }) : null,
+				currentTab === "cockpit" ? h(CockpitView, { controls, namespace, entries, onJumpEntry: jumpToEntry }) : null,
+				currentTab === "entries" ? entriesPane : null),
+			h(CreateDialog, {
+				open: createOpen,
+				form: createForm,
+				setForm: setCreateForm,
+				namespaces,
+				busy: busy === "create",
+				error: createError,
+				onClose: () => setCreateOpen(false),
+				onSubmit: handleCreate,
+				t,
+			}));
 	}
+
 	return {
 		inject: ["remote"],
 		async apply(ctx) {
@@ -663,14 +946,17 @@ export function createMemoryBrowserClient(require, styles) {
 				scope.effect(() => scope.locale.register(locale, dictionaries), "memory-browser: locale");
 				const controls = {
 					listNamespaces: () => resultValue(scope.remote.layeredMemoryStatus.listNamespaces()),
-					namespaceStats: request => resultValue(scope.remote.layeredMemoryStatus.namespaceStats(request)),
-					listEntries: request => resultValue(scope.remote.layeredMemoryStatus.listEntries(request)),
-					readEntry: request => resultValue(scope.remote.layeredMemoryStatus.readEntry(request)),
-					createEntry: request => resultValue(scope.remote.layeredMemoryStatus.createEntry(request)),
-					updateEntry: request => resultValue(scope.remote.layeredMemoryStatus.updateEntry(request)),
-					setArchived: request => resultValue(scope.remote.layeredMemoryStatus.setArchived(request)),
-					entryHistory: request => resultValue(scope.remote.layeredMemoryStatus.entryHistory(request)),
-					rollbackEntry: request => resultValue(scope.remote.layeredMemoryStatus.rollbackEntry(request)),
+					namespaceStats: req => resultValue(scope.remote.layeredMemoryStatus.namespaceStats(req)),
+					listEntries: req => resultValue(scope.remote.layeredMemoryStatus.listEntries(req)),
+					readEntry: req => resultValue(scope.remote.layeredMemoryStatus.readEntry(req)),
+					createEntry: req => resultValue(scope.remote.layeredMemoryStatus.createEntry(req)),
+					updateEntry: req => resultValue(scope.remote.layeredMemoryStatus.updateEntry(req)),
+					setArchived: req => resultValue(scope.remote.layeredMemoryStatus.setArchived(req)),
+					entryHistory: req => resultValue(scope.remote.layeredMemoryStatus.entryHistory(req)),
+					rollbackEntry: req => resultValue(scope.remote.layeredMemoryStatus.rollbackEntry(req)),
+					getInjectionState: req => resultValue(scope.remote.layeredMemoryStatus.getInjectionState(req)),
+					getDiskMetrics: req => resultValue(scope.remote.layeredMemoryStatus.getDiskMetrics(req)),
+					getMaintenanceReport: req => resultValue(scope.remote.layeredMemoryStatus.getMaintenanceReport(req)),
 				};
 				scope.slots.inject("main", () => scope.slots.register({ name: "main", key: "layered-memory", locale, inject: () => ({ controls }) }, MemoryBrowserPage));
 				scope.slots.inject("sidebar.panellist", () => scope.slots.register({ name: "sidebar.panellist", id: "layered-memory", order: 20, locale, label: () => scope.locale.translate(locale, "title") }, MemoryBrowserIcon));

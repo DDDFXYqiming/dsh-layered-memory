@@ -4,7 +4,7 @@
 
 ## 落地位置
 
-- 源 clone：/mnt/c/Users/39795/Desktop/AI_project/dsh-layered-memory，改代码在这里
+- 源 clone：/mnt/d/AI_Projects/dsh-layered-memory，改代码在这里
 - 运行副本 /home/dsh/src/dsh-layered-memory 的同步由 Lead 统一处理
 - 管理页做进 status 子包 @dsh-external/dsh-layered-memory-status：
   - 客户端 client/browser.js，样式 client/browser.css
@@ -17,7 +17,7 @@
 
 - 主包提供服务 layeredMemoryStore（src/store-service.js）
 - status 子包 src/status.js 的 inject 含 layeredMemoryStore，typert.register 的 invocations 含 STORE_REMOTE.descriptors
-- 前端经 remote.layeredMemoryStatus 调用下面 9 个方法，与 status 现有 invocations 同一通道
+- 前端经 remote.layeredMemoryStatus 调用下面 12 个方法，与 status 现有 invocations 同一通道
 
 ## 方法签名
 
@@ -52,10 +52,12 @@ entry 标识统一为 { namespace: string, kind: "rule"|"fact"|"sop", key: strin
    - includeArchived 为 false 时过滤掉已归档条目
    - 按 updatedAt 降序；没有日期的排在后面，同组按标题排序
    - 上限 500 条
+   - 每行还带展示用扩展字段：heat（热度分）、accessCount（访问次数）、lastAt（最近访问时间）、related（关联条目 {kind,key}[]）、relatedCount、summary（正文首行摘要，≤90 字符）、rank（注入排名，null 表示未排名）、injectionStatus（archived / rule / cold / hot）
 
 4. readEntry({ entry }) → { entry, title, content, revision, archived, evidence, sourceSession, createdAt, updatedAt }
    - evidence 是字符串，空串表示没有证据
    - sourceSession、createdAt、updatedAt 可为 null
+   - 详情页展示用扩展字段：heat、accessCount、lastAt、related（{kind,key}[]）、sourceSeqs
 
 5. createEntry({ namespace, kind, topic, content, evidence }) → { entry, revision }
    - 走 writeMemory 的 create 模式，写入后重建索引
@@ -77,6 +79,24 @@ entry 标识统一为 { namespace: string, kind: "rule"|"fact"|"sop", key: strin
 9. rollbackEntry({ entry, snapshotId }) → { revision }
    - 用指定快照恢复条目内容并重建索引
    - 快照不属于该条目时报错
+
+### 只读视图接口（10-12）
+
+这三个方法只读不写，返回对象整体透传给前端，字段缺失时前端按 0 或空值兜底。
+
+10. getInjectionState({ namespace }) → { namespace, combinedText, sections, budgetChars, indexChars, targetChars, triggerChars, coldCount, rankedCount, omittedCount, includedCount, items }
+    - items 是当前命名空间全部活跃条目，每项 { kind, key, title, chars, heat, rank, status, relatedCount }
+    - status 表示真实注入结果：rule（规则常驻）、included（已进入提示词）、cold（冷探索命中注入）、omitted（预算裁剪未进提示词）
+    - combinedText 是合并后真正注入的提示词原文，供注入透视视图逐字展示
+
+11. getDiskMetrics({ namespace }) → { namespace, rules, facts, sops, archived, pending, size_bytes, content_bytes, history_bytes, pending_bytes, metadata_bytes, updatedAt, ...索引统计字段 }
+    - 字节口径来自 src/store.js 的 computeNamespaceStats，供维护驾驶舱画存储构成条
+    - 索引统计字段与 namespaceStats 同口径（indexChars、budgetChars、ruleCount 等）
+
+12. getMaintenanceReport({ namespace }) → { actionable, dedupe, mergeCandidates, cold, review, graph }
+    - graph 是关系图谱视图的数据：nodes 每项 { id, kind, key, title, heat, chars, degree }
+    - edges 每项 { source, target, type, similarity? }，type 为 related（meta.related 显式关联）或 similar（近重复/合并候选）
+    - 报告本体来自命名空间下的 maintenance-report.json，文件缺失时返回空结构
 
 ## 错误约定
 
@@ -124,11 +144,11 @@ entry 标识统一为 { namespace: string, kind: "rule"|"fact"|"sop", key: strin
 
 ## 术语与本地化
 
-- 数据键不翻译：kind 只有 fact 与 sop，接口层传的都是这两个值
-- 界面按语言显示：中文“事实”“经验”，英文 Fact/Skill，其余语言按各自词典
+- 数据键不翻译：kind 取值有 rule、fact、sop 三种，接口层传的就是这三个值
+- 界面按语言显示：中文“规则”“事实”“经验”，英文 Rule/Fact/Skill，其余语言按各自词典
 - 取值走 client/browser.js 的 kindText，即 t("kind." + kind)；未知 kind 原样显示
 - 图例标签 usage.label.head、usage.label.rules、usage.label.facts、usage.label.sops 同样本地化，中文依次是说明、规则、事实目录、经验目录
-- 词典：client/browser.js 注册 layered-memory，每种语言 73 键；client/status.js 注册 layered-memory-status，每种语言 53 键。语言覆盖 zh、en、ja、es、fr、de、ru、pt
+- 词典：client/browser.js 注册 layered-memory，每种语言 90 键；client/status.js 注册 layered-memory-status，每种语言 53 键。语言覆盖 zh、en、ja、es、fr、de、ru、pt
 - 侧栏入口名称取 scope.locale.translate(locale, "title")，随界面语言变化
 - 页面内文案通过注册 locale 词典后由 t(key) 取值
 - 时间显示用 document.documentElement.lang 对应的区域格式
@@ -139,7 +159,21 @@ entry 标识统一为 { namespace: string, kind: "rule"|"fact"|"sop", key: strin
 
 - slots.inject("main") 注册页面，key 为 layered-memory
 - slots.inject("sidebar.panellist") 注册侧栏入口，id 为 layered-memory，order 20，图标是书本形 SVG
-- 页面头部是 h1 标题和“新建条目”按钮
+
+### 公共头部（四个视图共用）
+
+- 头部是 lm-browser-header-sticky，固定在页面顶部，不随视图切换而消失
+- 第一行：h1 标题、命名空间 SelectMenu、“新建条目”按钮
+- 第二行：BounceNav 弹性导航条，四个页签为条目表格、注入透视、关系图谱、维护驾驶舱，选中页签由药丸指示器跟随
+- 第三行：索引占用组件 IndexUsage，四个视图共用同一份 namespaceStats 数据，图例点击可切换条目类型过滤
+- 头部与索引占用组件位于内容区之外，切换视图不会重建它们
+
+### 四个工作台视图
+
+- 条目表格（entries）：工具栏 + 高级数据表 + 右侧详情。表头可按标题、热度、字符数、更新时间排序，行可展开显示摘要、关联条目胶囊与证据片段
+- 注入透视（injection）：四段漏斗（磁盘总目录 → 规则常驻 → 冷探索配额 → 最终注入）＋ 逐条取舍名单 ＋ 实际注入提示词原文，数据来自 getInjectionState
+- 关系图谱（graph）：同心圆星系布局，热度最高的节点位于核心，其余按环层均匀分布；支持搜索、仅看有边节点、缩放，点击节点高亮相邻连线并在右侧信息卡展示类型、字符数与关联数，数据来自 getMaintenanceReport 的 graph
+- 维护驾驶舱（cockpit）：Bento Grid 四块卡片——磁盘存储构成（按 content/history/metadata/pending 字节占比）、活跃条目与归档对比、相似与合并候选、冷条目巡检胶囊，数据分别来自 getDiskMetrics、getMaintenanceReport 与当前条目列表
 
 ### 工具栏
 
@@ -147,7 +181,7 @@ entry 标识统一为 { namespace: string, kind: "rule"|"fact"|"sop", key: strin
 
 - 命名空间下拉
 - 搜索框，type 为 search，有输入时出现清空按钮
-- 类型过滤：全部、事实、经验，文案走本地化词典
+- 类型过滤：全部、规则、事实、经验，文案走本地化词典
 - 显示已归档开关
 
 索引占用组件在工具栏下方、条目列表上方。
@@ -164,8 +198,10 @@ entry 标识统一为 { namespace: string, kind: "rule"|"fact"|"sop", key: strin
 - 标题与归档徽标；操作区是“归档/恢复”和“保存”，内容或证据有改动时保存才可用
 - 只读字段三项：namespace、kind、key。其中 kind 显示本地化名，另两项显示原值
 - 内容区在预览与编辑之间切换：预览渲染 Markdown，点击预览区切到编辑，编辑框失焦切回预览
+- 规则条目额外显示 100 字符计量条，超限时禁用保存
 - 证据是单行输入框
-- 历史快照列表每条给出时间、revision 前 12 位、字符数、内容变化摘要，带预览与“回滚到此版本”按钮，回滚需要二次确认
+- 历史快照列表每条给出时间、revision 前 8 位、内容变化摘要，带“对比/预览”与“回滚到此版本”按钮，回滚需要二次确认
+- 预览按钮展开的行级 Diff 以 snap.preview || snap.content 为旧文本，与当前正文逐行比对
 - 保存走 updateEntry，带 ifRevision；冲突时显示提示并给“重新加载”
 - 归档、回滚、创建成功后都刷新列表、详情与历史，占用数据随列表版本一起刷新
 

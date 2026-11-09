@@ -3,15 +3,15 @@ import { join } from "node:path";
 import { atomicWriteFileSync } from "./atomic-write.js";
 import { recordMaintainOutcome, recordMaintainFailure, readReflectionState, computeContentRevision } from "./reflection.js";
 import { syncReview } from "./review.js";
-import { ARCHIVE_DIR, readEntries, readMeta, computeNamespaceStats, pendingNames, loadAccess, entryHeat, withNsWriteLock, reconcileEntries } from "./store.js";
+import { ARCHIVE_DIR, readEntries, readMeta, loadAccess, computeNamespaceStats, pendingNames, withNsWriteLock, reconcileEntries } from "./store.js";
 import { syncIndex, readIndex, indexChars, L1_MAX_CHARS_DEFAULT } from "./l1index.js";
 import { exactNormalize, tokenize, jaccard } from "./similarity.js";
+import {
+	NEAR_DUPE_THRESHOLD, MERGE_CANDIDATE_THRESHOLD, MIN_TOKENS_FOR_FUZZY, NEAR_DUPE_REPORT_LIMIT,
+	COLD_REVIEW_DAYS, COLD_MAX_HEAT, collectColdEntries,
+} from "./maintenance-workspace.js";
 
-export const NEAR_DUPE_THRESHOLD = 0.85;
-export const MERGE_CANDIDATE_THRESHOLD = 0.45;
-export const MIN_TOKENS_FOR_FUZZY = 12;
-export const NEAR_DUPE_REPORT_LIMIT = 20;
-export const COLD_REVIEW_DAYS = 90;
+export { NEAR_DUPE_THRESHOLD, MERGE_CANDIDATE_THRESHOLD, MIN_TOKENS_FOR_FUZZY, NEAR_DUPE_REPORT_LIMIT, COLD_REVIEW_DAYS };
 
 function compareEntries(entries, opts) {
 	const report = { removed: [], merged: [], conflicts: [], exactDuplicates: [], nearDuplicates: [] };
@@ -54,17 +54,7 @@ export function dedupeEntries(root, opts = {}) { return compareEntries(readEntri
 export function findMergeCandidates(root, opts = {}) { return compareEntries(readEntries(root), opts).mergeCandidates.slice(0, NEAR_DUPE_REPORT_LIMIT); }
 
 export function findColdEntries(root, { heat = {}, days = COLD_REVIEW_DAYS, limit = 10, entries = readEntries(root) } = {}) {
-	const access = loadAccess(root), meta = readMeta(root), now = Date.now();
-	const rows = [];
-	for (const entry of entries) {
-		if (entry.kind === "rule" || entry.meta.archived) continue;
-		const created = Date.parse(entry.meta.createdAt);
-		const age = Number.isFinite(created) ? (now - created) / 86400000 : null;
-		const score = entryHeat(access, meta, entry.kind, entry.key, heat);
-		if (age !== null && age < days || score >= 0.5) continue;
-		rows.push({ kind: entry.kind, name: entry.key, heat: Number(score.toFixed(3)), age_days: age === null ? null : Math.round(age) });
-	}
-	rows.sort((a, b) => a.heat - b.heat || a.name.localeCompare(b.name));
+	const rows = collectColdEntries(entries, { access: loadAccess(root), meta: readMeta(root), heat, days, maxHeat: COLD_MAX_HEAT });
 	return { threshold_days: days, count: rows.length, entries: rows.slice(0, limit) };
 }
 

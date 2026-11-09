@@ -114,6 +114,31 @@ entry 标识统一为 { namespace: string, kind: "rule"|"fact"|"sop", key: strin
     - edges 每项 { source, target, type, similarity? }，type 为 related（meta.related 显式关联）或 similar（近重复/合并候选）
     - 报告本体来自命名空间下的 maintenance-report.json，文件缺失时返回空结构
 
+### 维护工作区接口（13-16）
+
+13. getMaintenanceWorkspace({ namespace }) → { namespace, scannedAt, counts: { active, archived, checked, candidates, cold }, candidates: Array<{ id, kind, reason, score, sharedTokens, left: { entry, title, revision, chars }, right: { entry, title, revision, chars } }>, cold: { items: Array<{ entry, title, revision, heat, ageDays, ageBasis, reason }>, total, criteria: { thresholdDays, maxHeat, ageBasis, excludes, heatBasis } } }
+    - 一次调用给出当前空间的完整候选与长期低热清单，两者来自同一次扫描快照
+    - 候选覆盖完全重复、近重复与同类内容重合（rule/fact/sop 之间），每对都给出真实入选原因与共有 token 数；不为凑数放宽阈值
+    - 冷条目与后台长期低热扫描同源同阈值（≥ thresholdDays 天、热度 ≤ maxHeat、排除规则与归档），年龄基准为 ageBasis（创建时间），全量按热度排序，不受列表分页或探索池影响
+    - 只读：不触发自动维护、不改索引、不发起模型请求、不记访问热度
+
+14. getMaintenanceReview({ namespace, entries: Array<{ namespace, kind, key }> }) → { namespace, items: Array<详情 DTO> }
+    - 一次最多两条，返回沿用 readEntry 的详情字段（正文、来源、当前 revision），供同页对比审阅
+    - 只读审阅，不增加访问热度
+
+15. mergeMaintenanceEntries({ namespace, left, right, keep: "left"|"right", ifLeftRevision, ifRightRevision, content, evidence? }) → { ok, namespace, kept: { entry, title, revision }, archived: { entry, revision }|null, related: [], partial, error? }
+    - 人工确认后的一次写操作：保留 keep 指向那条的**身份与标题**（本期不支持重命名，标题只读），正文与依据使用用户编辑后的内容；另一条被归档并指向保留项，原文件不删除
+    - 服务端校验：两条不同、**同命名空间**（跨空间直接拒绝）、同类型、均为活跃、**两侧 revision 必填**且一致；规则 100 字与证据等既有校验照常执行
+    - 在既有写锁内一次完成；冲突不覆盖，部分完成时以 partial 与 error 如实返回，不伪报成功
+    - 客户端请求若带 title 会被直接拒绝（本期不支持重命名）
+    - **两种 partial 形态，前端须分别处理且不得盲目重试**：
+      - `archived: null`：正文已保存，但**归档结果未确认**（可能已部分生效）→ 提示用户刷新后重新审阅并**重新选择仍活跃的候选**再建立新草稿；草稿保留供查看/复制，不自动重开旧对比对，禁止再次提交或更换保留目标
+      - `archived` 有值且错误标记为 `archive_applied_index_failed`：归档**已生效**，仅索引刷新失败 → 清草稿、关对比并提示真实状态；「重新检查」只刷新本页状态，不会修复索引
+
+16. archiveEntry({ entry, ifRevision }) → { ok: true, namespace, entry, revision }
+    - 单条人工归档，带 revision 校验（**revision 必填**）且必须与条目同命名空间，复用既有归档入口，不引入批量自动归档策略
+    - **归档已生效但索引刷新失败时抛错**，错误消息以稳定标记 `archive_applied_index_failed` 开头（该类错误原样透出，不会被套上会误导的失败前缀）⇒ 前端据此刷新状态即可，**不要再归档一次**
+
 ## 错误约定
 
 - 远程方法抛错消息是中文，格式为“动作名失败：原因”，例如“读取索引占用失败：…”、“回滚记忆失败：…”
@@ -189,7 +214,7 @@ entry 标识统一为 { namespace: string, kind: "rule"|"fact"|"sop", key: strin
 - 条目表格（entries）：工具栏 + 数据表 + 右侧详情。默认列只留标题、类型与更新时间；标题、热度、字符数、更新时间可排序，行可展开显示摘要、关联条目与证据片段
 - 注入透视（injection）：逐条取舍名单 ＋ 实际注入提示词原文，数据来自 getInjectionState。名单每行只留标题与必要类型，「打开条目」集中在当前选中项的预览头部；召回词与来源预算收进高级设置折叠区
 - 关系图谱（graph）：力导向布局，节点位置由图渲染库计算；滚轮以指针为中心缩放、拖拽平移，缩放按钮与适屏走同一套变换；初次渲染与容器尺寸变化后自动适屏，边界计算含标签占位；默认只显示焦点节点、其一跳邻居与少量重要节点的标签，其余标签让位；悬停高亮相邻连线并淡化其余网络，点击固定选中并在信息卡展示类型、字符数与关联数；工具栏是一张可展开卡片，显示选项是卡片内与 header 同宽连续的展开区；数据来自 getMaintenanceReport 的 graph
-- 维护驾驶舱（cockpit）：活跃与归档对比、相似与合并候选、冷条目巡检三块，冷条目默认只显示少量并可展开全部；数据分别来自 getDiskMetrics、getMaintenanceReport 与当前条目列表
+- 维护驾驶舱（cockpit）：上半是维护工作区 —— 当前空间的完整候选清单（每对带入选原因与共有 token 数）、同页对比审阅，人工确认后合并保留项或单条归档；下半是长期低热清单（与后台长期低热扫描同口径同阈值、年龄基准为创建时间、全量按热度排序），可逐条审阅归档。合并保留所选条目的身份与标题（本期不支持重命名），正文与依据可编辑；数据来自 getMaintenanceWorkspace、getMaintenanceReview、mergeMaintenanceEntries、archiveEntry，与 getDiskMetrics、getMaintenanceReport 并存
 
 ### 条目表格的空态与错误态
 

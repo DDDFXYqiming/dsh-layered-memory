@@ -8,6 +8,10 @@ import {
 } from "./store.js";
 import { writeMemory } from "./memory-ops.js";
 import { syncIndex, indexStats, L1_MAX_CHARS_DEFAULT, GLOBAL_L1_MAX_CHARS_DEFAULT, buildCombinedPromptIndex, ruleLinesLayout, RULES_MIN_RATIO } from "./l1index.js";
+import {
+	scanCandidates, collectColdEntries,
+	NEAR_DUPE_THRESHOLD, MERGE_CANDIDATE_THRESHOLD, MIN_TOKENS_FOR_FUZZY, COLD_REVIEW_DAYS, COLD_MAX_HEAT,
+} from "./maintenance-workspace.js";
 import { listNamespaces as discoverNamespaces } from "./search.js";
 import {
 	scoreEntries, rankEntries, pickColdSet, entryId, recallEntries, recallLine,
@@ -74,7 +78,7 @@ function snapshotDetails(root, record) {
 }
 
 function fail(action, error) {
-	if (error instanceof Error && error.message.includes("revision_conflict")) return error;
+	if (error instanceof Error && (error.message.includes("revision_conflict") || error.message.includes("archive_applied_index_failed"))) return error;
 	const message = error instanceof Error ? error.message : String(error);
 	return new Error(`${action}失败：${message}`, { cause: error });
 }
@@ -107,7 +111,7 @@ function heatContext(cfg, root, entries, namespace) {
 		sessionSeed: namespace,
 		ratio: cfg.l1ColdExploreRatio ?? COLD_EXPLORE_RATIO_DEFAULT,
 	});
-	return { access, meta, scores, rank, cold, ordered };
+	return { access, meta, scores, rank, cold, ordered, heatConfig: cfg.heat };
 }
 
 export function createLayeredMemoryStore(cfg) {
@@ -156,7 +160,7 @@ export function createLayeredMemoryStore(cfg) {
 					if (kind && value.kind !== kind) return false;
 					if (value.meta.archived && !includeArchived) return false;
 					return needle === null || `${value.title}\n${value.content}`.toLowerCase().includes(needle);
-				}).map(value => entryRow(value, { name, heat, heatConfig: cfg.heat }));
+				}).map(value => entryRow(value, { name, heat }));
 				values.sort((a, b) => {
 					const aTime = a.updatedAt ? Date.parse(a.updatedAt) : NaN;
 					const bTime = b.updatedAt ? Date.parse(b.updatedAt) : NaN;
@@ -196,7 +200,7 @@ export function createLayeredMemoryStore(cfg) {
 					if (value.meta.archived && !includeArchived) return false;
 					return needle === null || `${value.title}\n${value.content}`.toLowerCase().includes(needle);
 				});
-				const rows = matched.map(value => entryRow(value, { name, heat, heatConfig: cfg.heat }));
+				const rows = matched.map(value => entryRow(value, { name, heat }));
 				rows.sort((a, b) => {
 					const aTime = a.updatedAt ? Date.parse(a.updatedAt) : NaN;
 					const bTime = b.updatedAt ? Date.parse(b.updatedAt) : NaN;
@@ -224,33 +228,8 @@ export function createLayeredMemoryStore(cfg) {
 			return run("读取记忆", async () => {
 				const entry = entryIdentity(input.namespace, input.kind, input.key);
 				const root = rootOf(entry);
-				const value = requiredEntry(root, entry);
 				const heat = heatContext(cfg, root, readEntries(root), entry.namespace);
-				const access = heat.access;
-				const id = entryId(entry.kind, entry.key);
-				const score = heat.scores.get(id)?.score ?? entryHeat(access, heat.meta, entry.kind, entry.key, cfg.heat);
-				const heatValue = Number(score.toFixed(2));
-				const accessCount = Number(access[id]?.count || 0);
-				const lastAt = access[id]?.lastAt || null;
-				const related = relatedList(value.meta, entry.namespace);
-				const sourceSeqs = Array.isArray(value.meta.sourceSeqs) ? value.meta.sourceSeqs : [];
-
-				return {
-					entry,
-					title: value.title,
-					content: value.content,
-					revision: value.revision,
-					archived: Boolean(value.meta.archived),
-					evidence: typeof value.meta.evidence === "string" ? value.meta.evidence : "",
-					sourceSession: textOrNull(value.meta.sourceSession),
-					createdAt: textOrNull(value.meta.createdAt),
-					updatedAt: textOrNull(value.meta.updatedAt),
-					heat: heatValue,
-					accessCount,
-					lastAt,
-					related,
-					sourceSeqs,
-				};
+				return entryDetail(root, entry, heat);
 			});
 		},
 		async createEntry({ namespace, kind, topic, content, evidence }) {
@@ -660,10 +639,210 @@ export function createLayeredMemoryStore(cfg) {
 				};
 			});
 		},
+		/**
+		 * 人工维护工作区：一次读完整活跃库，同一内存快照出候选与长期低热条目。
+		 * 纯只读——不改索引、不做一致性清理、不写文件、不增加访问热度、不触发维护 agent。
+		 */
+		async getMaintenanceWorkspace({ namespace } = {}) {
+			return run("读取维护工作区", async () => {
+				const name = safeNs(namespace);
+				const root = nsRoot(cfg.memoryDir, name);
+				const entries = readEntries(root);
+				const access = loadAccess(root);
+				const meta = readMeta(root);
+				const heat = cfg.heat || {};
+				const nearThreshold = cfg.nearDupeThreshold ?? NEAR_DUPE_THRESHOLD;
+				const overlapThreshold = cfg.mergeCandidateThreshold ?? MERGE_CANDIDATE_THRESHOLD;
+				const minTokens = cfg.minTokensForFuzzy ?? MIN_TOKENS_FOR_FUZZY;
+				const coldDays = cfg.coldReviewDays ?? COLD_REVIEW_DAYS;
+
+				const candidates = scanCandidates(entries, { nearThreshold, overlapThreshold, minTokens, namespace: name });
+				const coldRows = collectColdEntries(entries, { access, meta, heat, days: coldDays, maxHeat: COLD_MAX_HEAT });
+				const byId = new Map(entries.map(entry => [entry.kind + ":" + entry.key, entry]));
+				const cold = {
+					items: coldRows.map(row => {
+						const entry = byId.get(row.kind + ":" + row.name);
+						return {
+							entry: { namespace: name, kind: row.kind, key: row.name },
+							title: entry?.title ?? row.name,
+							revision: entry?.revision ?? null,
+							heat: row.heat,
+							ageDays: row.age_days,
+							ageBasis: "meta.createdAt",
+							reason: row.age_days === null ? "low-heat" : "old-and-low-heat",
+						};
+					}),
+					total: coldRows.length,
+					criteria: {
+						thresholdDays: coldDays,
+						maxHeat: COLD_MAX_HEAT,
+						ageBasis: "meta.createdAt",
+						excludes: ["rule", "archived"],
+						heatBasis: `entryHeat 基础热度（半衰期 ${heat.halfLifeDays ?? HEAT_HALF_LIFE_DAYS} 天，新条目加成窗 ${Math.round((heat.recencyWindowMs ?? RECENCY_WINDOW_MS) / 86400000)} 天；不含关联与新条目加成）`,
+					},
+				};
+				const active = entries.filter(entry => !entry.meta?.archived);
+				return {
+					namespace: name,
+					scannedAt: new Date().toISOString(),
+					counts: {
+						active: active.length,
+						archived: entries.length - active.length,
+						checked: active.length,
+						candidates: candidates.length,
+						cold: cold.items.length,
+					},
+					candidates,
+					cold,
+				};
+			});
+		},
+		/** 审阅内容只读：不 bumpAccess，不改任何状态。 */
+		async getMaintenanceReview({ namespace, entries } = {}) {
+			return run("读取审阅内容", async () => {
+				const name = safeNs(namespace);
+				if (!Array.isArray(entries) || entries.length === 0) throw new Error("至少指定一条待审阅的记忆");
+				if (entries.length > 2) throw new Error("一次最多审阅两条记忆");
+				const root = nsRoot(cfg.memoryDir, name);
+				const heat = heatContext(cfg, root, readEntries(root), name);
+				const items = entries.map(input => {
+					const entry = entryIdentity(input?.namespace ?? name, input?.kind, input?.key);
+					if (entry.namespace !== name) throw new Error("只能审阅当前命名空间的记忆");
+					return entryDetail(root, entry, heat);
+				});
+				return { namespace: name, items };
+			});
+		},
+		/**
+		 * 人工合并：保留目标条目的身份，先写入合并正文与来源关联，再把另一条归档（replacement 指向目标）。
+		 * 校验失败在写入前抛出；保存成功但归档失败如实回报部分状态，不伪报成功。
+		 */
+		async mergeMaintenanceEntries({ namespace, left, right, keep, ifLeftRevision, ifRightRevision, content, title, evidence } = {}) {
+			return run("合并记忆条目", async () => {
+				const name = safeNs(namespace);
+				const root = nsRoot(cfg.memoryDir, name);
+				const leftRef = entryIdentity(left?.namespace ?? name, left?.kind, left?.key);
+				const rightRef = entryIdentity(right?.namespace ?? name, right?.kind, right?.key);
+				if (leftRef.namespace !== name || rightRef.namespace !== name) throw new Error("合并失败：只能合并当前命名空间的记忆");
+				if (leftRef.kind !== rightRef.kind) throw new Error("合并失败：两条记忆类型不同");
+				if (leftRef.key === rightRef.key) throw new Error("合并失败：左右是同一条记忆");
+				if (keep !== "left" && keep !== "right") throw new Error("合并失败：keep 必须是 left 或 right");
+				if (typeof content !== "string" || !content.trim()) throw new Error("合并失败：必须提供合并后的正文");
+				const keepRef = keep === "left" ? leftRef : rightRef;
+				const dropRef = keep === "left" ? rightRef : leftRef;
+				const keepRevision = keep === "left" ? ifLeftRevision : ifRightRevision;
+				const dropRevision = keep === "left" ? ifRightRevision : ifLeftRevision;
+				if (!keepRevision || !dropRevision) throw new Error("合并失败：必须提供两侧的 revision");
+
+				return withNsWriteLock(root, () => {
+					const currentKeep = readEntry(root, keepRef.kind, keepRef.key);
+					const currentDrop = readEntry(root, dropRef.kind, dropRef.key);
+					if (!currentKeep || !currentDrop) throw new Error("合并失败：待合并的记忆不存在");
+					if (currentKeep.meta?.archived || currentDrop.meta?.archived) throw new Error("合并失败：只能合并活跃记忆");
+					if (currentKeep.revision !== keepRevision || currentDrop.revision !== dropRevision) {
+						throw new Error("revision_conflict：条目已变化，请重新读取后再合并");
+					}
+					if (typeof title === "string" && title.trim() && title.trim() !== currentKeep.title) {
+						throw new Error("合并失败：合并保留目标条目的身份，不能改标题");
+					}
+					const related = [...(Array.isArray(currentKeep.meta?.related) ? currentKeep.meta.related : []), { namespace: name, kind: dropRef.kind, key: dropRef.key }];
+					const stored = writeMemory(root, {
+						mode: "update", key: keepRef.key, entryType: keepRef.kind, content, evidence,
+						namespace: name, related, preserveSource: true, maxChars: budgetOf(name),
+					});
+					const storedRelated = Array.isArray(stored.entry?.meta?.related) ? stored.entry.meta.related : [];
+					const relatedOut = storedRelated.filter(row => row && typeof row === "object" && row.namespace && row.kind && row.key);
+					let archived = null;
+					try {
+						archived = archiveEntry(root, dropRef.kind, dropRef.key, { replacement: keepRef });
+						if (!archived.archived) throw new Error("归档失败：条目状态未改变");
+					} catch (error) {
+						const cause = error instanceof Error ? error.message : String(error);
+						return {
+							ok: false,
+							partial: true,
+							namespace: name,
+							kept: { entry: keepRef, title: currentKeep.title, revision: stored.entry.revision },
+							archived: null,
+							related: relatedOut,
+							error: `归档未确认（可能已部分生效，请重新审阅确认状态后再决定是否重试）：${cause}`,
+						};
+					}
+					try {
+						syncIndex(root, budgetOf(name));
+					} catch (error) {
+						return {
+							ok: false,
+							partial: true,
+							namespace: name,
+							kept: { entry: keepRef, title: currentKeep.title, revision: stored.entry.revision },
+							archived: { entry: dropRef, revision: archived.entry?.revision ?? null },
+							related: relatedOut,
+							error: `archive_applied_index_failed：记忆已归档，索引刷新失败：${error instanceof Error ? error.message : String(error)}`,
+						};
+					}
+					return {
+						ok: true,
+						namespace: name,
+						kept: { entry: keepRef, title: currentKeep.title, revision: stored.entry.revision },
+						archived: { entry: dropRef, revision: archived.entry?.revision ?? null },
+						related: relatedOut,
+						partial: false,
+					};
+				});
+			});
+		},
+		/** 单条人工归档：带 revision 校验，复用既有 archiveEntry 入口，不引入批量自动归档策略。 */
+		async archiveEntry({ entry: input, ifRevision, namespace } = {}) {
+			return run("归档记忆", async () => {
+				const entry = entryIdentity(input?.namespace, input?.kind, input?.key);
+				if (namespace !== undefined && safeNs(namespace) !== entry.namespace) throw new Error("归档失败：记忆不在该命名空间");
+				if (typeof ifRevision !== "string" || !ifRevision.trim()) throw new Error("归档失败：必须提供 revision");
+				const root = rootOf(entry);
+				return withNsWriteLock(root, () => {
+					const current = readEntry(root, entry.kind, entry.key);
+					if (!current) throw new Error(`记忆不存在：${entry.namespace}/${entry.kind}/${entry.key}`);
+					if (current.meta?.archived) throw new Error("该记忆已经处于归档状态");
+					if (current.revision !== ifRevision) throw new Error("revision_conflict：条目已变化，请重新读取后再归档");
+					const archived = archiveEntry(root, entry.kind, entry.key, {});
+					if (!archived.archived) throw new Error("归档失败：条目状态未改变");
+					try {
+						syncIndex(root, budgetOf(entry.namespace));
+					} catch (error) {
+						throw new Error(`archive_applied_index_failed：记忆已归档，索引刷新失败：${error instanceof Error ? error.message : String(error)}`);
+					}
+					return { ok: true, namespace: entry.namespace, entry, revision: archived.entry?.revision ?? null };
+				});
+			});
+		},
 	};
 }
 
-function entryRow(value, { name, heat, heatConfig }) {
+function entryDetail(root, entry, heat) {
+	const value = readEntry(root, entry.kind, entry.key);
+	if (!value) throw new Error(`记忆不存在：${entry.namespace}/${entry.kind}/${entry.key}`);
+	const id = entryId(entry.kind, entry.key);
+	const score = heat.scores.get(id)?.score ?? entryHeat(heat.access, heat.meta, entry.kind, entry.key, heat.heatConfig);
+	const access = heat.access;
+	return {
+		entry,
+		title: value.title,
+		content: value.content,
+		revision: value.revision,
+		archived: Boolean(value.meta.archived),
+		evidence: typeof value.meta.evidence === "string" ? value.meta.evidence : "",
+		sourceSession: textOrNull(value.meta.sourceSession),
+		createdAt: textOrNull(value.meta.createdAt),
+		updatedAt: textOrNull(value.meta.updatedAt),
+		heat: Number(score.toFixed(2)),
+		accessCount: Number(access[id]?.count || 0),
+		lastAt: access[id]?.lastAt || null,
+		related: relatedList(value.meta, entry.namespace),
+		sourceSeqs: Array.isArray(value.meta.sourceSeqs) ? value.meta.sourceSeqs : [],
+	};
+}
+
+function entryRow(value, { name, heat }) {
 	const id = entryId(value.kind, value.key);
 	const rawSummary = String(value.content || "").split(/\r?\n/).map(line => line.trim()).find(line => line !== "") || "";
 	const summary = rawSummary.replace(/^[#> \-*`~]+\s*/, "").slice(0, 90);
@@ -681,7 +860,7 @@ function entryRow(value, { name, heat, heatConfig }) {
 		archived: Boolean(value.meta.archived),
 		updatedAt: textOrNull(value.meta.updatedAt),
 		chars: value.content.length,
-		heat: Number((heat.scores.get(id)?.score ?? entryHeat(heat.access, heat.meta, value.kind, value.key, heatConfig)).toFixed(2)),
+		heat: Number((heat.scores.get(id)?.score ?? entryHeat(heat.access, heat.meta, value.kind, value.key, heat.heatConfig)).toFixed(2)),
 		accessCount: Number(heat.access[id]?.count || 0),
 		lastAt: heat.access[id]?.lastAt || null,
 		related,

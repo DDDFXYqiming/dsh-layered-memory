@@ -73,6 +73,10 @@ class MemoryStatus extends Service {
 	async getInjectionState(args, signal) { return this.callStore("getInjectionState", [args], signal); }
 	async getDiskMetrics(args, signal) { return this.callStore("getDiskMetrics", [args], signal); }
 	async getMaintenanceReport(args, signal) { return this.callStore("getMaintenanceReport", [args], signal); }
+	async getMaintenanceWorkspace(args, signal) { return this.callStore("getMaintenanceWorkspace", [args], signal); }
+	async getMaintenanceReview(args, signal) { return this.callStore("getMaintenanceReview", [args], signal); }
+	async mergeMaintenanceEntries(args, signal) { return this.callStore("mergeMaintenanceEntries", [args], signal); }
+	async archiveEntry(args, signal) { return this.callStore("archiveEntry", [args], signal); }
 }
 
 export function apply(ctx) {

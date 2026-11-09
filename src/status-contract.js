@@ -13,6 +13,10 @@ function count(value) {
 	if (!Number.isSafeInteger(value) || value < 0) throw new TypeError("记忆状态计数必须是非负整数");
 	return value;
 }
+function number(value) {
+	if (typeof value !== "number" || !Number.isFinite(value)) throw new TypeError("记忆状态数值必须是有限数字");
+	return value;
+}
 function boolean(value) {
 	if (typeof value !== "boolean") throw new TypeError("记忆状态标记必须是布尔值");
 	return value;
@@ -175,6 +179,22 @@ function parseNamespaceInput(value) {
 	text(value.namespace);
 	return value;
 }
+function parseListEntriesPageInput(value) {
+	inputObject(value, ["namespace"], ["kind", "query", "includeArchived", "offset", "limit"]);
+	text(value.namespace);
+	if (value.kind !== undefined && !["rule", "fact", "sop"].includes(value.kind)) throw new TypeError("未知的记忆类型");
+	if (value.query !== undefined) stringValue(value.query);
+	if (value.includeArchived !== undefined) boolean(value.includeArchived);
+	if (value.offset !== undefined) count(value.offset);
+	if (value.limit !== undefined) count(value.limit);
+	return value;
+}
+function parseInjectionInput(value) {
+	inputObject(value, ["namespace"], ["query"]);
+	text(value.namespace);
+	if (value.query !== undefined) stringValue(value.query);
+	return value;
+}
 // 容错解析：缺字段或类型不符按 0 处理，避免旧服务端数据让整个面板报错。
 function parseNamespaceStats(value) {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("索引占用统计必须是对象");
@@ -193,16 +213,55 @@ function parseNamespaceStats(value) {
 		sopCount: chars("sopCount"),
 	};
 }
+function parseRelatedList(value) {
+	if (!Array.isArray(value)) throw new TypeError("关联列表必须是数组");
+	for (const row of value) {
+		if (!row || typeof row !== "object") throw new TypeError("关联项必须是对象");
+		text(row.namespace);
+		text(row.kind);
+		text(row.key);
+	}
+	return value;
+}
+function parseEntryRow(value) {
+	if (!value || typeof value !== "object") throw new TypeError("记忆条目必须是对象");
+	parseEntry(value.entry);
+	text(value.title);
+	boolean(value.archived);
+	nullableText(value.updatedAt);
+	count(value.chars);
+	if (value.heat !== undefined) number(value.heat);
+	if (value.accessCount !== undefined) count(value.accessCount);
+	nullableText(value.lastAt);
+	if (value.related !== undefined) parseRelatedList(value.related);
+	if (value.relatedCount !== undefined) count(value.relatedCount);
+	stringValue(value.summary);
+	if (value.rank !== null && value.rank !== undefined) count(value.rank);
+	if (!["rule", "cold", "hot", "archived"].includes(value.injectionStatus)) throw new TypeError("未知的记忆注入状态");
+	return value;
+}
 function parseEntries(value) {
 	if (!Array.isArray(value)) throw new TypeError("记忆列表必须是数组");
-	for (const row of value) {
-		if (!row || typeof row !== "object") throw new TypeError("记忆条目必须是对象");
-		parseEntry(row.entry);
-		text(row.title);
-		boolean(row.archived);
-		nullableText(row.updatedAt);
-		count(row.chars);
-	}
+	for (const row of value) parseEntryRow(row);
+	return value;
+}
+function parseKindCounts(value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("记忆分类统计必须是对象");
+	for (const key of ["rule", "fact", "sop", "total"]) count(value[key]);
+	return value;
+}
+function parseEntriesPage(value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("记忆列表分页必须是对象");
+	text(value.namespace);
+	if (!Array.isArray(value.entries)) throw new TypeError("记忆列表必须是数组");
+	for (const row of value.entries) parseEntryRow(row);
+	const facets = value.facets;
+	if (!facets || typeof facets !== "object" || Array.isArray(facets)) throw new TypeError("记忆库存统计必须是对象");
+	count(facets.total);
+	parseKindCounts(facets.active);
+	parseKindCounts(facets.archived);
+	for (const key of ["matched", "returned", "offset", "limit"]) count(value[key]);
+	boolean(value.truncated);
 	return value;
 }
 function parseReadEntry(value) {
@@ -261,6 +320,101 @@ function parseObjectResult(value) {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("结果必须是对象");
 	return value;
 }
+function parseInjectionItem(value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("注入条目必须是对象");
+	text(value.kind);
+	text(value.key);
+	text(value.title);
+	count(value.chars);
+	number(value.heat);
+	if (value.rank !== null && value.rank !== undefined) count(value.rank);
+	if (!["rule", "included", "cold", "recall", "partial", "omitted", "unknown"].includes(value.status)) throw new TypeError("未知的注入状态");
+	boolean(value.included);
+	if (!["body", "title", null].includes(value.promptLevel)) throw new TypeError("未知的提示词层级");
+	nullableText(value.promptToken);
+	nullableText(value.promptNamespace);
+	if (value.promptLine !== null && value.promptLine !== undefined) count(value.promptLine);
+	count(value.relatedCount);
+	parseRelatedList(value.related);
+	return value;
+}
+function parseInjectionState(value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("注入预览必须是对象");
+	text(value.namespace);
+	boolean(value.preview);
+	text(value.previewKind);
+	text(value.disclaimer);
+	boolean(value.sessionTracked);
+	const basis = value.basis;
+	if (!basis || typeof basis !== "object" || Array.isArray(basis)) throw new TypeError("注入预览依据必须是对象");
+	for (const key of ["heatHalfLifeDays", "heatRecencyWindowDays", "relatedBonus", "relatedCap", "newEntryDays", "newEntryBonus", "rulesMinRatio", "coldRatio", "coldMax", "coldPoolStart", "recallLimit", "indexTargetRatio"]) number(basis[key]);
+	text(basis.coldSeedScope);
+	nullableText(basis.recallQuery);
+	boolean(basis.rulesAttributed);
+	boolean(basis.coldRatioApplied);
+	stringValue(value.combinedText);
+	if (!Array.isArray(value.sections)) throw new TypeError("注入分段必须是数组");
+	for (const section of value.sections) {
+		if (!section || typeof section !== "object") throw new TypeError("注入分段必须是对象");
+		text(section.namespace);
+		stringValue(section.text);
+		count(section.totalChars);
+		count(section.shownChars);
+		count(section.maxChars);
+		boolean(section.overLimit);
+		count(section.entryCount);
+		count(section.includedCount);
+		count(section.omittedCount);
+		boolean(section.coldRatioApplied);
+	}
+	for (const key of ["budgetChars", "indexChars", "targetChars", "triggerChars", "coldCount", "coldIncludedCount", "rankedCount", "includedCount", "omittedCount", "partialCount", "recallCount", "combinedIncludedCount"]) count(value[key]);
+	const counts = value.counts;
+	if (!counts || typeof counts !== "object" || Array.isArray(counts)) throw new TypeError("注入条目统计必须是对象");
+	for (const key of ["total", "active", "archived", "rule", "fact", "sop"]) count(counts[key]);
+	if (!Array.isArray(value.items)) throw new TypeError("注入条目必须是数组");
+	for (const item of value.items) parseInjectionItem(item);
+	return value;
+}
+function parseMaintenanceReport(value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("维护报告必须是对象");
+	const graph = value.graph;
+	if (!graph || typeof graph !== "object" || Array.isArray(graph)) throw new TypeError("关系图谱必须是对象");
+	if (!Array.isArray(graph.nodes)) throw new TypeError("关系图节点必须是数组");
+	for (const node of graph.nodes) {
+		if (!node || typeof node !== "object") throw new TypeError("关系图节点必须是对象");
+		text(node.id);
+		text(node.namespace);
+		text(node.kind);
+		text(node.key);
+		text(node.title);
+		number(node.heat);
+		count(node.chars);
+		count(node.degree);
+	}
+	if (!Array.isArray(graph.edges)) throw new TypeError("关系图边必须是数组");
+	for (const edge of graph.edges) {
+		if (!edge || typeof edge !== "object") throw new TypeError("关系图边必须是对象");
+		text(edge.source);
+		text(edge.target);
+		text(edge.type);
+		text(edge.sourceNamespace);
+		text(edge.targetNamespace);
+		if (edge.similarity !== null && edge.similarity !== undefined) number(edge.similarity);
+	}
+	count(graph.nodeCount);
+	count(graph.edgeCount);
+	if (graph.skipped !== undefined) {
+		if (!Array.isArray(graph.skipped)) throw new TypeError("跳过的边必须是数组");
+		for (const row of graph.skipped) {
+			if (!row || typeof row !== "object") throw new TypeError("跳过的边必须是对象");
+			text(row.source);
+			text(row.target);
+			text(row.type);
+			text(row.reason);
+		}
+	}
+	return value;
+}
 const storeParameter = (name, parse) => ({ name: "args", wire: "args", source: "json", codec: codec(name, parse) });
 const storeDescriptor = (method, parseResult, parseInput) => ({
 	id: STATUS_PACKAGE + "#" + method,
@@ -278,14 +432,15 @@ export const STORE_REMOTE = {
 		storeDescriptor("listNamespaces", parseNamespaces),
 		storeDescriptor("namespaceStats", parseNamespaceStats, parseNamespaceInput),
 		storeDescriptor("listEntries", parseEntries, parseListEntriesInput),
+		storeDescriptor("listEntriesPage", parseEntriesPage, parseListEntriesPageInput),
 		storeDescriptor("readEntry", parseReadEntry, parseEntryInput),
 		storeDescriptor("createEntry", parseCreatedEntry, parseCreateInput),
 		storeDescriptor("updateEntry", parseRevision, parseUpdateInput),
 		storeDescriptor("setArchived", parseArchived, parseArchivedInput),
 		storeDescriptor("entryHistory", parseHistory, parseEntryInput),
 		storeDescriptor("rollbackEntry", parseRevision, parseRollbackInput),
-		storeDescriptor("getInjectionState", parseObjectResult, parseNamespaceInput),
+		storeDescriptor("getInjectionState", parseInjectionState, parseInjectionInput),
 		storeDescriptor("getDiskMetrics", parseObjectResult, parseNamespaceInput),
-		storeDescriptor("getMaintenanceReport", parseObjectResult, parseNamespaceInput),
+		storeDescriptor("getMaintenanceReport", parseMaintenanceReport, parseNamespaceInput),
 	],
 };

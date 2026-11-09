@@ -1,0 +1,104 @@
+/* Toolbar popover — host primitives adapter.
+   The trigger stays inline in the toolbar; the panel is portalled by the
+   host's MenuSurface and positioned by the host's anchor hook, so only
+   surface styling belongs here. */
+
+.lm-eui-toolbar-popover {
+	display: inline-flex;
+	align-items: center;
+	min-width: 0;
+}
+
+.lm-eui-toolbar-popover-trigger {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 32px;
+	padding: 4px 10px;
+	border: 1px solid var(--dsw-alias-border-l3);
+	border-radius: 8px;
+	background: transparent;
+	color: var(--dsw-alias-label-primary);
+	font: inherit;
+	font-size: 12px;
+	line-height: 1.4;
+	cursor: pointer;
+	transition: background-color 120ms, border-color 120ms;
+}
+
+.lm-eui-toolbar-popover-trigger:hover {
+	background: var(--dsw-alias-interactive-bg-hover);
+	border-color: var(--dsw-alias-border-l2);
+}
+
+.lm-eui-toolbar-popover-trigger:focus-visible {
+	outline: 2px solid var(--dsw-static-blue-450);
+	outline-offset: 2px;
+}
+
+.lm-eui-toolbar-popover-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.lm-eui-toolbar-popover-count {
+	flex: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 18px;
+	height: 16px;
+	padding: 0 5px;
+	border-radius: 999px;
+	background: var(--dsw-alias-interactive-bg-active);
+	color: var(--dsw-alias-label-secondary);
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
+}
+
+/* The panel is mounted to the document body by this adapter, so it must not
+   rely on any ancestor selector. It is pinned to the viewport: the anchor
+   hook reports viewport coordinates and the host surface is relative.
+
+   Surface treatment mirrors the host's own menu card: the translucent fill
+   and the backdrop blur come from the host `MenuSurface` material layer,
+   while the hairline stroke and the elevation shadow come from the host
+   elevation tokens. The layer sits on the host's submenu step (101) — above
+   the anchored list and tooltip layer (100) and above the app chrome, and
+   below the host modal overlay (1000). */
+.lm-eui-toolbar-popover-panel {
+	position: fixed;
+	z-index: 101;
+	max-width: min(320px, calc(100vw - 24px));
+	/* The host surface root already carries this radius (MenuSurface.module.css
+	   sets `.surface { border-radius: var(--dsw-radius-lg) }`, and the material
+	   layer only inherits it). Stating it here keeps the panel's shape in this
+	   stylesheet instead of depending on the host class staying on the element. */
+	border-radius: var(--dsw-radius-lg);
+	border: 0;
+	--dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
+	box-shadow: var(--dsw-elevation-prominent);
+}
+
+/* The viewport fit follows the host's scrollable menu: the card stops short
+   of the viewport edges and taller content scrolls inside. */
+.lm-eui-toolbar-popover-body {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	min-height: 0;
+	max-height: calc(100vh - 12px - max(12px, var(--dsh-frame-overlay-top, 12px)));
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	padding: 10px 12px;
+	color: var(--dsw-alias-label-secondary);
+	font-size: 12px;
+	line-height: 1.5;
+}
+
+@media (max-width: 700px) {
+	.lm-eui-toolbar-popover-trigger {
+		min-height: 44px;
+	}
+}

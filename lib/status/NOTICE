@@ -1,0 +1,8 @@
+本子包内含以下第三方组件的打包运行时，许可证全文随包发布：
+
+- EasyUI 组件（改编自 https://github.com/Surajmaurya1/easyui ，MIT）→ licenses/easyui.txt
+- framer-motion 13.5.1（MIT）→ licenses/framer-motion.txt
+- lucide-react 1.31.0（ISC）→ licenses/lucide-react.txt
+- d3 7.9.2（ISC）→ licenses/d3.txt
+
+组件来源、改编范围与上游地址见 docs/component-sources.md 与 docs/graph-components.md。

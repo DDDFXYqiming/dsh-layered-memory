@@ -4,14 +4,30 @@
 
 ## 落地位置
 
-- 源 clone：/mnt/d/AI_Projects/dsh-layered-memory，改代码在这里
-- 运行副本 /home/dsh/src/dsh-layered-memory 的同步由 Lead 统一处理
 - 管理页做进 status 子包 @dsh-external/dsh-layered-memory-status：
   - 客户端 client/browser.js，样式 client/browser.css
+  - 图谱视图独立成模块 client/graph-view.js，样式 client/graph-view.css
+  - 客户端运行时入口 client/ui-runtime-entry.js，第三方组件源码 client/vendor/
   - 服务端通道 src/status.js、src/status-contract.js，存储操作 src/store-service.js
   - 索引切分与统计 src/l1index.js
-- 构建：node scripts/build.mjs，把 src/status.js、src/status-contract.js、client/status.js、client/browser.js、client/status.css、client/browser.css 组装进 lib/status/
+- 构建：node scripts/build.mjs，把服务端通道、client/status.js、client/browser.js、client/graph-view.js、客户端运行时包与样式组装进 lib/status/
 - 当前规则条目接口适用于 0.11.0 起的版本
+
+## 客户端运行时
+
+视图工厂从构建产物拿到同一个 `runtime` 对象，宿主注入的模块与第三方运行时都从这里走：
+
+- `createMemoryBrowserClient(require, styles, runtime)`：第三个参数是运行时，缺省时视图退回自身的降级实现
+- `createMemoryGraphView(require, runtime)`：图谱视图工厂，由构建装配到 `runtime.graphView`
+- runtime 的字段：
+  - `React`、`ui`：宿主注入的 React 与 @deepseek-ai/dsh-client-ui-primitives，与产物内不重复打包
+  - `motion`、`AnimatePresence`、`useReducedMotion` 等：动画运行时
+  - `d3`：图谱用的图渲染库，在构建时装载于模块工厂内的局部作用域
+  - `components`：数据表、图表、滚动进度、页签等视图组件
+  - `reducedMotion()`：是否处于降低动效偏好
+  - `graphView`、`styles`：图谱视图组件与它的样式文本
+
+第三方组件的来源、许可证与改编范围见 docs/component-sources.md；图谱链路见 docs/graph-components.md。
 
 ## 服务端 → 前端数据通道
 
@@ -170,45 +186,67 @@ entry 标识统一为 { namespace: string, kind: "rule"|"fact"|"sop", key: strin
 
 ### 四个工作台视图
 
-- 条目表格（entries）：工具栏 + 高级数据表 + 右侧详情。表头可按标题、热度、字符数、更新时间排序，行可展开显示摘要、关联条目胶囊与证据片段
-- 注入透视（injection）：四段漏斗（磁盘总目录 → 规则常驻 → 冷探索配额 → 最终注入）＋ 逐条取舍名单 ＋ 实际注入提示词原文，数据来自 getInjectionState
-- 关系图谱（graph）：同心圆星系布局，热度最高的节点位于核心，其余按环层均匀分布；支持搜索、仅看有边节点、缩放，点击节点高亮相邻连线并在右侧信息卡展示类型、字符数与关联数，数据来自 getMaintenanceReport 的 graph
-- 维护驾驶舱（cockpit）：Bento Grid 四块卡片——磁盘存储构成（按 content/history/metadata/pending 字节占比）、活跃条目与归档对比、相似与合并候选、冷条目巡检胶囊，数据分别来自 getDiskMetrics、getMaintenanceReport 与当前条目列表
+- 条目表格（entries）：工具栏 + 数据表 + 右侧详情。默认列只留标题、类型与更新时间；标题、热度、字符数、更新时间可排序，行可展开显示摘要、关联条目与证据片段
+- 注入透视（injection）：逐条取舍名单 ＋ 实际注入提示词原文，数据来自 getInjectionState。名单每行只留标题与必要类型，「打开条目」集中在当前选中项的预览头部；召回词与来源预算收进高级设置折叠区
+- 关系图谱（graph）：力导向布局，节点位置由图渲染库计算；滚轮以指针为中心缩放、拖拽平移，缩放按钮与适屏走同一套变换；初次渲染与容器尺寸变化后自动适屏，边界计算含标签占位；默认只显示焦点节点、其一跳邻居与少量重要节点的标签，其余标签让位；悬停高亮相邻连线并淡化其余网络，点击固定选中并在信息卡展示类型、字符数与关联数；工具栏是一张可展开卡片，显示选项是卡片内与 header 同宽连续的展开区；数据来自 getMaintenanceReport 的 graph
+- 维护驾驶舱（cockpit）：活跃与归档对比、相似与合并候选、冷条目巡检三块，冷条目默认只显示少量并可展开全部；数据分别来自 getDiskMetrics、getMaintenanceReport 与当前条目列表
+
+### 条目表格的空态与错误态
+
+搜索与类型过滤都由服务端承担，组件自带的客户端筛选与分页不参与：
+
+- 搜索框由页面工具栏提供，表格组件的内置搜索框不渲染。
+- 服务端分页由「加载更多」推进，表格组件的内部分页器不渲染，已加载行一次性呈现。
+- 空态只给一句短标题与一个图标，不带解释性小字；动作（如清空查询）回调到父级，由父级清空服务端查询，而不是只清组件内部的客户端筛选。
+- 错误态只给一句短标题；原始错误信息作为技术详情默认折叠，按需展开。
+- 无数据与失败是两种状态：当前条件下没有条目走空态，请求失败走错误态。
+
+这几项由数据表组件的可选内容接口提供，参数与默认值见 docs/component-sources.md 的「新增的可选调用方接口」。
+
+### 阅读层级与渐进展开
+
+默认阅读直接看到正文，次要信息收起：
+
+- 详情页正文之后是若干折叠区（来源与依据、关联、历史等），各自默认关闭；标题可带数量徽标。
+- 折叠由共享的 `Disclosure` 组件承担，展开状态**归各视图自己持有**，组件不另存一份。条目身份变化时由视图重置。
+- 收起时折叠内容被卸载；同时面板容器按 `open` 同步 `aria-hidden` 与 `inert`，所以**退出动画期间**旧内容既不可 Tab 也不可交互，收起后页面上不留可焦点控件；触发器是真按钮，键盘与触控都可直接操作。
+- 列表的搜索、类型筛选与结果数留在工具栏，列表本身不再带组件自带的搜索框与分页器：分页由服务端窗口加「加载更多」推进，组件侧的 `hidePagination` 会同时去掉分页器与内部切片。
+
+工具栏里的高级项走浮层而不是折叠块，入口与工具栏同排、不独占一行：注入页的「高级设置」与图谱的「显示选项」都用共享的 `ToolbarPopover`，面板由宿主挂到页面根并按锚点定位，因此不会被页面滚动容器裁切；关闭后不留空表面。
 
 ### 工具栏
 
-一行四组，从左到右：
+默认只保留阅读相关的一行：
 
-- 命名空间下拉
 - 搜索框，type 为 search，有输入时出现清空按钮
 - 类型过滤：全部、规则、事实、经验，文案走本地化词典
-- 显示已归档开关
+- 一项简短结果数
+
+命名空间切换与「显示已归档」等低频条件收进可点的筛选/更多入口，不摊在正文上方；命名空间切换仍保留在该入口内。详情页的「更多」用宿主 Menu，菜单以 portal 渲染脱离滚动区裁切，并带 `aria-haspopup` / `aria-expanded`。
 
 索引占用组件在工具栏下方、条目列表上方。
 
 ### 列表
 
-- 每行给出标题、类型徽标、归档标记、更新时间
+- 每行给出标题、类型徽标与更新时间
 - 类型徽标显示本地化名，不显示 fact 或 sop
 - 已归档行加 is-archived 样式置灰
 - 选中行高亮，切换选中会清掉提示与冲突状态
 
 ### 详情
 
-- 标题与归档徽标；操作区是“归档/恢复”和“保存”，内容或证据有改动时保存才可用
-- 只读字段三项：namespace、kind、key。其中 kind 显示本地化名，另两项显示原值
-- 内容区在预览与编辑之间切换：预览渲染 Markdown，点击预览区切到编辑，编辑框失焦切回预览
-- 规则条目额外显示 100 字符计量条，超限时禁用保存
-- 证据是单行输入框
-- 历史快照列表每条给出时间、revision 前 8 位、内容变化摘要，带“对比/预览”与“回滚到此版本”按钮，回滚需要二次确认
+- 标题、类型小徽标与两个入口：「编辑」与「更多」。「更多」用宿主 Menu，放归档/恢复、复制引用等低频动作，写入进行中时相应动作禁用
+- 正文紧随其后，阅读态直接看到 Markdown 正文；不常驻保存按钮，点正文也不会进入编辑
+- 身份三元组（namespace / kind / key）、热度与访问次数、来源会话等不默认铺开，需要时在「更多」或按需展开的细节里取
+- 进入编辑后显示正文编辑器与修改依据字段，此时才出现保存/取消；保存走 updateEntry，带 ifRevision；冲突时显示提示并给“重新加载”，取消按脏稿确认并恢复 baseline，不写服务器
+- 规则条目在编辑态显示 100 字符计量条，超限时禁用保存
+- 来源与依据、关联、历史三个折叠区放在正文之后，默认关闭；历史每条给出时间与内容变化摘要，带“对比/预览”与“回滚到此版本”，回滚需要二次确认
 - 预览按钮展开的行级 Diff 以 snap.preview || snap.content 为旧文本，与当前正文逐行比对
-- 保存走 updateEntry，带 ifRevision；冲突时显示提示并给“重新加载”
 - 归档、回滚、创建成功后都刷新列表、详情与历史，占用数据随列表版本一起刷新
 
 ### 新建弹层
 
-- 字段：namespace（下拉）、kind（下拉，选项文案本地化）、topic、content、evidence
-- 打开时 namespace 取当前选择，kind 取当前过滤值，没有则取 fact
+- 字段：namespace（随当前空间预填）、kind（短名 + 色标）、topic、content、evidence
 - namespace、topic、content、evidence 都要填，缺一项时报必填提示
 - 提交后关闭弹层，选中新建的条目并刷新列表
 
@@ -216,4 +254,5 @@ entry 标识统一为 { namespace: string, kind: "rule"|"fact"|"sop", key: strin
 
 - 沿用 @deepseek-ai/dsh-client-ui-primitives 的 Button、Input、Menu、MenuItemButton、Switch、Tooltip
 - 颜色与间距取 --dsw-alias-* 等官方变量
+- 数据表与折叠区等视图组件改编自 Component Hunt 收录的 EasyUI 组件，来源与许可见 docs/component-sources.md
 - 代码注释与文案用中文，中文引号用全角“”

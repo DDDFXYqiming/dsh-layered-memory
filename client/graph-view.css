@@ -1,0 +1,681 @@
+/* 关系图谱视图样式（配套 client/graph-view.js）
+   颜色尽量取宿主主题变量，缺失时回落到与旧图谱一致的分类色。 */
+
+.lm-graph-view {
+	display: flex;
+	flex: 1;
+	height: 100%;
+	min-height: 0;
+	overflow: hidden;
+	position: relative;
+	color: var(--dsw-alias-label-primary, #e5e7eb);
+}
+
+.lm-graph-stage {
+	position: relative;
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+	background: var(--dsw-alias-bg-base, #050505);
+	border-radius: 10px;
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.lm-graph-canvas {
+	display: block;
+	width: 100%;
+	height: 100%;
+	cursor: grab;
+	touch-action: none;
+	outline: none;
+}
+
+.lm-graph-canvas:active,
+.lm-graph-stage.lm-graph-is-panning .lm-graph-canvas {
+	cursor: grabbing;
+}
+
+/* 分类色：规则 / 事实 / 经验 */
+.lm-graph-kind-rule { --lm-graph-color: #a855f7; }
+.lm-graph-kind-fact { --lm-graph-color: #3b82f6; }
+.lm-graph-kind-sop { --lm-graph-color: #b78535; }
+.lm-graph-kind-other { --lm-graph-color: #94a3b8; }
+
+/* 工具栏 */
+/* 工具栏 = 一张可展开的卡片：一套 surface、稳定宽度、限高在 stage 内。
+   header 行常驻不收缩，展开区接在同卡片下缘、同宽、同水平内距、内部滚动。 */
+.lm-graph-toolbar-card {
+	position: absolute;
+	top: 10px;
+	left: 10px;
+	z-index: 6;
+	display: flex;
+	flex-direction: column;
+	width: 320px;
+	max-width: calc(100% - 20px);
+	max-height: calc(100% - 20px);
+	min-height: 0;
+	background: var(--dsw-alias-bg-layer-1, #0e0e0e);
+	border-radius: var(--dsw-radius-md, 12px);
+	box-shadow: var(--dsw-elevation-panel, 0 1px 2px rgba(0, 0, 0, .14));
+}
+
+/* 展开态的卡片提到本画布 UI 最上层（角落缩放 6 / 详情 7 / 提示 8），
+   收起时仍是原来的 6。 */
+.lm-graph-toolbar-card[data-open="true"] {
+	z-index: 9;
+}
+
+.lm-graph-toolbar-header {
+	flex: none;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	padding: 8px 10px;
+}
+
+.lm-graph-toolbar-body {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow: auto;
+	padding: 0 10px 10px;
+}
+
+
+.lm-graph-options-body {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.lm-graph-options-group {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+}
+
+.lm-graph-options-label {
+	font-size: 11px;
+	color: var(--dsw-alias-label-tertiary, #737373);
+}
+
+.lm-graph-options-foot {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding-top: 8px;
+	border-top: 0.5px solid var(--dsw-alias-border-l3, #1f1f1f);
+}
+
+/* 角落紧凑缩放控件 */
+.lm-graph-zoom-cluster {
+	position: absolute;
+	right: 12px;
+	bottom: 12px;
+	z-index: 6;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.lm-graph-zoom-cluster .lm-graph-btn {
+	min-width: 44px;
+	min-height: 44px;
+}
+
+.lm-graph-search {
+	flex: 1 1 200px;
+	min-width: 120px;
+	max-width: 260px;
+}
+
+.lm-graph-search,
+.lm-graph-search input {
+	min-height: 36px;
+}
+
+.lm-graph-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+.lm-graph-chip {
+	appearance: none;
+	display: inline-flex;
+	align-items: center;
+	border: 0.5px solid var(--dsw-alias-border-l3, #1f1f1f);
+	background: transparent;
+	color: var(--dsw-alias-label-secondary, #a1a1a1);
+	border-radius: 999px;
+	min-height: 36px;
+	padding: 0 12px;
+	font-size: 11px;
+	line-height: 1.6;
+	cursor: pointer;
+	transition: background .16s ease, color .16s ease, border-color .16s ease;
+}
+
+.lm-graph-chip:hover {
+	color: var(--dsw-alias-label-primary, #fafafa);
+	border-color: var(--dsw-alias-border-l2, #333);
+}
+
+.lm-graph-chip.is-active {
+	background: color-mix(in srgb, var(--lm-graph-color, #3b82f6) 26%, transparent);
+	border-color: color-mix(in srgb, var(--dsw-state-business-primary, #3b82f6) 60%, transparent);
+	color: var(--dsw-alias-label-primary, #fafafa);
+}
+
+.lm-graph-switch {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 36px;
+	font-size: 11px;
+	color: var(--dsw-alias-label-secondary, #a1a1a1);
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.lm-graph-btn {
+	min-width: 36px;
+	min-height: 36px;
+	white-space: nowrap;
+}
+
+/* 固定宽度的按钮（适屏、显示选项）：基础文案永不收缩，
+   空间不够时先收搜索框与后面的条件后缀。 */
+.lm-graph-btn.is-fixed {
+	flex: none;
+}
+
+/* 生效条件后缀：优先被省略，完整内容留在 title 与按钮的 aria-label */
+.lm-graph-options-state {
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 11px;
+	color: var(--dsw-alias-label-tertiary, #737373);
+}
+
+.lm-graph-btn.is-active {
+	border-color: var(--dsw-state-business-primary, #3b82f6);
+}
+
+.lm-graph-counts {
+	font-size: 11px;
+	color: var(--dsw-alias-label-tertiary, #737373);
+	overflow-wrap: anywhere;
+}
+
+/* 图例 */
+.lm-graph-legend {
+	position: absolute;
+	left: 12px;
+	bottom: 12px;
+	z-index: 5;
+	display: flex;
+	gap: 10px;
+	padding: 5px 9px;
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--dsw-alias-bg-layer-1, #0e0e0e) 78%, transparent);
+	border: 0.5px solid var(--dsw-alias-border-l3, #1f1f1f);
+	font-size: 11px;
+	color: var(--dsw-alias-label-secondary, #a1a1a1);
+	pointer-events: none;
+}
+
+.lm-graph-legend-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.lm-graph-legend-swatch {
+	width: 9px;
+	height: 9px;
+	border-radius: 50%;
+	background: var(--lm-graph-color, #94a3b8);
+}
+
+/* 节点与边 */
+.lm-graph-node {
+	cursor: pointer;
+	transition: opacity .18s ease;
+}
+
+.lm-graph-node:focus {
+	outline: none;
+}
+
+.lm-graph-dot {
+	fill: var(--lm-graph-color, #94a3b8);
+	stroke: color-mix(in srgb, var(--lm-graph-color, #94a3b8) 40%, transparent);
+	stroke-width: 1;
+}
+
+.lm-graph-halo {
+	fill: transparent;
+	stroke: transparent;
+	stroke-width: 1;
+}
+
+.lm-graph-ring {
+	fill: none;
+	stroke: transparent;
+	stroke-width: 1.5;
+}
+
+.lm-graph-node.is-active .lm-graph-dot {
+	stroke: #ffffff;
+	stroke-width: 2;
+}
+
+.lm-graph-node.is-active .lm-graph-ring {
+	stroke: color-mix(in srgb, var(--lm-graph-color, #3b82f6) 70%, transparent);
+}
+
+.lm-graph-node.is-linked .lm-graph-ring {
+	stroke: color-mix(in srgb, var(--lm-graph-color, #3b82f6) 45%, transparent);
+}
+
+.lm-graph-node.is-muted {
+	opacity: .22;
+}
+
+.lm-graph-node.is-dim {
+	opacity: .18;
+}
+
+.lm-graph-node.is-active {
+	opacity: 1;
+}
+
+.lm-graph-node.is-dragging {
+	cursor: grabbing;
+}
+
+.lm-graph-node.is-dragging .lm-graph-dot {
+	stroke: #ffffff;
+}
+
+.lm-graph-edge {
+	fill: none;
+	stroke: var(--dsw-alias-border-l2, #2a2a2a);
+	stroke-width: 1.2;
+	stroke-linecap: round;
+	transition: opacity .18s ease, stroke .18s ease;
+}
+
+.lm-graph-edge-similar {
+	stroke: color-mix(in srgb, #b78535 70%, transparent);
+	stroke-dasharray: 4 4;
+}
+
+.lm-graph-edge-related {
+	stroke: color-mix(in srgb, #3b82f6 55%, transparent);
+}
+
+.lm-graph-edge.is-active {
+	stroke: var(--dsw-state-business-primary, #3b82f6);
+	stroke-width: 2;
+	stroke-dasharray: none;
+}
+
+.lm-graph-edge.is-muted {
+	opacity: .22;
+}
+
+.lm-graph-edge.is-dim {
+	opacity: .1;
+}
+
+.lm-graph-label {
+	fill: var(--dsw-alias-label-primary, #fafafa);
+	font-size: 11px;
+	paint-order: stroke;
+	stroke: color-mix(in srgb, var(--dsw-alias-bg-base, #050505) 94%, transparent);
+	stroke-width: 3.5px;
+	stroke-linejoin: round;
+	pointer-events: none;
+	transition: opacity .18s ease;
+}
+
+.lm-graph-label.is-active {
+	font-weight: 700;
+}
+
+/* 悬停提示 */
+.lm-graph-tooltip {
+	position: absolute;
+	top: 0;
+	left: 0;
+	z-index: 8;
+	max-width: 260px;
+	padding: 8px 10px;
+	border-radius: var(--dsw-radius-md, 12px);
+	background: var(--dsw-alias-bg-layer-1, #0e0e0e);
+	border: 0;
+	box-shadow: var(--dsw-elevation-soft, 0 4px 16px rgba(0, 0, 0, .12));
+	font-size: 12px;
+	line-height: 1.5;
+	pointer-events: none;
+}
+
+.lm-graph-tooltip-title {
+	font-weight: 600;
+	margin-bottom: 3px;
+	word-break: break-word;
+}
+
+.lm-graph-tooltip-row {
+	color: var(--dsw-alias-label-secondary, #a1a1a1);
+	font-size: 11px;
+}
+
+.lm-graph-tooltip-kind {
+	display: inline-block;
+	padding: 0 6px;
+	border-radius: 999px;
+	color: var(--lm-graph-color, #94a3b8);
+	border: 0.5px solid color-mix(in srgb, var(--lm-graph-color, #94a3b8) 55%, transparent);
+}
+
+/* 详情面板 */
+.lm-graph-panel {
+	position: absolute;
+	top: var(--lm-graph-panel-top, 72px);
+	right: 12px;
+	z-index: 7;
+	width: min(300px, calc(100% - 24px));
+	max-height: calc(100% - 96px);
+	overflow: auto;
+	padding: 12px;
+	border-radius: var(--dsw-radius-lg, 16px);
+	background: var(--dsw-alias-bg-layer-1, #0e0e0e);
+	border: 0;
+	box-shadow: var(--dsw-elevation-soft, 0 4px 16px rgba(0, 0, 0, .12));
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	font-size: 12px;
+}
+
+.lm-graph-panel-head {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.lm-graph-panel-title {
+	margin: 0;
+	font-size: 14px;
+	line-height: 1.4;
+	word-break: break-word;
+}
+
+.lm-graph-panel-titles {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 0;
+}
+
+.lm-graph-panel-kind {
+	align-self: flex-start;
+	padding: 1px 8px;
+	border-radius: 999px;
+	font-size: 11px;
+	color: var(--lm-graph-color, #94a3b8);
+	border: 0.5px solid color-mix(in srgb, var(--lm-graph-color, #94a3b8) 55%, transparent);
+}
+
+.lm-graph-neighbor-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	max-height: 180px;
+	overflow: auto;
+}
+
+.lm-graph-panel-locate {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	font-size: 11px;
+	color: var(--dsw-alias-label-secondary, #a1a1a1);
+	word-break: break-all;
+}
+
+/* 本地兜底折叠（共享 Disclosure 缺席时使用） */
+.lm-graph-disclosure-local {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.lm-graph-disclosure-local-trigger {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	width: 100%;
+	min-height: 36px;
+	padding: 4px 8px;
+	border: 0.5px solid var(--dsw-alias-border-l3, #1f1f1f);
+	border-radius: 8px;
+	background: transparent;
+	color: var(--dsw-alias-label-secondary, #a1a1a1);
+	font-size: 12px;
+	text-align: left;
+	cursor: pointer;
+}
+
+.lm-graph-disclosure-local-count {
+	font-size: 11px;
+	color: var(--dsw-alias-label-tertiary, #737373);
+}
+
+/* 内距/限高/滚动由 bodyClassName 指定的 class 接管，这里不重复设置 */
+.lm-graph-disclosure-local-body {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.lm-graph-neighbor-link {
+	appearance: none;
+	display: inline-flex;
+	align-items: center;
+	min-height: 36px;
+	border: none;
+	background: transparent;
+	padding: 2px 0;
+	color: var(--dsw-alias-label-primary, #fafafa);
+	font-size: 12px;
+	text-align: left;
+	cursor: pointer;
+	text-decoration: underline;
+	text-decoration-style: dotted;
+	text-underline-offset: 2px;
+}
+
+.lm-graph-neighbor-link:hover {
+	color: var(--dsw-state-business-primary, #3b82f6);
+}
+
+.lm-graph-neighbor-sim {
+	margin-left: 6px;
+	font-size: 10px;
+	color: var(--dsw-alias-label-tertiary, #737373);
+}
+
+.lm-graph-panel-empty {
+	margin: 0;
+	color: var(--dsw-alias-label-tertiary, #737373);
+	font-size: 11px;
+}
+
+/* 状态图标：直接用宿主 primitives 的图标，这里只管排版、颜色与读取中的旋转 */
+.lm-graph-state-icon {
+	display: block;
+	margin: 0 auto 2px;
+	color: var(--dsw-alias-label-tertiary, #737373);
+}
+
+.lm-graph-state-icon.is-error {
+	color: var(--dsw-state-danger, #ef4444);
+}
+
+.lm-graph-state-icon.is-loading {
+	animation: lm-graph-spin 1s linear infinite;
+}
+
+@keyframes lm-graph-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* 覆盖层：加载 / 失败 / 空态 */
+.lm-graph-overlay {
+	position: absolute;
+	inset: 0;
+	z-index: 5;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	padding: 20px;
+	text-align: center;
+	font-size: 13px;
+	color: var(--dsw-alias-label-secondary, #a1a1a1);
+	background: color-mix(in srgb, var(--dsw-alias-bg-base, #050505) 72%, transparent);
+}
+
+.lm-graph-overlay-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	justify-content: center;
+}
+
+.lm-graph-overlay-detail {
+	margin: 0;
+	max-width: 320px;
+	font-size: 11px;
+	color: var(--dsw-alias-label-tertiary, #737373);
+	word-break: break-word;
+}
+
+.lm-graph-overlay-title {
+	margin: 0;
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--dsw-alias-label-primary, #fafafa);
+}
+
+.lm-graph-overlay-error .lm-graph-overlay-title {
+	color: var(--dsw-state-danger, #ef4444);
+}
+
+/* 窄屏 */
+@media (max-width: 560px) {
+	.lm-graph-toolbar-card {
+		top: 8px;
+		left: 8px;
+		width: min(320px, calc(100% - 16px));
+		max-width: calc(100% - 16px);
+		max-height: calc(100% - 16px);
+	}
+
+	.lm-graph-toolbar-header {
+		gap: 6px;
+		padding: 7px 8px;
+	}
+
+	.lm-graph-toolbar-body {
+		padding: 0 8px 8px;
+	}
+
+	.lm-graph-search {
+		flex: 1 1 120px;
+		min-width: 96px;
+		max-width: none;
+	}
+
+
+	.lm-graph-zoom-cluster {
+		right: 8px;
+		bottom: 8px;
+	}
+
+	.lm-graph-counts {
+		flex: 1 1 100%;
+		white-space: normal;
+	}
+
+	.lm-graph-btn {
+		min-width: 44px;
+		min-height: 44px;
+	}
+
+	.lm-graph-chip {
+		min-height: 44px;
+		padding: 0 14px;
+		font-size: 12px;
+	}
+
+	.lm-graph-search,
+	.lm-graph-search input {
+		min-height: 44px;
+	}
+
+	.lm-graph-switch {
+		min-height: 44px;
+	}
+
+	.lm-graph-neighbor-link {
+		min-height: 44px;
+	}
+
+	.lm-graph-legend {
+		left: 8px;
+		bottom: 10px;
+	}
+
+	.lm-graph-panel {
+		top: auto;
+		left: 8px;
+		right: 8px;
+		bottom: 8px;
+		width: auto;
+		max-height: 46%;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.lm-graph-node,
+	.lm-graph-edge,
+	.lm-graph-label,
+	.lm-graph-chip,
+	.lm-graph-btn {
+		transition: none !important;
+	}
+
+	.lm-graph-state-icon.is-loading {
+		animation: none;
+	}
+}

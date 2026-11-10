@@ -70,80 +70,70 @@ entry 标识统一为 { namespace: string, kind: "rule"|"fact"|"sop", key: strin
    - 上限 500 条
    - 每行还带展示用扩展字段：heat（热度分）、accessCount（访问次数）、lastAt（最近访问时间）、related（关联条目 {kind,key}[]）、relatedCount、summary（正文首行摘要，≤90 字符）、rank（注入排名，null 表示未排名）、injectionStatus（archived / rule / cold / hot）
 
-4. readEntry({ entry }) → { entry, title, content, revision, archived, evidence, sourceSession, createdAt, updatedAt }
+4. listEntriesPage({ namespace, kind?, query?, includeArchived?, offset?, limit? }) → { namespace, entries, facets, matched, returned, offset, limit, truncated }
+   - 条目表格的列表来源：过滤条件与 listEntries 相同（kind 省略 = 全部，query 省略 = 不过滤，includeArchived 为 false 时过滤归档），按 offset/limit 截取一段
+   - entries 每行沿用 listEntries 的展示字段（title、heat、accessCount、lastAt、related、relatedCount、summary、rank、injectionStatus 等）
+   - facets 是该空间的库存统计：total 与 active/archived 各自按 rule/fact/sop 计数；matched 是过滤后的命中数，returned 是本次返回条数，truncated 表示还有更多
+
+5. readEntry({ entry }) → { entry, title, content, revision, archived, evidence, sourceSession, createdAt, updatedAt }
    - evidence 是字符串，空串表示没有证据
    - sourceSession、createdAt、updatedAt 可为 null
    - 详情页展示用扩展字段：heat、accessCount、lastAt、related（{kind,key}[]）、sourceSeqs
 
-5. createEntry({ namespace, kind, topic, content, evidence }) → { entry, revision }
+6. createEntry({ namespace, kind, topic, content, evidence }) → { entry, revision }
    - 走 writeMemory 的 create 模式，写入后重建索引
 
-6. updateEntry({ entry, content, evidence?, ifRevision? }) → { revision }
+7. updateEntry({ entry, content, evidence?, ifRevision? }) → { revision }
    - ifRevision 提供且与当前 revision 不一致时报错，错误消息含 revision_conflict
    - evidence 省略 = 沿用原来源
 
-7. setArchived({ entry, archived: boolean }) → { ok: true }
+8. setArchived({ entry, archived: boolean }) → { ok: true }
    - 归档前先存一份历史快照，快照路径记在 meta.archivedFrom
    - 归档后重建索引
 
-8. entryHistory({ entry }) → Array<{ snapshotId, createdAt, revision, chars, summary, preview, change }>
+9. entryHistory({ entry }) → Array<{ snapshotId, createdAt, revision, chars, summary, preview, change }>
    - change 是 { contentDelta: number|null, evidenceChanged: boolean, initial: boolean }
    - contentDelta 是与上一版快照的字符数差；initial 为 true 表示这是初始版本
    - summary 取正文第一行的前 60 字符，preview 取正文前 2000 字符
    - 按时间降序，上限 50
 
-9. rollbackEntry({ entry, snapshotId }) → { revision }
+10. rollbackEntry({ entry, snapshotId }) → { revision }
    - 用指定快照恢复条目内容并重建索引
    - 快照不属于该条目时报错
 
-### 只读视图接口（10-12）
+### 只读视图接口（11-12）
 
 这三个方法只读不写，返回对象整体透传给前端，字段缺失时前端按 0 或空值兜底。
 
-10. getInjectionState({ namespace }) → { namespace, combinedText, sections, budgetChars, indexChars, targetChars, triggerChars, coldCount, rankedCount, omittedCount, includedCount, items }
+11. getInjectionState({ namespace }) → { namespace, combinedText, sections, budgetChars, indexChars, targetChars, triggerChars, coldCount, rankedCount, omittedCount, includedCount, items }
     - items 是当前命名空间全部活跃条目，每项 { kind, key, title, chars, heat, rank, status, relatedCount }
     - status 表示真实注入结果：rule（规则常驻）、included（已进入提示词）、cold（冷探索命中注入）、omitted（预算裁剪未进提示词）
     - combinedText 是合并后真正注入的提示词原文，供注入透视视图逐字展示
-
-11. getDiskMetrics({ namespace }) → { namespace, rules, facts, sops, archived, pending, size_bytes, content_bytes, history_bytes, pending_bytes, metadata_bytes, updatedAt, ...索引统计字段 }
-    - 字节口径来自 src/store.js 的 computeNamespaceStats，供维护驾驶舱画存储构成条
-    - 索引统计字段与 namespaceStats 同口径（indexChars、budgetChars、ruleCount 等）
 
 12. getMaintenanceReport({ namespace }) → { actionable, dedupe, mergeCandidates, cold, review, graph }
     - graph 是关系图谱视图的数据：nodes 每项 { id, kind, key, title, heat, chars, degree }
     - edges 每项 { source, target, type, similarity? }，type 为 related（meta.related 显式关联）或 similar（近重复/合并候选）
     - 报告本体来自命名空间下的 maintenance-report.json，文件缺失时返回空结构
 
-### 维护工作区接口（13-16）
-
-13. getMaintenanceWorkspace({ namespace }) → { namespace, scannedAt, counts: { active, archived, checked, candidates, cold }, candidates: Array<{ id, kind, reason, score, sharedTokens, left: { entry, title, revision, chars }, right: { entry, title, revision, chars } }>, cold: { items: Array<{ entry, title, revision, heat, ageDays, ageBasis, reason }>, total, criteria: { thresholdDays, maxHeat, ageBasis, excludes, heatBasis } } }
-    - 一次调用给出当前空间的完整候选与长期低热清单，两者来自同一次扫描快照
-    - 候选覆盖完全重复、近重复与同类内容重合（rule/fact/sop 之间），每对都给出真实入选原因与共有 token 数；不为凑数放宽阈值
-    - 冷条目与后台长期低热扫描同源同阈值（≥ thresholdDays 天、热度 ≤ maxHeat、排除规则与归档），年龄基准为 ageBasis（创建时间），全量按热度排序，不受列表分页或探索池影响
-    - 只读：不触发自动维护、不改索引、不发起模型请求、不记访问热度
-
-14. getMaintenanceReview({ namespace, entries: Array<{ namespace, kind, key }> }) → { namespace, items: Array<详情 DTO> }
-    - 一次最多两条，返回沿用 readEntry 的详情字段（正文、来源、当前 revision），供同页对比审阅
-    - 只读审阅，不增加访问热度
-
-15. mergeMaintenanceEntries({ namespace, left, right, keep: "left"|"right", ifLeftRevision, ifRightRevision, content, evidence? }) → { ok, namespace, kept: { entry, title, revision }, archived: { entry, revision }|null, related: [], partial, error? }
-    - 人工确认后的一次写操作：保留 keep 指向那条的**身份与标题**（本期不支持重命名，标题只读），正文与依据使用用户编辑后的内容；另一条被归档并指向保留项，原文件不删除
-    - 服务端校验：两条不同、**同命名空间**（跨空间直接拒绝）、同类型、均为活跃、**两侧 revision 必填**且一致；规则 100 字与证据等既有校验照常执行
-    - 在既有写锁内一次完成；冲突不覆盖，部分完成时以 partial 与 error 如实返回，不伪报成功
-    - 客户端请求若带 title 会被直接拒绝（本期不支持重命名）
-    - **两种 partial 形态，前端须分别处理且不得盲目重试**：
-      - `archived: null`：正文已保存，但**归档结果未确认**（可能已部分生效）→ 提示用户刷新后重新审阅并**重新选择仍活跃的候选**再建立新草稿；草稿保留供查看/复制，不自动重开旧对比对，禁止再次提交或更换保留目标
-      - `archived` 有值且错误标记为 `archive_applied_index_failed`：归档**已生效**，仅索引刷新失败 → 清草稿、关对比并提示真实状态；「重新检查」只刷新本页状态，不会修复索引
-
-16. archiveEntry({ entry, ifRevision }) → { ok: true, namespace, entry, revision }
-    - 单条人工归档，带 revision 校验（**revision 必填**）且必须与条目同命名空间，复用既有归档入口，不引入批量自动归档策略
-    - **归档已生效但索引刷新失败时抛错**，错误消息以稳定标记 `archive_applied_index_failed` 开头（该类错误原样透出，不会被套上会误导的失败前缀）⇒ 前端据此刷新状态即可，**不要再归档一次**
-
 ## 错误约定
 
 - 远程方法抛错消息是中文，格式为“动作名失败：原因”，例如“读取索引占用失败：…”、“回滚记忆失败：…”
-- revision 冲突的消息带 revision_conflict 字样，前端据此切到冲突提示
+- revision 冲突的消息带 revision_conflict 字样，前端据此切到冲突提示；该类错误原样透出，不会被套上会误导的动作前缀
 - namespaceStats 的返回解析是容错的，其余方法的返回按契约严格校验字段
+
+## 后台自动维护
+
+记忆的整理与维护由后台链路承担，界面负责查看与编辑：
+
+- **触发**：`cfg.maintainEveryTurns`（默认 20 回合）到点后，在命名空间写锁内执行一次 `runMaintain`
+- **内容**：
+  - 一致性修复（`reconcileEntries`）：让条目与索引保持一致
+  - 重复与候选识别：`dedupeEntries` 分出完全重复与近重复（`nearDupeThreshold`，默认 0.85），`findMergeCandidates` 给出相似候选（`mergeCandidateThreshold`，默认 0.45）；**识别结果只进报告**，不自动删除或合并条目
+  - 索引收敛：`syncIndex` 按预算重建 L1 索引，并记录超限与超目标情况（`indexTargetRatio`，默认 0.9）
+  - 长期低热识别：`findColdEntries` 给出存续 ≥ `coldReviewDays`（默认 90 天）且热度低的条目，排除规则与归档
+  - 语义复审状态：`syncReview` 记录是否需要模型复审
+- **产物**：运行结果写入命名空间的 `maintenance-report.json`（含 dedupe、mergeCandidates、cold、review、graph 与 actionable）；需要复审时由维护 agent（`src/maintenance-agent.js`）处理，运行记录写在 `maintenance-runs.json`
+- **关系图谱**读同一份报告的 graph 部分（见 12）
 
 ## 索引占用组件
 
@@ -201,20 +191,19 @@ entry 标识统一为 { namespace: string, kind: "rule"|"fact"|"sop", key: strin
 - slots.inject("main") 注册页面，key 为 layered-memory
 - slots.inject("sidebar.panellist") 注册侧栏入口，id 为 layered-memory，order 20，图标是书本形 SVG
 
-### 公共头部（四个视图共用）
+### 公共头部（三个视图共用）
 
 - 头部是 lm-browser-header-sticky，固定在页面顶部，不随视图切换而消失
 - 第一行：h1 标题、命名空间 SelectMenu、“新建条目”按钮
-- 第二行：BounceNav 弹性导航条，四个页签为条目表格、注入透视、关系图谱、维护驾驶舱，选中页签由药丸指示器跟随
-- 第三行：索引占用组件 IndexUsage，四个视图共用同一份 namespaceStats 数据，图例点击可切换条目类型过滤
+- 第二行：BounceNav 弹性导航条，三个页签为条目表格、注入透视、关系图谱，选中页签由药丸指示器跟随
+- 第三行：索引占用组件 IndexUsage，三个视图共用同一份 namespaceStats 数据，图例点击可切换条目类型过滤
 - 头部与索引占用组件位于内容区之外，切换视图不会重建它们
 
-### 四个工作台视图
+### 三个工作台视图
 
 - 条目表格（entries）：工具栏 + 数据表 + 右侧详情。默认列只留标题、类型与更新时间；标题、热度、字符数、更新时间可排序，行可展开显示摘要、关联条目与证据片段
 - 注入透视（injection）：逐条取舍名单 ＋ 实际注入提示词原文，数据来自 getInjectionState。名单每行只留标题与必要类型，「打开条目」集中在当前选中项的预览头部；召回词与来源预算收进高级设置折叠区
 - 关系图谱（graph）：力导向布局，节点位置由图渲染库计算；滚轮以指针为中心缩放、拖拽平移，缩放按钮与适屏走同一套变换；初次渲染与容器尺寸变化后自动适屏，边界计算含标签占位；默认只显示焦点节点、其一跳邻居与少量重要节点的标签，其余标签让位；悬停高亮相邻连线并淡化其余网络，点击固定选中并在信息卡展示类型、字符数与关联数；工具栏是一张可展开卡片，显示选项是卡片内与 header 同宽连续的展开区；数据来自 getMaintenanceReport 的 graph
-- 维护驾驶舱（cockpit）：上半是维护工作区 —— 当前空间的完整候选清单（每对带入选原因与共有 token 数）、同页对比审阅，人工确认后合并保留项或单条归档；下半是长期低热清单（与后台长期低热扫描同口径同阈值、年龄基准为创建时间、全量按热度排序），可逐条审阅归档。合并保留所选条目的身份与标题（本期不支持重命名），正文与依据可编辑；数据来自 getMaintenanceWorkspace、getMaintenanceReview、mergeMaintenanceEntries、archiveEntry，与 getDiskMetrics、getMaintenanceReport 并存
 
 ### 条目表格的空态与错误态
 

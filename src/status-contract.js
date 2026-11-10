@@ -195,40 +195,6 @@ function parseInjectionInput(value) {
 	if (value.query !== undefined) stringValue(value.query);
 	return value;
 }
-function parseNamespaceOnlyInput(value) {
-	inputObject(value, ["namespace"]);
-	text(value.namespace);
-	return value;
-}
-function parseReviewInput(value) {
-	inputObject(value, ["namespace", "entries"]);
-	text(value.namespace);
-	if (!Array.isArray(value.entries) || value.entries.length === 0) throw new TypeError("至少指定一条待审阅的记忆");
-	if (value.entries.length > 2) throw new TypeError("一次最多审阅两条记忆");
-	for (const row of value.entries) parseEntryRef(row);
-	return value;
-}
-function parseMergeInput(value) {
-	if (value && typeof value === "object" && Object.hasOwn(value, "title")) throw new TypeError("本期不支持重命名：标题随所选保留条目，合并请求不要带 title");
-	inputObject(value, ["namespace", "left", "right", "keep", "ifLeftRevision", "ifRightRevision", "content"], ["evidence"]);
-	text(value.namespace);
-	parseEntryRef(value.left);
-	parseEntryRef(value.right);
-	if (value.keep !== "left" && value.keep !== "right") throw new TypeError("keep 必须是 left 或 right");
-	text(value.ifLeftRevision);
-	text(value.ifRightRevision);
-	stringValue(value.content);
-	if (value.title !== undefined) stringValue(value.title);
-	if (value.evidence !== undefined) stringValue(value.evidence);
-	return value;
-}
-function parseArchiveInput(value) {
-	inputObject(value, ["entry", "ifRevision"], ["namespace"]);
-	parseEntryRef(value.entry);
-	text(value.ifRevision);
-	if (value.namespace !== undefined) text(value.namespace);
-	return value;
-}
 // 容错解析：缺字段或类型不符按 0 处理，避免旧服务端数据让整个面板报错。
 function parseNamespaceStats(value) {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("索引占用统计必须是对象");
@@ -350,141 +316,7 @@ function parseHistory(value) {
 	}
 	return value;
 }
-function parseObjectResult(value) {
-	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("结果必须是对象");
-	return value;
-}
-function parseEntryRef(value) {
-	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("条目引用必须是对象");
-	exactObject(value, ["namespace", "kind", "key"]);
-	text(value.namespace);
-	if (!["rule", "fact", "sop"].includes(value.kind)) throw new TypeError("未知的记忆类型");
-	text(value.key);
-	return value;
-}
-function parseCandidateSide(value) {
-	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("候选端必须是对象");
-	exactObject(value, ["entry", "title", "revision", "chars"]);
-	parseEntryRef(value.entry);
-	text(value.title);
-	text(value.revision);
-	count(value.chars);
-	return value;
-}
-function parseCandidate(value) {
-	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("候选必须是对象");
-	exactObject(value, ["id", "kind", "reason", "score", "sharedTokens", "left", "right"]);
-	text(value.id);
-	if (!["rule", "fact", "sop"].includes(value.kind)) throw new TypeError("未知的记忆类型");
-	if (!["exact", "near", "overlap", "contains"].includes(value.reason)) throw new TypeError("未知的候选理由");
-	number(value.score);
-	count(value.sharedTokens);
-	parseCandidateSide(value.left);
-	parseCandidateSide(value.right);
-	return value;
-}
-function parseColdItem(value) {
-	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("冷条目必须是对象");
-	exactObject(value, ["entry", "title", "revision", "heat", "ageDays", "ageBasis", "reason"]);
-	parseEntryRef(value.entry);
-	text(value.title);
-	if (value.revision !== null) text(value.revision);
-	number(value.heat);
-	if (value.ageDays !== null) count(value.ageDays);
-	text(value.ageBasis);
-	text(value.reason);
-	return value;
-}
-function parseWorkspace(value) {
-	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("维护工作区必须是对象");
-	exactObject(value, ["namespace", "scannedAt", "counts", "candidates", "cold"]);
-	text(value.namespace);
-	text(value.scannedAt);
-	const counts = value.counts;
-	if (!counts || typeof counts !== "object" || Array.isArray(counts)) throw new TypeError("工作区计数必须是对象");
-	for (const key of ["active", "archived", "checked", "candidates", "cold"]) count(counts[key]);
-	if (!Array.isArray(value.candidates)) throw new TypeError("候选必须是数组");
-	for (const row of value.candidates) parseCandidate(row);
-	const cold = value.cold;
-	if (!cold || typeof cold !== "object" || Array.isArray(cold)) throw new TypeError("冷条目集合必须是对象");
-	exactObject(cold, ["items", "total", "criteria"]);
-	if (!Array.isArray(cold.items)) throw new TypeError("冷条目必须是数组");
-	for (const row of cold.items) parseColdItem(row);
-	count(cold.total);
-	const criteria = cold.criteria;
-	if (!criteria || typeof criteria !== "object" || Array.isArray(criteria)) throw new TypeError("冷条目判据必须是对象");
-	exactObject(criteria, ["thresholdDays", "maxHeat", "ageBasis", "excludes", "heatBasis"]);
-	count(criteria.thresholdDays);
-	number(criteria.maxHeat);
-	text(criteria.ageBasis);
-	if (!Array.isArray(criteria.excludes)) throw new TypeError("排除项必须是数组");
-	for (const row of criteria.excludes) text(row);
-	text(criteria.heatBasis);
-	return value;
-}
-function parseDetail(value) {
-	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("记忆详情必须是对象");
-	parseEntry(value.entry);
-	text(value.title);
-	stringValue(value.content);
-	text(value.revision);
-	boolean(value.archived);
-	stringValue(value.evidence);
-	nullableText(value.sourceSession);
-	nullableText(value.createdAt);
-	nullableText(value.updatedAt);
-	number(value.heat);
-	count(value.accessCount);
-	nullableText(value.lastAt);
-	parseRelatedList(value.related);
-	if (!Array.isArray(value.sourceSeqs)) throw new TypeError("来源事件必须是数组");
-	return value;
-}
-function parseReview(value) {
-	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("审阅内容必须是对象");
-	exactObject(value, ["namespace", "items"]);
-	text(value.namespace);
-	if (!Array.isArray(value.items)) throw new TypeError("审阅条目必须是数组");
-	for (const row of value.items) parseDetail(row);
-	return value;
-}
-function parseMergeResult(value) {
-	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("合并结果必须是对象");
-	boolean(value.ok);
-	text(value.namespace);
-	boolean(value.partial);
-	const kept = value.kept;
-	if (!kept || typeof kept !== "object" || Array.isArray(kept)) throw new TypeError("合并保留方必须是对象");
-	exactObject(kept, ["entry", "title", "revision"]);
-	parseEntryRef(kept.entry);
-	text(kept.title);
-	text(kept.revision);
-	if (value.archived !== null && value.archived !== undefined) {
-		const archived = value.archived;
-		if (!archived || typeof archived !== "object" || Array.isArray(archived)) throw new TypeError("合并归档方必须是对象");
-		exactObject(archived, ["entry", "revision"]);
-		parseEntryRef(archived.entry);
-		text(archived.revision);
-	}
-	if (!Array.isArray(value.related)) throw new TypeError("关联列表必须是数组");
-	for (const row of value.related) {
-		if (!row || typeof row !== "object") throw new TypeError("关联项必须是对象");
-		text(row.namespace);
-		text(row.kind);
-		text(row.key);
-	}
-	if (value.error !== undefined && value.error !== null) stringValue(value.error);
-	return value;
-}
-function parseArchiveResult(value) {
-	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("归档结果必须是对象");
-	exactObject(value, ["ok", "namespace", "entry", "revision"]);
-	if (value.ok !== true) throw new TypeError("归档结果不正确");
-	text(value.namespace);
-	parseEntryRef(value.entry);
-	text(value.revision);
-	return value;
-}
+
 function parseInjectionItem(value) {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("注入条目必须是对象");
 	text(value.kind);
@@ -605,11 +437,6 @@ export const STORE_REMOTE = {
 		storeDescriptor("entryHistory", parseHistory, parseEntryInput),
 		storeDescriptor("rollbackEntry", parseRevision, parseRollbackInput),
 		storeDescriptor("getInjectionState", parseInjectionState, parseInjectionInput),
-		storeDescriptor("getDiskMetrics", parseObjectResult, parseNamespaceInput),
 		storeDescriptor("getMaintenanceReport", parseMaintenanceReport, parseNamespaceInput),
-		storeDescriptor("getMaintenanceWorkspace", parseWorkspace, parseNamespaceOnlyInput),
-		storeDescriptor("getMaintenanceReview", parseReview, parseReviewInput),
-		storeDescriptor("mergeMaintenanceEntries", parseMergeResult, parseMergeInput),
-		storeDescriptor("archiveEntry", parseArchiveResult, parseArchiveInput),
 	],
 };

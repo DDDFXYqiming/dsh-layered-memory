@@ -32,7 +32,7 @@ export function createMemoryBrowserClient(require, styles, runtime) {
 			"usage.label.head": "说明", "usage.label.rules": "规则", "usage.label.facts": "事实目录", "usage.label.sops": "经验目录",
 			"kind.rule": "规则", "kind.fact": "事实", "kind.sop": "经验", kindLabel: "类型", ruleEvidencePlaceholder: "输入规则依据，例如用户的明确指令",
 			"usage.tip.head": "索引头部说明", "usage.tip.rules": "L0 红线规则", "usage.tip.facts": "事实条目目录 (facts.md)", "usage.tip.sops": "任务经验目录 (sops/)",
-			tabEntries: "条目表格", tabInjection: "注入透视", tabGraph: "关系图谱", tabCockpit: "维护驾驶舱",
+			tabEntries: "条目表格", tabInjection: "注入透视", tabGraph: "关系图谱",
 			backToList: "← 返回列表",
 			heatLabel: "热度", accessLabel: "访问", statusLabel: "流态",
 			inventoryLabel: "库存", resultCount: "{count} 条结果", clearFilter: "清除筛选",
@@ -42,25 +42,7 @@ export function createMemoryBrowserClient(require, styles, runtime) {
 			statusUnknown: "未判定",
 			previewScope: "空间预览", coldCandidateTitle: "候选",
 			sourceBudget: "预算", sourceTarget: "目标", sourceColdRatio: "冷比例", sourceRecall: "召回词",
-			copyReferenceFailed: "复制失败，请从「来源与依据」手动复制引用",
-			statusActive: "活跃", statusArchived: "归档",
-			coldTitle: "长期低热待审",
-			cockpitTitle: "维护驾驶舱", recheck: "重新检查", checking: "检查中…", notChecked: "尚未检查",
-			scannedAt: "检查于 {time}", checkedCount: "本次检查覆盖 {count} 条", candidateTitle: "相似与合并候选", noCandidates: "本次检查未发现候选",
-			candidateReasonColumn: "入选理由", candidateScoreColumn: "相似分",
-			candidateSideOne: "条目一", candidateSideTwo: "条目二", kindRuleLabel: "规则",
-			candidateActionColumn: "操作", candidateCompareAction: "对比", candidateDecisionTitle: "判定详情", candidateSharedTokens: "共有 token",
-			reasonExact: "内容相同", reasonNear: "高度相似", reasonOverlap: "内容重合", reasonContains: "包含关系",
-			coldCriteriaLabel: "判定口径", coldDaysUnit: "天", coldHeatBase: "基础访问热度", coldExcludes: "排除",
-			coldAgeBasisCreated: "以创建时间为准", mergePartial: "正文已保存，归档状态未确认。请重新审阅确认后再决定是否重试。", mergeIndexRefreshFailed: "合并与归档已完成，但 L1 索引刷新失败，索引目录可能仍保留被归档条目。「重新检查」只刷新本页状态，不会修复索引。", mergeIndexFailedTitle: "索引刷新失败", archiveAppliedIndexFailed: "归档已生效，但 L1 索引刷新失败，索引目录可能仍保留该条目；不会重复归档。「重新检查」只刷新本页状态。", reReview: "重新审阅",
-			keepSideLeft: "保留第一条", keepSideRight: "保留第二条",
-			compareTitle: "候选对比", candidateMetaTitle: "元数据与来源",
-			mergeDraftTitle: "编辑合并草稿", keepWhich: "保留哪一条", mergeKeptTitle: "保留标题",
-			mergeSubmit: "合并并归档另一条", mergeConfirmTitle: "确认合并", mergeKeepLabel: "将保留", mergeArchiveLabel: "将归档",
-			mergeDone: "已合并并归档", mergeFailedTitle: "合并未完成", mergeConflict: "其中一条已被修改，请重新加载后再合并。",
-			noColdEntries: "本次检查没有符合条件的长期低热条目",
-			coldReasonText: "条目存续 {days} 天 / 低使用热度 {heat}", coldArchiveConfirmTitle: "确认归档",
-			coldArchiveConfirmBody: "将归档这条长期低热条目", coldArchiveButton: "确认归档",
+			copyReferenceFailed: "复制失败，请从「来源与依据」手动复制引用", noCandidates: "本次检查未发现候选",
 			storeEntriesTitle: "条目",
 			retry: "重试", loadFailed: "读取失败", loadFailedHint: "请求失败，可以重试。", details: "详情", emptyEntries: "没有匹配的条目",
 			rawPrompt: "原文", groupedPrompt: "分组", copyPrompt: "复制原文", copied: "已复制", copyFailed: "复制失败，请手动选择原文",
@@ -71,7 +53,7 @@ export function createMemoryBrowserClient(require, styles, runtime) {
 			confirmTitle: "请确认", confirm: "继续", injectionEmpty: "当前筛选没有条目",
 			sourceTitle: "来源与依据", relatedTitle: "关联", historyTitle: "历史",
 			moreActions: "更多", copyReference: "复制引用", referenceCopied: "已复制引用",
-			entryKey: "标识", noEvidence: "暂无依据", showAll: "展开全部", showLess: "收起",
+			entryKey: "标识", noEvidence: "暂无依据",
 			filters: "筛选", advancedTitle: "高级设置",
 			injectionPaneLabel: "切换面板", injectionListPane: "名单", injectionPreviewPane: "预览",
 		},
@@ -91,7 +73,7 @@ export function createMemoryBrowserClient(require, styles, runtime) {
 			"usage.label.head": "Header", "usage.label.rules": "Rules", "usage.label.facts": "Facts", "usage.label.sops": "Skills",
 			"kind.rule": "Rule", "kind.fact": "Fact", "kind.sop": "Skill", kindLabel: "Type", ruleEvidencePlaceholder: "Rule evidence",
 			"usage.tip.head": "Index header", "usage.tip.rules": "L0 Rules", "usage.tip.facts": "Facts (facts.md)", "usage.tip.sops": "Skills (sops/)",
-			tabEntries: "Data Table", tabInjection: "Injection Flow", tabGraph: "Memory Graph", tabCockpit: "Maintenance Cockpit",
+			tabEntries: "Data Table", tabInjection: "Injection Flow", tabGraph: "Memory Graph",
 			backToList: "← Back",
 			heatLabel: "Heat", accessLabel: "Access", statusLabel: "Status",
 			inventoryLabel: "Inventory", resultCount: "{count} results", clearFilter: "Clear filter",
@@ -101,25 +83,7 @@ export function createMemoryBrowserClient(require, styles, runtime) {
 			statusUnknown: "Undetermined",
 			previewScope: "Space preview", coldCandidateTitle: "Candidates",
 			sourceBudget: "Budget", sourceTarget: "Target", sourceColdRatio: "Cold ratio", sourceRecall: "Recall query",
-			copyReferenceFailed: "Copy failed, copy the reference manually from Source",
-			statusActive: "Active", statusArchived: "Archived",
-			coldTitle: "Long-term low-heat entries",
-			cockpitTitle: "Maintenance Cockpit", recheck: "Re-check", checking: "Checking…", notChecked: "Not checked yet",
-			scannedAt: "Checked at {time}", checkedCount: "Checked {count} entries", candidateTitle: "Similar & merge candidates", noCandidates: "No candidates found in this check",
-			candidateReasonColumn: "Reason", candidateScoreColumn: "Score",
-			candidateSideOne: "Entry one", candidateSideTwo: "Entry two", kindRuleLabel: "Rule",
-			candidateActionColumn: "Action", candidateCompareAction: "Compare", candidateDecisionTitle: "Decision details", candidateSharedTokens: "Shared tokens",
-			reasonExact: "Identical", reasonNear: "Near duplicate", reasonOverlap: "Overlapping", reasonContains: "Contains",
-			coldCriteriaLabel: "Criteria", coldDaysUnit: "days", coldHeatBase: "base access heat", coldExcludes: "excludes",
-			coldAgeBasisCreated: "based on creation time", mergePartial: "The content was saved but the archive state is not confirmed. Review the entries again and decide whether to retry.", mergeIndexRefreshFailed: "The merge and archive succeeded, but the L1 index refresh failed, so the archived entry may still be listed in the index. Re-check only refreshes this page; it does not repair the index.", mergeIndexFailedTitle: "Index refresh failed", archiveAppliedIndexFailed: "The archive took effect but the L1 index refresh failed, so the entry may still be listed in the index. It will not be archived again. Re-check only refreshes this page.", reReview: "Review again",
-			keepSideLeft: "Keep the first", keepSideRight: "Keep the second",
-			compareTitle: "Candidate comparison", candidateMetaTitle: "Metadata & source",
-			mergeDraftTitle: "Edit merge draft", keepWhich: "Which one to keep", mergeKeptTitle: "Kept title",
-			mergeSubmit: "Merge and archive the other", mergeConfirmTitle: "Confirm merge", mergeKeepLabel: "Will keep", mergeArchiveLabel: "Will archive",
-			mergeDone: "Merged and archived", mergeFailedTitle: "Merge failed", mergeConflict: "One entry was modified; reload before merging.",
-			noColdEntries: "No long-term low-heat entries matched this check",
-			coldReasonText: "Entry age {days}d / low usage heat {heat}", coldArchiveConfirmTitle: "Confirm archive",
-			coldArchiveConfirmBody: "This long-term low-heat entry will be archived", coldArchiveButton: "Archive this entry",
+			copyReferenceFailed: "Copy failed, copy the reference manually from Source", noCandidates: "No candidates found in this check",
 			storeEntriesTitle: "Entries",
 			retry: "Retry", loadFailed: "Failed to load", loadFailedHint: "The request failed. You can retry.", details: "Details", emptyEntries: "No matching entries",
 			rawPrompt: "Raw", groupedPrompt: "Grouped", copyPrompt: "Copy raw text", copied: "Copied", copyFailed: "Copy failed, select the raw text manually",
@@ -130,7 +94,7 @@ export function createMemoryBrowserClient(require, styles, runtime) {
 			confirmTitle: "Please confirm", confirm: "Continue", injectionEmpty: "No entries in the current filter",
 			sourceTitle: "Source & evidence", relatedTitle: "Related", historyTitle: "History",
 			moreActions: "More", copyReference: "Copy reference", referenceCopied: "Reference copied",
-			entryKey: "Key", noEvidence: "No evidence", showAll: "Show all", showLess: "Show less",
+			entryKey: "Key", noEvidence: "No evidence",
 			filters: "Filters", advancedTitle: "Advanced",
 			injectionPaneLabel: "Switch pane", injectionListPane: "List", injectionPreviewPane: "Preview",
 		}
@@ -231,8 +195,7 @@ export function createMemoryBrowserClient(require, styles, runtime) {
 			{ id: "entries", label: t("tabEntries") },
 			{ id: "injection", label: t("tabInjection") },
 			{ id: "graph", label: t("tabGraph") },
-			{ id: "cockpit", label: t("tabCockpit") },
-		];
+			];
 		const activeIndex = Math.max(0, tabs.findIndex(tab => tab.id === currentTab));
 		const containerRef = React.useRef(null);
 		const [tabWidth, setTabWidth] = React.useState(98);
@@ -796,508 +759,6 @@ export function createMemoryBrowserClient(require, styles, runtime) {
 	}
 
 	// 维护驾驶舱：真实数据绑定
-	// 驾驶舱数据来自后台维护工作区（纯只读）：候选 left/right 两端、长期低热集合与判定口径。
-	const mapCandidate = raw => ({
-		id: raw?.id || "",
-		kind: raw?.kind || "",
-		reason: raw?.reason || "",
-		score: raw?.score ?? null,
-		sharedTokens: raw?.sharedTokens ?? null,
-		left: raw?.left || null,
-		right: raw?.right || null,
-	});
-
-	const mapColdEntry = raw => ({
-		entry: raw?.entry || null,
-		title: raw?.title || raw?.entry?.key || "",
-		revision: raw?.revision ?? null,
-		heat: raw?.heat ?? null,
-		ageDays: raw?.ageDays ?? null,
-		ageBasis: raw?.ageBasis || "",
-		reason: raw?.reason || "",
-	});
-
-	function CockpitView({ controls, namespace, draft, onDraftChange, onDiscardRequest, onBusyChange, onRefreshEntries, t }) {
-		const [workspace, setWorkspace] = React.useState(null);
-		const [workspaceBusy, setWorkspaceBusy] = React.useState(false);
-		const [workspaceError, setWorkspaceError] = React.useState(null);
-		const [candidate, setCandidate] = React.useState(null);
-		const [review, setReview] = React.useState(null);
-		const [reviewBusy, setReviewBusy] = React.useState(false);
-		const [reviewError, setReviewError] = React.useState(null);
-		const [submitBusy, setSubmitBusy] = React.useState(false);
-		const [submitError, setSubmitError] = React.useState(null);
-		const [submitNotice, setSubmitNotice] = React.useState(null);
-		const [coldTarget, setColdTarget] = React.useState(null);
-		const [coldDetail, setColdDetail] = React.useState(null);
-		const [coldBusy, setColdBusy] = React.useState(false);
-		const [coldError, setColdError] = React.useState(null);
-		const [confirmState, setConfirmState] = React.useState(null);
-		const [metaOpen, setMetaOpen] = React.useState(false);
-		const [decisionOpen, setDecisionOpen] = React.useState(false);
-		const [coldMetaOpen, setColdMetaOpen] = React.useState(false);
-		const [showAllCandidates, setShowAllCandidates] = React.useState(false);
-		const [showAllCold, setShowAllCold] = React.useState(false);
-		const [partial, setPartial] = React.useState(false);
-		const [pendingRebuild, setPendingRebuild] = React.useState(false);
-		const [indexWarning, setIndexWarning] = React.useState(null);
-		const workspaceRef = React.useRef(0);
-		const reviewRef = React.useRef(0);
-
-		const load = React.useCallback(() => {
-			const token = ++workspaceRef.current;
-			if (!namespace) {
-				setWorkspace(null);
-				setWorkspaceBusy(false);
-				return;
-			}
-			setWorkspaceBusy(true);
-			setWorkspaceError(null);
-			controls.getMaintenanceWorkspace({ namespace })
-				.then(value => {
-					if (token !== workspaceRef.current) return;
-					setWorkspace(value || null);
-				})
-				.catch(failure => {
-					if (token !== workspaceRef.current) return;
-					setWorkspace(null);
-					setWorkspaceError(String(failure?.message || failure));
-				})
-				.finally(() => {
-					if (token === workspaceRef.current) setWorkspaceBusy(false);
-				});
-		}, [controls, namespace]);
-
-		React.useEffect(() => { load(); }, [load]);
-
-		// 空间切换或重新检查后，迟回包不得覆盖当前结果。
-		React.useEffect(() => {
-			reviewRef.current += 1;
-			setCandidate(null);
-			setReview(null);
-			setColdTarget(null);
-			setColdDetail(null);
-			setSubmitError(null);
-			setSubmitNotice(null);
-			setIndexWarning(null);
-			setWorkspace(null);
-		}, [namespace]);
-
-		React.useEffect(() => {
-			if (!draft || candidate || !draft.left || !draft.right) return;
-			setCandidate({ id: "", kind: draft.kind || "", reason: "", score: null, left: { entry: draft.left, title: draft.title }, right: { entry: draft.right, title: "" } });
-		}, [draft, candidate]);
-
-		// 重新审阅：先经父的弃稿确认，确认后关闭旧对比并刷新工作区，由用户重新选择候选。
-		React.useEffect(() => {
-			if (!pendingRebuild || draft) return;
-			setPendingRebuild(false);
-			setCandidate(null);
-			setReview(null);
-			setPartial(false);
-			setSubmitError(null);
-			setShowAllCandidates(false);
-			load();
-		}, [pendingRebuild, draft]);
-
-		const candidates = (workspace?.candidates || []).map(mapCandidate);
-		const coldEntries = (workspace?.cold?.items || []).map(mapColdEntry);
-		const visibleCandidates = showAllCandidates ? candidates : candidates.slice(0, 6);
-		const visibleCold = showAllCold ? coldEntries : coldEntries.slice(0, 6);
-		const criteria = workspace?.cold?.criteria || null;
-		const counts = workspace?.counts || {};
-		const scannedAt = workspace?.scannedAt || null;
-
-		const reasonLabel = reason => {
-			const map = { exact: t("reasonExact"), near: t("reasonNear"), overlap: t("reasonOverlap"), contains: t("reasonContains") };
-			return map[reason] || reason || "";
-		};
-
-		const sideTitle = side => (side ? (side.title || side.entry?.key || "") : "");
-		const sideEntry = side => (side ? side.entry : null);
-
-		const ageBasisLabel = basis => (basis === "meta.createdAt" ? t("coldAgeBasisCreated") : basis || "");
-
-		const excludeLabel = value => {
-			const map = { rule: t("kindRuleLabel"), archived: t("archived") };
-			return map[value] || value;
-		};
-		const criteriaText = criteria
-			? `${t("coldCriteriaLabel")}: ${ageBasisLabel(criteria.ageBasis)} ≥ ${criteria.thresholdDays ?? "-"} ${t("coldDaysUnit")} · ${t("coldHeatBase")} < ${criteria.maxHeat ?? "-"}${Array.isArray(criteria.excludes) && criteria.excludes.length ? ` · ${t("coldExcludes")} ${criteria.excludes.map(excludeLabel).join(" / ")}` : ""}`
-			: "";
-		const criteriaTitle = criteria && criteria.heatBasis
-			? String(criteria.heatBasis).replace(/^entryHeat\s*/, "").replace("基础热度", t("coldHeatBase"))
-			: "";
-
-		const candidateColumns = [
-			{
-				id: "sideOne",
-				header: t("candidateSideOne"),
-				width: "34%",
-				accessorFn: row => sideTitle(row.left),
-				cell: ({ row }) => h("span", { className: "lm-cockpit-cell-title", title: sideTitle(row.left) }, sideTitle(row.left)),
-			},
-			{
-				id: "sideTwo",
-				header: t("candidateSideTwo"),
-				width: "34%",
-				accessorFn: row => sideTitle(row.right),
-				cell: ({ row }) => h("span", { className: "lm-cockpit-cell-title", title: sideTitle(row.right) }, sideTitle(row.right)),
-			},
-			{ id: "reason", header: t("candidateReasonColumn"), width: "18%", accessorFn: row => row.reason, cell: ({ row }) => h("span", { className: "lm-cockpit-cell-reason" }, reasonLabel(row.reason)) },
-			{
-				id: "action",
-				header: t("candidateActionColumn"),
-				width: "14%",
-				accessorFn: () => "",
-				cell: ({ row }) => h(Button, { variant: "outline", size: "sm", onClick: () => openCandidate(row) }, t("candidateCompareAction")),
-			},
-		];
-
-		// 两端详情一次取回；按身份对齐，避免依赖返回顺序。
-		const loadReview = (entries, apply) => {
-			const token = ++reviewRef.current;
-			setReviewBusy(true);
-			setReviewError(null);
-			controls.getMaintenanceReview({ namespace, entries })
-				.then(value => {
-					if (token !== reviewRef.current) return;
-					const items = (value && value.items) || [];
-					const byKey = new Map(items.map(item => [`${item.entry?.namespace}|${item.entry?.kind}|${item.entry?.key}`, item]));
-					const pick = ref => byKey.get(`${ref?.namespace}|${ref?.kind}|${ref?.key}`) || null;
-					apply(items, pick);
-				})
-				.catch(failure => {
-					if (token !== reviewRef.current) return;
-					setReviewError(String(failure?.message || failure));
-				})
-				.finally(() => {
-					if (token === reviewRef.current) setReviewBusy(false);
-				});
-		};
-
-		const openCandidate = row => {
-			setCandidate(row);
-			setPartial(false);
-			setMetaOpen(false);
-			setDecisionOpen(false);
-			setReview(null);
-			setSubmitError(null);
-			setSubmitNotice(null);
-			loadReview([sideEntry(row.left), sideEntry(row.right)], (items, pick) => {
-				setReview({ left: pick(sideEntry(row.left)) || items[0] || null, right: pick(sideEntry(row.right)) || items[1] || null });
-			});
-		};
-
-		const closeCandidate = () => {
-			reviewRef.current += 1;
-			setCandidate(null);
-			setReview(null);
-			setReviewError(null);
-			setSubmitError(null);
-			setSubmitNotice(null);
-		};
-
-		const joinBodies = (first, second) => {
-			const left = String(first || "").trim();
-			const right = String(second || "").trim();
-			if (!left) return right;
-			if (!right) return left;
-			if (left === right) return left;
-			return left + "\n\n---\n\n" + right;
-		};
-
-		const buildDraft = (keep, pair) => {
-			const kept = keep === "right" ? pair.right : pair.left;
-			const other = keep === "right" ? pair.left : pair.right;
-			const exact = candidate?.reason === "exact";
-			const content = exact ? String(kept?.content || "") : joinBodies(kept?.content, other?.content);
-			const evidence = exact ? String(kept?.evidence || "") : joinBodies(kept?.evidence, other?.evidence);
-			const next = {
-				keep,
-				kind: candidate?.kind || kept?.entry?.kind || "",
-				title: kept?.title || sideTitle(candidate?.left),
-				content,
-				evidence,
-				left: sideEntry(candidate?.left),
-				right: sideEntry(candidate?.right),
-				leftRevision: pair.left?.revision ?? null,
-				rightRevision: pair.right?.revision ?? null,
-			};
-			next.baseline = { title: next.title, content: next.content, evidence: next.evidence };
-			return next;
-		};
-
-		const startMerge = () => {
-			if (!review || !candidate) return;
-			onDraftChange(buildDraft(draft?.keep || "left", review));
-		};
-
-		// 切换保留身份不重置用户已经编辑过的正文；只有标题随保留方变化。
-		const setKeep = keep => {
-			if (!draft || !review) return;
-			const kept = keep === "right" ? review.right : review.left;
-			const title = kept?.title || draft.title;
-			onDraftChange({ ...draft, keep, title, baseline: { ...(draft.baseline || {}), title } });
-		};
-
-		const ruleOverLimit = draft && draft.kind === "rule" && ruleContentLength(draft.content) > 100;
-
-		const submitMerge = () => {
-			if (!draft || submitBusy || ruleOverLimit) return;
-			setConfirmState({
-				title: t("mergeConfirmTitle"),
-				message: h("div", null,
-					h("p", null, `${t("mergeKeepLabel")}: ${draft.title}`),
-					h("p", null, `${t("mergeArchiveLabel")}: ${draft.keep === "left" ? sideTitle(candidate?.right) : sideTitle(candidate?.left)}`)),
-				confirmLabel: t("mergeSubmit"),
-				cancelLabel: t("cancel"),
-				onConfirm: () => { setConfirmState(null); runMerge(); },
-				onCancel: () => setConfirmState(null),
-			});
-		};
-
-		const runMerge = async () => {
-			if (!draft || submitBusy) return;
-			const keep = draft.keep === "right" ? "right" : "left";
-			setSubmitBusy(true);
-			setSubmitError(null);
-			onBusyChange && onBusyChange(true);
-			try {
-				const result = await controls.mergeMaintenanceEntries({
-					namespace,
-					left: draft.left,
-					right: draft.right,
-					keep,
-					ifLeftRevision: draft.leftRevision,
-					ifRightRevision: draft.rightRevision,
-					content: draft.content,
-					evidence: draft.evidence,
-				});
-				if (result && result.partial) {
-					const errorText = String(result.error || "");
-					if (result.archived || errorText.includes("archive_applied_index_failed")) {
-						// 合并与归档都已生效，只是 L1 索引刷新失败：写操作已完成，草稿作废。
-						setPartial(false);
-						onDraftChange(null);
-						closeCandidate();
-						setIndexWarning(t("mergeIndexRefreshFailed"));
-						load();
-						onRefreshEntries && onRefreshEntries();
-						return;
-					}
-					setPartial(true);
-					setSubmitError(t("mergePartial"));
-					load();
-					onRefreshEntries && onRefreshEntries();
-					return;
-				}
-				if (!result || result.ok !== true) {
-					setSubmitError(t("mergeFailedTitle"));
-					return;
-				}
-				setPartial(false);
-				onDraftChange(null);
-				closeCandidate();
-				setSubmitNotice(t("mergeDone"));
-				load();
-				onRefreshEntries && onRefreshEntries();
-			} catch (failure) {
-				const message = String(failure?.message || failure);
-				setSubmitError(message.includes("revision_conflict") ? t("mergeConflict") : message);
-			} finally {
-				setSubmitBusy(false);
-				onBusyChange && onBusyChange(false);
-			}
-		};
-
-		const openCold = item => {
-			setColdTarget(item);
-			setColdMetaOpen(false);
-			setColdDetail(null);
-			setColdError(null);
-			loadReview([item.entry], items => { setColdDetail(items[0] || null); });
-		};
-
-		const closeCold = () => {
-			reviewRef.current += 1;
-			setColdTarget(null);
-			setColdDetail(null);
-			setColdError(null);
-		};
-
-		const submitArchiveCold = () => {
-			if (!coldTarget || submitBusy) return;
-			setConfirmState({
-				title: t("coldArchiveConfirmTitle"),
-				message: h("p", null, `${t("coldArchiveConfirmBody")}: ${coldTarget.title}`),
-				confirmLabel: t("coldArchiveButton"),
-				cancelLabel: t("cancel"),
-				onConfirm: () => { setConfirmState(null); runArchiveCold(); },
-				onCancel: () => setConfirmState(null),
-			});
-		};
-
-		const runArchiveCold = async () => {
-			if (!coldTarget) return;
-			const entry = coldTarget.entry;
-			const revision = coldDetail?.revision ?? coldTarget.revision;
-			setSubmitBusy(true);
-			setColdError(null);
-			onBusyChange && onBusyChange(true);
-			try {
-				await controls.archiveEntry({ namespace, entry, ifRevision: revision });
-				closeCold();
-				setSubmitNotice(t("archivedDone"));
-				load();
-				onRefreshEntries && onRefreshEntries();
-			} catch (failure) {
-				const message = String(failure?.message || failure);
-				if (message.includes("archive_applied_index_failed")) {
-					closeCold();
-					setIndexWarning(t("archiveAppliedIndexFailed"));
-					load();
-					onRefreshEntries && onRefreshEntries();
-					return;
-				}
-				setColdError(message.includes("revision_conflict") ? t("conflict") : message);
-			} finally {
-				setSubmitBusy(false);
-				onBusyChange && onBusyChange(false);
-			}
-		};
-
-		const sideBlock = (label, side) => h("div", { className: "lm-cockpit-compare-side" },
-			h("div", { className: "lm-cockpit-compare-head" },
-				h("span", { className: "lm-cockpit-side-label" }, label),
-				h("strong", { className: "lm-cockpit-side-title", title: side?.title || "" }, side?.title || ""),
-				h("span", { className: "lm-browser-kind" }, side?.entry?.kind ? kindText(side.entry.kind, t) : "")),
-			h("div", { className: "lm-browser-md-preview lm-cockpit-content" }, renderMarkdown(side?.content || "")),
-			h(Disclosure, { title: t("candidateMetaTitle"), open: metaOpen, onOpenChange: setMetaOpen, className: "lm-cockpit-meta" },
-				h("div", { className: "lm-detail-meta-list" },
-					h("div", null, h("span", { className: "lm-detail-meta-label" }, t("evidence")), h("pre", { className: "lm-detail-evidence" }, side?.evidence || t("noEvidence"))),
-					h("div", null, h("span", { className: "lm-detail-meta-label" }, t("updatedAt")), h("span", null, side?.updatedAt ? time(side.updatedAt) : "-")),
-					h("div", null, h("span", { className: "lm-detail-meta-label" }, t("entryKey")), h("code", null, side?.entry?.key || "-")))));
-
-		const compareArea = candidate ? h("section", { className: "lm-cockpit-panel" },
-			h("div", { className: "lm-cockpit-panel-head" },
-				h("h3", null, t("compareTitle")),
-				h(Button, { variant: "ghost", size: "sm", disabled: submitBusy, onClick: () => { if (draft) { onDiscardRequest && onDiscardRequest(); } else { closeCandidate(); } } }, t("cancel"))),
-			reviewBusy ? h("p", { className: "lm-detail-hint" }, t("loading")) : null,
-			reviewError ? h(ErrorNotice, { title: t("loadFailed"), message: reviewError, onRetry: () => openCandidate(candidate), t }) : null,
-			review ? h("div", { className: "lm-cockpit-compare" },
-				sideBlock(t("candidateSideOne"), review.left),
-				sideBlock(t("candidateSideTwo"), review.right),
-				h(Disclosure, { title: t("candidateDecisionTitle"), open: decisionOpen, onOpenChange: setDecisionOpen, className: "lm-cockpit-meta" },
-					h("div", { className: "lm-detail-meta-list" },
-						h("div", null, h("span", { className: "lm-detail-meta-label" }, t("candidateReasonColumn")), h("span", null, reasonLabel(candidate?.reason))),
-						h("div", null, h("span", { className: "lm-detail-meta-label" }, t("candidateScoreColumn")), h("span", null, candidate?.score === null || candidate?.score === undefined ? "-" : String(Number(candidate.score).toFixed(2)))),
-						h("div", null, h("span", { className: "lm-detail-meta-label" }, t("candidateSharedTokens")), h("span", null, candidate?.sharedTokens === null || candidate?.sharedTokens === undefined ? "-" : String(candidate.sharedTokens)))))) : null,
-			review && !draft ? h("div", { className: "lm-cockpit-panel-actions" },
-				h(Button, { variant: "primary", size: "sm", disabled: submitBusy, onClick: startMerge }, t("mergeDraftTitle"))) : null,
-			draft ? h("div", { className: "lm-cockpit-draft" },
-				h("div", { className: "lm-cockpit-draft-head" },
-					h("h4", null, t("mergeDraftTitle")),
-					h("div", { className: "lm-cockpit-keep" },
-						h("span", { className: "lm-detail-meta-label" }, t("keepWhich")),
-						h(Button, { variant: draft.keep === "left" ? "primary" : "outline", size: "sm", disabled: submitBusy || partial, onClick: () => setKeep("left") }, t("keepSideLeft")),
-						h(Button, { variant: draft.keep === "right" ? "primary" : "outline", size: "sm", disabled: submitBusy || partial, onClick: () => setKeep("right") }, t("keepSideRight")))),
-				h("div", { className: "lm-browser-field" },
-					h("span", { className: "lm-browser-field-label" }, t("mergeKeptTitle")),
-					h("div", { className: "lm-create-namespace" }, draft.title)),
-				h("p", { className: "lm-cockpit-draft-meta" }, `${t("kindLabel")}: ${draft.kind ? kindText(draft.kind, t) : "-"} · ${t("space")}: ${namespace || "-"}`),
-				h(Field, { label: t("content") },
-					h("textarea", { className: "lm-browser-textarea lm-browser-content", readOnly: partial, value: draft.content, onChange: event => onDraftChange({ ...draft, content: event.target.value }) })),
-				draft.kind === "rule" ? h("div", { className: "lm-browser-rule-meter" + (ruleOverLimit ? " is-over" : "") },
-					h("div", { className: "lm-browser-rule-meter-track" },
-						h("div", { className: "lm-browser-rule-meter-fill", style: { width: Math.min(100, ruleContentLength(draft.content)) + "%" } })),
-					h("span", { className: "lm-browser-rule-length" }, `${ruleContentLength(draft.content)} / 100 字符`)) : null,
-				h(Field, { label: t("evidence") }, h("textarea", { className: "lm-browser-textarea lm-browser-evidence-textarea", readOnly: partial, value: draft.evidence, onChange: event => onDraftChange({ ...draft, evidence: event.target.value }) })),
-				submitError ? h(ErrorNotice, { title: t("mergeFailedTitle"), message: submitError, t }) : null,
-				h("div", { className: "lm-cockpit-panel-actions" },
-					h(Button, { variant: "ghost", size: "sm", disabled: submitBusy, onClick: () => { setSubmitError(null); onDiscardRequest && onDiscardRequest(); } }, t("cancel")),
-					partial
-						? h(Button, { variant: "primary", size: "sm", disabled: submitBusy, onClick: () => { setPendingRebuild(true); onDiscardRequest && onDiscardRequest(); } }, t("reReview"))
-						: h(Button, { variant: "primary", size: "sm", disabled: submitBusy || ruleOverLimit || !draft.content.trim(), onClick: submitMerge }, submitBusy ? t("saving") : t("mergeSubmit")))) : null) : null;
-
-		const coldArea = coldTarget ? h("section", { className: "lm-cockpit-panel" },
-			h("div", { className: "lm-cockpit-panel-head" },
-				h("h3", null, coldTarget.title),
-				h(Button, { variant: "ghost", size: "sm", disabled: submitBusy, onClick: closeCold }, t("cancel"))),
-			coldBusy ? h("p", { className: "lm-detail-hint" }, t("loading")) : null,
-			coldError ? h(ErrorNotice, { title: t("loadFailed"), message: coldError, onRetry: () => openCold(coldTarget), t }) : null,
-			coldDetail ? h("div", null,
-				h("p", { className: "lm-detail-hint" }, t("coldReasonText", { days: coldTarget.ageDays === null || coldTarget.ageDays === undefined ? "-" : String(coldTarget.ageDays), heat: coldTarget.heat === null || coldTarget.heat === undefined ? "-" : String(coldTarget.heat) })),
-				h("div", { className: "lm-browser-md-preview lm-cockpit-content" }, renderMarkdown(coldDetail.content || "")),
-				h(Disclosure, { title: t("candidateMetaTitle"), open: coldMetaOpen, onOpenChange: setColdMetaOpen, className: "lm-cockpit-meta" },
-					h("div", { className: "lm-detail-meta-list" },
-						h("div", null, h("span", { className: "lm-detail-meta-label" }, t("evidence")), h("pre", { className: "lm-detail-evidence" }, coldDetail.evidence || t("noEvidence"))),
-						h("div", null, h("span", { className: "lm-detail-meta-label" }, t("updatedAt")), h("span", null, coldDetail.updatedAt ? time(coldDetail.updatedAt) : "-")))),
-				h("div", { className: "lm-cockpit-panel-actions" },
-					h(Button, { variant: "primary", size: "sm", disabled: submitBusy, onClick: submitArchiveCold }, t("coldArchiveButton")))) : null) : null;
-
-		const candidateSection = h("section", { className: "lm-cockpit-panel" },
-			h("div", { className: "lm-cockpit-panel-head" },
-				h("h3", null, `${t("candidateTitle")}${counts.candidates ? ` ${counts.candidates}` : ""}`),
-				h("div", { className: "lm-cockpit-panel-tools" },
-					scannedAt ? h("span", { className: "lm-cockpit-scanned" }, `${t("scannedAt", { time: time(scannedAt) })}${counts.checked ? ` · ${t("checkedCount", { count: counts.checked })}` : ""}`) : null,
-					candidates.length > 6 ? h(Button, { variant: "ghost", size: "sm", onClick: () => setShowAllCandidates(value => !value) }, showAllCandidates ? t("showLess") : t("showAll")) : null)),
-			workspaceBusy ? h("p", { className: "lm-detail-hint" }, t("checking")) : null,
-			workspace && !candidates.length ? h("div", { className: "lm-empty-inline" }, h("span", { className: "lm-empty-icon" }, "○"), h("span", null, t("noCandidates"))) : null,
-			candidates.length && DataTable
-				? h("div", { className: "lm-browser-advanced-table lm-cockpit-advanced-table" },
-					h(DataTable, {
-						data: visibleCandidates,
-						columns: candidateColumns,
-						getRowId: (row, index) => row.id || `${index}`,
-						hidePagination: true,
-						isLoading: workspaceBusy,
-						contentProps: { emptyTitle: t("noCandidates"), emptyDescription: null, emptyActionLabel: null },
-						className: "lm-eui-dt-host",
-					}, DataTableContent ? h(DataTableContent, { emptyTitle: t("noCandidates"), emptyDescription: null, emptyActionLabel: null }) : null))
-				: null);
-
-		const coldSection = h("section", { className: "lm-cockpit-panel" },
-			h("div", { className: "lm-cockpit-panel-head" },
-				h("h3", null, `${t("coldTitle")}${counts.cold ? ` ${counts.cold}` : ""}`),
-				coldEntries.length > 6 ? h(Button, { variant: "ghost", size: "sm", onClick: () => setShowAllCold(value => !value) }, showAllCold ? t("showLess") : t("showAll")) : null),
-			criteriaText ? h("p", { className: "lm-cockpit-criteria", title: criteriaTitle }, criteriaText) : null,
-			workspace && !coldEntries.length ? h("div", { className: "lm-empty-inline" }, h("span", { className: "lm-empty-icon" }, "○"), h("span", null, t("noColdEntries"))) : null,
-			coldEntries.length ? h("ul", { className: "lm-cockpit-cold-list" },
-				visibleCold.map((item, index) => h("li", { key: `${item.entry?.key || index}` },
-					h("button", {
-						type: "button",
-						className: "lm-capsule-tag",
-						onClick: () => openCold(item),
-					}, `❄️ ${item.title}`),
-					h("span", { className: "lm-cockpit-cold-meta" }, t("coldReasonText", { days: item.ageDays === null || item.ageDays === undefined ? "-" : String(item.ageDays), heat: item.heat === null || item.heat === undefined ? "-" : String(item.heat) }))))) : null);
-
-		return h("div", { className: "lm-cockpit-view" },
-			h("div", { className: "lm-cockpit-head" },
-				h("h2", null, t("cockpitTitle")),
-				counts.active !== undefined || counts.archived !== undefined
-					? h("span", { className: "lm-cockpit-inventory" }, `${t("statusActive")} ${counts.active ?? 0} · ${t("statusArchived")} ${counts.archived ?? 0}`)
-					: null,
-				h(Button, { variant: "outline", size: "sm", disabled: workspaceBusy || submitBusy, onClick: load }, workspaceBusy ? t("checking") : t("recheck"))),
-			workspaceError ? h(ErrorNotice, { title: t("loadFailed"), message: workspaceError, onRetry: load, t }) : null,
-			indexWarning ? h(ErrorNotice, { title: t("mergeIndexFailedTitle"), message: indexWarning, onRetry: load, t }) : null,
-			submitNotice ? h("p", { className: "lm-detail-notice" }, submitNotice) : null,
-			!workspace && !workspaceBusy && !workspaceError ? h("p", { className: "lm-detail-hint" }, t("checking")) : null,
-			candidateSection,
-			compareArea,
-			coldSection,
-			coldArea,
-			confirmState ? h(ConfirmDialog, {
-				open: true,
-				title: confirmState.title,
-				message: confirmState.message,
-				confirmLabel: confirmState.confirmLabel,
-				cancelLabel: confirmState.cancelLabel || t("cancel"),
-				onConfirm: confirmState.onConfirm,
-				onCancel: confirmState.onCancel,
-			}) : null);
-	}
-
 	function MemoryBrowserPage({ controls, t }) {
 		const [currentTab, setCurrentTab] = React.useState("entries");
 		const [namespaces, setNamespaces] = React.useState([]);
@@ -1349,8 +810,6 @@ export function createMemoryBrowserClient(require, styles, runtime) {
 		const detailScrollRef = React.useRef(null);
 		const listPaneRef = React.useRef(null);
 		const draftRef = React.useRef(false);
-		const [maintenanceDraft, setMaintenanceDraft] = React.useState(null);
-		const [maintenanceBusy, setMaintenanceBusy] = React.useState(false);
 		const [paneWidth, setPaneWidth] = React.useState(0);
 		React.useEffect(() => {
 			const element = listPaneRef.current;
@@ -1498,11 +957,7 @@ export function createMemoryBrowserClient(require, styles, runtime) {
 
 		const ruleOverLimitNow = detail ? ruleContentOverLimit(detail.entry.kind, content) : false;
 		const detailDirty = Boolean(detail) && (content !== detail.content || evidence !== detail.evidence);
-		const maintenanceDirty = Boolean(maintenanceDraft)
-			&& (maintenanceDraft.title !== (maintenanceDraft.baseline?.title ?? maintenanceDraft.title)
-				|| maintenanceDraft.content !== (maintenanceDraft.baseline?.content ?? maintenanceDraft.content)
-				|| maintenanceDraft.evidence !== (maintenanceDraft.baseline?.evidence ?? maintenanceDraft.evidence));
-		const hasDraft = detailDirty || maintenanceDirty;
+		const hasDraft = detailDirty;
 		React.useEffect(() => { draftRef.current = detailDirty; }, [detailDirty]);
 
 		const reference = detail ? `${detail.entry.namespace}/${detail.entry.kind}/${detail.entry.key}` : "";
@@ -1513,21 +968,7 @@ export function createMemoryBrowserClient(require, styles, runtime) {
 				setEvidence(detail.evidence);
 			}
 			setDetailMode("read");
-			setMaintenanceDraft(null);
 			draftRef.current = false;
-		};
-
-		const requestDiscardMaintenance = () => {
-			if (!maintenanceDirty) {
-				setMaintenanceDraft(null);
-				return;
-			}
-			setConfirmState({
-				title: t("confirmTitle"),
-				message: t("draftSwitchWarning"),
-				confirmLabel: t("confirm"),
-				onConfirm: () => { discardDraft(); },
-			});
 		};
 
 		const requestArchive = () => {
@@ -1545,7 +986,7 @@ export function createMemoryBrowserClient(require, styles, runtime) {
 		};
 
 		const selectTab = next => {
-			if (next === currentTab || maintenanceBusy) return;
+			if (next === currentTab || !["entries", "injection", "graph"].includes(next)) return;
 			if (hasDraft) {
 				setConfirmState({
 					title: t("confirmTitle"),
@@ -1559,7 +1000,7 @@ export function createMemoryBrowserClient(require, styles, runtime) {
 		};
 
 		const switchNamespace = next => {
-			if (!next || next === namespace || maintenanceBusy) return;
+			if (!next || next === namespace) return;
 			const apply = () => {
 				discardDraft();
 				setNamespace(next);
@@ -2059,7 +1500,7 @@ export function createMemoryBrowserClient(require, styles, runtime) {
 								"aria-label": t("space"),
 								"aria-haspopup": "menu",
 								"aria-expanded": spaceOpen,
-								disabled: namespaceBusy || maintenanceBusy,
+								disabled: namespaceBusy,
 								onClick: () => setSpaceOpen(value => !value),
 							}, t("space")),
 						}, namespaces.map(row => h(MenuItemButton, {
@@ -2085,16 +1526,6 @@ export function createMemoryBrowserClient(require, styles, runtime) {
 						: h("div", { className: "lm-graph-view" },
 							h(ErrorNotice, { title: t("loadFailed"), message: t("loadFailedHint"), t })))
 					: null,
-				currentTab === "cockpit" ? h(CockpitView, {
-					controls,
-					namespace,
-					draft: maintenanceDraft,
-					onDraftChange: setMaintenanceDraft,
-					onDiscardRequest: requestDiscardMaintenance,
-					onBusyChange: setMaintenanceBusy,
-					onRefreshEntries: refreshEntries,
-					t,
-				}) : null,
 				currentTab === "entries" ? entriesPane : null),
 			h(CreateDialog, {
 				open: createOpen,
@@ -2135,12 +1566,7 @@ export function createMemoryBrowserClient(require, styles, runtime) {
 					entryHistory: req => resultValue(scope.remote.layeredMemoryStatus.entryHistory(req)),
 					rollbackEntry: req => resultValue(scope.remote.layeredMemoryStatus.rollbackEntry(req)),
 					getInjectionState: req => resultValue(scope.remote.layeredMemoryStatus.getInjectionState(req)),
-					getDiskMetrics: req => resultValue(scope.remote.layeredMemoryStatus.getDiskMetrics(req)),
 					getMaintenanceReport: req => resultValue(scope.remote.layeredMemoryStatus.getMaintenanceReport(req)),
-					getMaintenanceWorkspace: req => resultValue(scope.remote.layeredMemoryStatus.getMaintenanceWorkspace(req)),
-					getMaintenanceReview: req => resultValue(scope.remote.layeredMemoryStatus.getMaintenanceReview(req)),
-					mergeMaintenanceEntries: req => resultValue(scope.remote.layeredMemoryStatus.mergeMaintenanceEntries(req)),
-					archiveEntry: req => resultValue(scope.remote.layeredMemoryStatus.archiveEntry(req)),
 				};
 				scope.slots.inject("main", () => scope.slots.register({ name: "main", key: "layered-memory", locale, inject: () => ({ controls }) }, MemoryBrowserPage));
 				scope.slots.inject("sidebar.panellist", () => scope.slots.register({ name: "sidebar.panellist", id: "layered-memory", order: 20, locale, label: () => scope.locale.translate(locale, "sidebarTitle") }, MemoryBrowserIcon));

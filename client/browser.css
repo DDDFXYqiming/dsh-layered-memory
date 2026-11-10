@@ -277,11 +277,6 @@
 .lm-injection-table-pane { flex: 1; overflow: auto; border: .5px solid var(--dsw-alias-border-l3); border-radius: 12px; padding: 12px; background: var(--dsw-alias-bg-base); }
 .lm-injection-text-pane { flex: 1; display: flex; flex-direction: column; border: .5px solid var(--dsw-alias-border-l3); border-radius: 12px; padding: 12px; background: var(--dsw-alias-bg-base); }
 
-/* 关系图谱视图样式由 client/graph-view.css 提供（task-8 独立组件自带注入） */
-
-/* 维护驾驶舱 Bento Grid (Bug 5 修复) */
-.lm-cockpit-view { display: flex; flex-direction: column; flex: 1; height: 100%; overflow: auto; padding: 16px clamp(16px, 3vw, 36px); }
-
 /* 弹层样式 */
 .lm-browser-modal-backdrop { position: fixed; z-index: 1000; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; background: var(--dsw-alias-mask, rgb(0 0 0 / 40%)); }
 .lm-browser-modal { display: flex; flex-direction: column; width: min(580px, 100%); max-height: calc(100dvh - 48px); overflow: hidden; border: .5px solid var(--dsw-alias-border-l3); border-radius: 16px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); box-shadow: 0 16px 48px rgb(0 0 0 / 24%); }
@@ -539,38 +534,3 @@
 		scroll-behavior: auto !important;
 	}
 }
-
-/* 维护驾驶舱：候选审阅与长期低热待审 */
-.lm-cockpit-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; }
-.lm-cockpit-head h2 { margin: 0; font-size: 18px; font-weight: 600; }
-.lm-cockpit-inventory { font-size: 12px; color: var(--dsw-alias-label-secondary); }
-.lm-cockpit-panel { padding: 12px 0 4px; border-top: .5px solid var(--dsw-alias-border-l3); }
-.lm-cockpit-panel-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-bottom: 8px; }
-.lm-cockpit-panel-head h3 { margin: 0; font-size: 14px; font-weight: 600; }
-.lm-cockpit-scanned { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
-.lm-cockpit-panel-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-.lm-cockpit-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-.lm-cockpit-compare-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.lm-cockpit-compare-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-.lm-cockpit-content { min-height: 0; max-height: 320px; overflow: auto; padding: 10px 12px; border: .5px solid var(--dsw-alias-border-l3); border-radius: 10px; background: var(--dsw-alias-bg-base); }
-.lm-cockpit-meta { border-top: 0; }
-.lm-cockpit-draft { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
-.lm-cockpit-draft-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
-.lm-cockpit-draft-head h4 { margin: 0; font-size: 13px; font-weight: 600; }
-.lm-cockpit-keep { display: flex; align-items: center; gap: 8px; }
-.lm-cockpit-cold-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.lm-cockpit-cold-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.lm-cockpit-cold-meta { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
-.lm-cockpit-criteria { margin: 0 0 8px; font-size: 11px; color: var(--dsw-alias-label-tertiary); }
-.lm-cockpit-draft-meta { margin: 0; font-size: 11px; color: var(--dsw-alias-label-tertiary); }
-.lm-cockpit-panel-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
-
-/* 驾驶舱候选表：仅本作用域，标题列占主宽并换行/省略，不影响条目表 */
-.lm-cockpit-advanced-table .lm-eui-dt-table { table-layout: fixed; }
-.lm-cockpit-advanced-table .lm-eui-dt-td { white-space: normal; overflow-wrap: anywhere; }
-.lm-cockpit-advanced-table .lm-eui-dt-th { white-space: nowrap; }
-.lm-cockpit-cell-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-.lm-cockpit-cell-reason { overflow-wrap: anywhere; }
-.lm-cockpit-compare-head { flex-wrap: wrap; }
-.lm-cockpit-side-label { flex: none; font-size: 11px; color: var(--dsw-alias-label-tertiary); }
-.lm-cockpit-side-title { flex: 1 1 160px; min-width: 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
